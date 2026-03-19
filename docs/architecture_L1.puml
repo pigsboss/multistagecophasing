@@ -1,10 +1,10 @@
-@startuml architecture_L1
+@startuml architecture_L1_v2
 !theme plain
 skinparam roundcorner 10
 skinparam classAttributeIconSize 0
 skinparam packageStyle folder
 
-title 航天器动力学与控制：L1 级架构实现细节 (单质点轨道维持)
+title 航天器动力学与控制：L1 级架构实现细节 (最优轨道维持 LQR v2.0)
 
 ' ==========================================
 ' 核心领域层 (Core Domain)
@@ -19,6 +19,12 @@ package "core" #E3F2FD {
             EARTH_MOON_ROTATING
             BODY_FRAME
         }
+        
+        class Telecommand <<contract>> {
+            + type : str
+            + target_state : ndarray
+            + frame : CoordinateFrame
+        }
     }
     
     package "spacecraft" {
@@ -26,7 +32,8 @@ package "core" #E3F2FD {
             + id : str
             + state : ndarray
             + frame : CoordinateFrame
-            + mass : float
+            + initial_mass : float
+            + current_mass : float
             + external_accel : ndarray
             + consumed_fuel : float
             + position() : ndarray
@@ -59,7 +66,7 @@ package "core" #E3F2FD {
             + pos_noise_std : float
             + vel_noise_std : float
             + track_spacecraft(true_state: ndarray, sc_frame: CoordinateFrame) : Tuple[ndarray, CoordinateFrame]
-            + generate_telecommand(cmd_type: str, target_state: ndarray, target_frame: CoordinateFrame) : dict
+            + generate_telecommand(cmd_type: str, target_state: ndarray, target_frame: CoordinateFrame) : Telecommand
         }
     }
     
@@ -71,7 +78,7 @@ package "core" #E3F2FD {
             + target_state : ndarray
             + is_active : bool
             + control_mode : str
-            + process_telecommand(packet: dict)
+            + process_telecommand(packet: Telecommand)
             + update_navigation(obs_state: ndarray, obs_frame: CoordinateFrame)
             + compute_control_force(k_matrix: ndarray) : Tuple[ndarray, CoordinateFrame]
         }
@@ -83,6 +90,13 @@ package "core" #E3F2FD {
 ' ==========================================
 package "utils" #E8F5E9 {
     
+    package "math_tools" {
+        class "math_tools.py" as MathTools <<module>> {
+            + get_lqr_gain(A: ndarray, B: ndarray, Q: ndarray, R: ndarray) : ndarray
+        }
+        note bottom: 封装 SciPy 连续时间 ARE 求解器\n提供基于真实物理量纲的 LQR 增益
+    }
+
     package "loggers" {
         class HDF5Logger {
             + filepath : str
@@ -119,17 +133,20 @@ class "main.py (L1 仿真主循环)" as MainLoop <<Script>> #FFF3E0
 ' 依赖关系与数据流映射
 ' ==========================================
 
-' 1. 全局契约强依赖 (所有的核心模块都必须认识坐标系)
+' 1. 全局契约强依赖
 SpacecraftPointMass .up.> CoordinateFrame : 强制校验
 CelestialEnvironment .up.> CoordinateFrame : 强制校验
 GroundStation .up.> CoordinateFrame : 强制校验
 GNC_Subsystem .up.> CoordinateFrame : 强制校验
+GroundStation .up.> Telecommand : 生成
+GNC_Subsystem .up.> Telecommand : 消费
 
 ' 2. 仿真主循环驱动的物理/信息交互 (通过 main.py 桥接)
 MainLoop --> CelestialEnvironment : 1. 请求环境场
 MainLoop --> SpacecraftPointMass : 2. 动力学积分
 MainLoop --> GroundStation : 3. 触发测量与上行指令
-MainLoop --> GNC_Subsystem : 4. 触发控制解算
+MainLoop --> MathTools : 4. 组装物理 A/B 阵求解最优 K
+MainLoop --> GNC_Subsystem : 5. 注入 K 阵触发控制解算
 
 CelestialEnvironment -[hidden]-> SpacecraftPointMass
 note on link
@@ -142,7 +159,7 @@ GroundStation -[hidden]-> GNC_Subsystem
 note on link
   [信息域流转]
   Spacecraft 真实状态被 GroundStation 观测加噪，
-  打包成遥测帧喂给 GNC 算法。
+  打包成 Telecommand 喂给 GNC 算法。
 end note
 
 GNC_Subsystem -[hidden]-> SpacecraftPointMass

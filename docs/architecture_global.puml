@@ -1,14 +1,15 @@
-@startuml architecture_global
+@startuml architecture_global_v2
 !theme plain
 skinparam roundcorner 10
 skinparam packageStyle rectangle
+skinparam classAttributeIconSize 0
 
-title 航天器动力学与控制：全局总体静态架构 (Global Static Architecture)
+title MCPC: 航天器动力学与控制全局架构 (DDD + Class Fusion)
 
 note top of "Mission_Sim_Framework"
-  **总体架构设计哲学：二维正交解耦**
-  1. 静态空间维度：基于领域驱动设计(DDD)的包结构，严格分离物理域、信息域与工具域。
-  2. 动态时间维度：核心类在各包内从 L1 向 L5 迭代升级，但包间的依赖契约保持不变。
+  **总体架构设计哲学：二维正交解耦** 
+  1. 静态空间维度：严格分离物理域、信息域与工具域。 
+  2. 动态时间维度：核心类在各包内从 L1 向 L5 迭代升级，但包间的依赖契约保持不变。 
 end note
 
 package "Mission_Sim_Framework (工程根目录)" {
@@ -16,9 +17,16 @@ package "Mission_Sim_Framework (工程根目录)" {
     ' ==========================================
     ' 第一层：仿真场景与主控引擎
     ' ==========================================
-    package "scenarios (仿真场景层 / main.py)" #FFF3E0 {
-        class "Simulation_Runner" <<入口>>
-        note right: 负责读取配置、组装 Core 组件、\n调用 Utils 工具，驱动时间步进主循环。\n(如 main_L1.py, main_L2_formation.py)
+    package "scenarios (仿真场景层)" #FFF3E0 {
+        class "Simulation_Runner" <<入口>> {
+            + load_config()
+            + init_components()
+            + execute_time_loop()
+        }
+        note right of Simulation_Runner
+          负责读取配置、组装 Core 组件、调用 Utils 工具，
+          驱动时间步进主循环。(如 main_L1.py, main_L2.py) 
+        end note
     }
 
     ' ==========================================
@@ -26,22 +34,51 @@ package "Mission_Sim_Framework (工程根目录)" {
     ' ==========================================
     package "core (核心领域层)" #E3F2FD {
         
-        package "types (全局契约基石)" {
-            class "CoordinateFrame" <<Enum>>
-            class "PhysicalConstants" <<Static>>
-            note top: **跨 L1-L5 全局复用**\n绝对基石，定义整个系统的参考系字典与基础常数。
+        package "types (全局契约基石)" #FFFFFF {
+            enum CoordinateFrame {
+                J2000_ECI
+                SUN_EARTH_ROTATING
+                LVLH  <<L2新增>>
+            }
+            class Telecommand {
+                + type: String
+                + target_state: Array
+                + frame: CoordinateFrame
+            }
+            note top of CoordinateFrame
+              **跨 L1-L5 全局复用** [cite: 2]
+              绝对基石，防范坐标系错位的最后防线。
+            end note
         }
         
-        package "Physical_Domain (物理域)" {
-            class "Spacecraft (航天器本体)"
-            class "Environment (天体环境)"
-            note bottom: 随等级演进：\nL1: 质点 + 简单引力\nL2: 多体相对运动\nL4: 刚体姿态动力学\nL5: 挠性附件耦合
+        package "Physical_Domain (物理域)" #E8F8F5 {
+            class CelestialEnvironment {
+                + get_gravity_acceleration()
+            }
+            class SpacecraftPointMass <<L1, L2>> {
+                + state: Array[6]
+                + current_mass: Float
+                + apply_thrust(force, frame)
+                + get_derivative(grav, frame)
+            }
+            note bottom: 随等级演进：[cite: 3]\nL1: 质点 + CRTBP引力\nL2: 多体相对运动\nL4: 刚体姿态动力学\nL5: 挠性附件耦合 [cite: 3]
         }
 
-        package "Information_Domain (信息域)" {
-            class "GNC_Subsystem (星载控制)"
-            class "GroundStation (测控网络)"
-            note bottom: 随等级演进：\nL1: 绝对轨道维持\nL2: 编队相对导航\nL4: 姿轨联合高频控制
+        package "Information_Domain (信息域)" #FEF9E7 {
+            class GroundStation {
+                + track_spacecraft(real_state)
+                + generate_telecommand()
+            }
+            class GNC_Subsystem {
+                + estimated_state: Array[6]
+                + compute_control_force(K_matrix)
+            }
+            class FormationManager <<L2新增>> {
+                + chief: sc_id
+                + deputies: List[sc_id]
+                + broadcast_lvlh_state()
+            }
+            note bottom: 随等级演进：[cite: 4]\nL1: LQR绝对轨道维持\nL2: 编队相对导航\nL4: 姿轨联合高频控制 [cite: 4]
         }
     }
 
@@ -49,27 +86,39 @@ package "Mission_Sim_Framework (工程根目录)" {
     ' 第三层：基础设施层 (与物理级别解耦)
     ' ==========================================
     package "utils (基础设施层)" #E8F5E9 {
-        class "Loggers (数据持久化)"
-        class "Visualizers (后处理渲染)"
-        class "MathTools (数学库/积分器)"
-        note bottom: **跨 L1-L5 全局复用**\n专注于高性能 I/O (HDF5)、坐标系矩阵运算与 3D 动画渲染。\n它不关心卫星是怎么飞的，只负责算和画。
+        class "MathTools (数学库)" {
+            + get_lqr_gain(A, B, Q, R)
+            + absolute_to_lvlh(r_c, v_c, r_d, v_d)
+        }
+        class "Loggers (数据持久化)" {
+            + write_hdf5_timestep()
+        }
+        class "Visualizers (渲染)" {
+            + plot_orbit_3d()
+        }
+        note bottom of MathTools
+          **跨 L1-L5 全局复用** [cite: 4]
+          它不关心卫星是怎么飞的，只负责算和画。 [cite: 4]
+        end note
     }
 }
 
 ' ==========================================
 ' 宏观依赖关系约束
 ' ==========================================
-[Physical_Domain (物理域)] .up.> [types (全局契约基石)] : 强制遵守
-[Information_Domain (信息域)] .up.> [types (全局契约基石)] : 强制遵守
+Physical_Domain .up.> types : 强制遵守 
+Information_Domain .up.> types : 强制遵守 
 
-[scenarios (仿真场景层 / main.py)] --> [core (核心领域层)] : 实例化与编排
-[scenarios (仿真场景层 / main.py)] --> [utils (基础设施层)] : 调用日志与绘图
+scenarios --> core : 实例化与编排 
+scenarios --> utils : 调用日志与绘图 
 
-[core (核心领域层)] -[hidden]-> [utils (基础设施层)]
+GNC_Subsystem ..> MathTools : "计算最优增益 K"
+
+core -[hidden]-> utils
 note right on link
-  **依赖倒置原则 (DIP)**:
-  core 内部绝不能 import utils 里的绘图或落盘代码。
-  数据的产出(core)与数据的消费(utils)在主程序中通过 HDF5 桥接解耦。
+  **依赖倒置原则 (DIP)**: 
+  core 内部绝不能 import utils 里的绘图或落盘代码。 
+  数据的产出(core)与数据的消费(utils)在主程序中通过 HDF5 桥接解耦。 
 end note
 
 @enduml
