@@ -26,7 +26,7 @@ def main():
     # 确保输出目录存在
     out_dir = "output"
     os.makedirs(out_dir, exist_ok=True)
-    h5_filepath = os.path.join(out_dir, "l1_simulation.h5")
+    h5_filepath = os.path.join(out_dir, "L1_simulation.h5")
     
     # 全局强制契约：日地旋转系
     MISSION_FRAME = CoordinateFrame.SUN_EARTH_ROTATING
@@ -102,16 +102,16 @@ def main():
     vis = L1Visualizer(h5_filepath, sc.id)
     
     # 1. 状态时序曲线
-    state_plot_path = os.path.join(out_dir, "l1_state_history.png")
+    state_plot_path = os.path.join(out_dir, "L1_state_history.png")
     vis.plot_state_history(save_path=state_plot_path)
     
     # 2. GNC 推力活动时序
-    gnc_plot_path = os.path.join(out_dir, "l1_gnc_activity.png")
+    gnc_plot_path = os.path.join(out_dir, "L1_gnc_activity.png")
     vis.plot_gnc_activity(save_path=gnc_plot_path)
     
     # 3. 带有矢量推力的 3D 轨迹动画
     # 注意: mp4 渲染需要系统级安装 ffmpeg。如果遇到报错，可将后缀改为 .gif
-    anim_plot_path = os.path.join(out_dir, "l1_trajectory.mp4") 
+    anim_plot_path = os.path.join(out_dir, "L1_trajectory.mp4") 
     vis.create_animation(save_path=anim_plot_path, downsample=10, thrust_scale=30.0)
 
     print("="*60)

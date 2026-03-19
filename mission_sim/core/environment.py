@@ -1,5 +1,5 @@
 import numpy as np
-from core.types import CoordinateFrame
+from mission_sim.core.types import CoordinateFrame
 
 class CelestialEnvironment:
     """
