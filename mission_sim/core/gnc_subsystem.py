@@ -1,79 +1,83 @@
+# mission_sim/core/gnc_subsystem.py
 import numpy as np
 from mission_sim.core.types import CoordinateFrame, Telecommand
 
 class GNC_Subsystem:
     """
-    航天器 GNC 子系统 (Level 1)
-    职责：接收地面指令与遥测，执行严格的坐标系校验，计算控制偏差，并输出带坐标系标签的推力指令。
+    制导、导航与控制 (GNC) 子系统 (Information Domain)
+    负责在特定参考系下计算控制律，实现绝对轨道维持或相对编队保持。
     """
     def __init__(self, sc_id: str, operating_frame: CoordinateFrame):
-        """
-        :param sc_id: 航天器标识符
-        :param operating_frame: GNC 算法内部运算所依赖的基准坐标系
-        """
         self.sc_id = sc_id
         self.operating_frame = operating_frame
         
-        # 内部状态寄存器
-        self.estimated_state: np.ndarray = None
-        self.target_state: np.ndarray = None
+        # 逻辑自洽：初始化为全零向量 (6x1)，确保计算安全性
+        self.current_nav_state = np.zeros(6)
+        self.target_state = np.zeros(6)
         
-        # 控制状态机
-        self.is_active = True
-        self.control_mode = "STANDBY"
+        # 遥测记录
+        self.last_control_force = np.zeros(3)
 
     def process_telecommand(self, packet: Telecommand):
-        """处理地面上行的遥控指令，此时 packet 已经是 Telecommand 对象"""
-        
-        # 1. 强制契约校验：如果指令坐标系与 GNC 运行坐标系不符，直接拒收！
+        """
+        处理来自地面站或编队管理器的指令。
+        逻辑自洽：指令的参考系必须与 GNC 的运行参考系一致。
+        """
         if packet.frame != self.operating_frame:
-            raise ValueError(
-                f"[GNC Error] Frame Mismatch! "
-                f"GNC is in {self.operating_frame.name}, "
-                f"but Command is in {packet.frame.name}."
-            )
-            
-        # 2. 解析对象属性 (不再使用字典的 .get())
-        if packet.cmd_type == "ORBIT_MAINTENANCE":
+            print(f"⚠️  [{self.sc_id} GNC] Frame Mismatch! CMD: {packet.frame.name} | GNC: {self.operating_frame.name}")
+            return False
+
+        # 支持 L1(绝对) 和 L2(相对) 指令集
+        valid_cmds = ["ORBIT_MAINTENANCE", "FORMATION_KEEPING", "ARRAY_RECONFIGURATION"]
+        
+        if packet.cmd_type in valid_cmds:
             self.target_state = np.copy(packet.target_state)
-            self.control_mode = packet.cmd_type
-            self.is_active = True
-            print(f"[{self.sc_id} GNC] Accepted command: {packet.cmd_type}")
+            print(f"✅ [{self.sc_id} GNC] Target Locked: {self.target_state[0:3]}m in {self.operating_frame.name}")
+            return True
+        else:
+            print(f"❌ [{self.sc_id} GNC] Unknown Command Type: {packet.cmd_type}")
+            return False
 
-    def update_navigation(self, obs_state: np.ndarray, obs_frame: CoordinateFrame):
-        """
-        更新导航滤波器状态 (L1 阶段为直接透传)
-        :param obs_state: 带有噪声的观测状态 [x, y, z, vx, vy, vz]
-        :param obs_frame: 该观测状态所在的坐标系
-        """
-        # 【防呆校验 2】拦截坐标系错误的测量数据
-        if obs_frame != self.operating_frame:
-            raise ValueError(
-                f"[GNC 报错] 测量坐标系拒收！无法将基于 {obs_frame.name} 的观测值"
-                f"直接融合进 {self.operating_frame.name} 的导航滤波器中。"
-            )
-            
-        self.estimated_state = np.array(obs_state, dtype=np.float64)
+    def update_navigation(self, obs_state: np.ndarray, frame: CoordinateFrame):
+        """更新导航滤波器输出的状态"""
+        if frame != self.operating_frame:
+            raise ValueError(f"Navigation frame {frame} does not match GNC operating frame.")
+        self.current_nav_state = np.copy(obs_state)
 
-    def compute_control_force(self, k_matrix: np.ndarray) -> tuple[np.ndarray, CoordinateFrame]:
+    def compute_control_force(self, K_matrix: np.ndarray):
         """
-        计算所需的推力控制量，并附带 GNC 的坐标系印章
-        :param k_matrix: 外部传入的控制增益矩阵 (例如 LQR 增益)
-        :return: (推力向量 [Fx, Fy, Fz] (N), 推力向量所在的坐标系)
+        基于 LQR 增益矩阵计算控制力。
+        公式：u = -K * (x - x_target)
         """
-        # 安全检查：未激活或数据不全时，输出零推力
-        if not self.is_active or self.estimated_state is None or self.target_state is None:
-            return np.zeros(3, dtype=np.float64), self.operating_frame
-
-        # 1. 计算状态偏差 (此时由于前面的严格校验，保证了两者一定在同一坐标系下)
-        error = self.estimated_state - self.target_state
+        # 误差计算：这是消除 550m 静差的数学核心
+        # 如果是从星，这里的 current_nav_state 是相对位移，target_state 是目标相对位移
+        error = self.current_nav_state - self.target_state
         
-        # 2. 计算推力 (比例反馈控制: u = -K * x)
-        force_cmd = -k_matrix @ error
+        # 计算控制量 (3x1 推力矢量)
+        u = -K_matrix @ error
         
-        # 3. 返回推力和坐标系印章 (供 SpacecraftPointMass.apply_thrust 进行最后一次校验)
-        return force_cmd, self.operating_frame
+        self.last_control_force = np.copy(u)
+        
+        # 返回推力及其所在的参考系标签
+        return u, self.operating_frame
+
+    def get_status(self):
+        """返回 GNC 当前健康状态"""
+        return {
+            "sc_id": self.sc_id,
+            "frame": self.operating_frame.name,
+            "error_magnitude": np.linalg.norm(self.current_nav_state[0:3] - self.target_state[0:3])
+        }
 
     def __repr__(self):
-        mode_str = self.control_mode if self.is_active else "DISABLED"
-        return f"GNC[{self.sc_id}] | Frame: {self.operating_frame.name} | Mode: {mode_str}"
+        """返回开发者友好的对象描述"""
+        return (f"GNC_Subsystem(id='{self.sc_id}', "
+                f"frame={self.operating_frame.name}, "
+                f"target={self.target_state[0:3]})")
+
+    def __str__(self):
+        """返回用户友好的状态摘要"""
+        pos_err = np.linalg.norm(self.current_nav_state[0:3] - self.target_state[0:3])
+        return (f"[{self.sc_id} GNC] Frame: {self.operating_frame.name} | "
+                f"Target: {self.target_state[0:3]} | "
+                f"PosError: {pos_err:.2f}m")
