@@ -1,127 +1,68 @@
-import os
+# mission_sim/utils/loggers.py
 import h5py
 import numpy as np
-from enum import Enum
+import os
 
 class HDF5Logger:
-    """
-    航天高维时序数据 HDF5 记录器
-    特性：
-    1. 增量写入 (Chunking)：避免 OOM，支持无限长仿真。
-    2. 树状层级 (Hierarchy)：支持按航天器 ID、子系统对数据进行分类。
-    3. 元数据绑定 (Attributes)：支持将坐标系、物理常数刻印在数据结构上。
-    """
-    def __init__(self, filepath: str, flush_interval: int = 100):
-        """
-        :param filepath: 目标 .h5 或 .hdf5 文件路径
-        :param flush_interval: 缓存多少个时间步后集中进行一次磁盘 I/O 写入
-        """
+    """高性能增量式 HDF5 数据记录器"""
+    def __init__(self, filepath, flush_interval=500):
         self.filepath = filepath
         self.flush_interval = flush_interval
-        
-        # 确保目标路径的文件夹存在
-        os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
-        
-        # 以截断写模式打开文件 (实际工程中可改为按时间戳生成文件名)
-        self.file = h5py.File(self.filepath, 'w')
-        
         self._buffer = {}
-        self._buffer_count = 0
-
-    def set_metadata(self, path: str, meta_dict: dict):
-        """
-        为特定的 Group 或 Dataset 永久打上属性标签 (元数据)。
-        这是维持坐标系契约的关键：把 CoordinateFrame 存进文件！
+        self._step_count = 0
         
-        :param path: HDF5 内部路径，如 "/" 或 "/Probe-Alpha"
-        :param meta_dict: 字典格式的属性键值对
-        """
-        if path not in self.file:
-            self.file.create_group(path)
-            
-        target = self.file[path]
-        for key, value in meta_dict.items():
-            # 枚举类无法直接存入 HDF5，需自动转换为字符串名称
-            if isinstance(value, Enum):
-                value = value.name
-            target.attrs[key] = value
+        # 每次仿真开始前，强制清理旧文件，防止数据污染
+        if os.path.exists(self.filepath):
+            os.remove(self.filepath)
+
+    def set_metadata(self, group_name, meta_dict):
+        """记录仿真环境的静态配置"""
+        with h5py.File(self.filepath, 'a') as f:
+            grp = f.require_group(group_name)
+            for k, v in meta_dict.items():
+                grp[k] = v
 
     def log(self, group: str, dataset: str, data: np.ndarray):
-        """
-        将一帧数据推入内存缓存。
-        
-        :param group: HDF5 组路径，如 "Probe-Alpha"
-        :param dataset: 数据集名称，如 "true_state"
-        :param data: 当前步的数据 (标量、向量或张量均可)
-        """
-        # 强制转换为至少一维的 np.float64 数组，保持物理量纲严谨
-        data_np = np.atleast_1d(np.array(data, dtype=np.float64))
-        
-        if group not in self._buffer:
-            self._buffer[group] = {}
-        if dataset not in self._buffer[group]:
-            self._buffer[group][dataset] = []
-            
-        self._buffer[group][dataset].append(data_np)
-        
+        """将当前步的数据存入内存 Buffer"""
+        key = f"{group}/{dataset}"
+        if key not in self._buffer:
+            self._buffer[key] = []
+        # 必须使用 np.copy 防止引用同一块内存地址
+        self._buffer[key].append(np.copy(data))
+
     def step(self):
-        """
-        通知 Logger 仿真时间前进了一步。如果缓存堆积满，则自动落盘。
-        """
-        self._buffer_count += 1
-        if self._buffer_count >= self.flush_interval:
+        """主循环推进，达到阈值后自动落盘 (防 OOM 核心)"""
+        self._step_count += 1
+        if self._step_count % self.flush_interval == 0:
             self.flush()
 
     def flush(self):
-        """
-        将内存缓存集中写入 HDF5 磁盘文件 (增量 Appending)。
-        """
-        if self._buffer_count == 0:
+        """将 Buffer 中的数据增量追加到硬盘"""
+        if not self._buffer:
             return
             
-        for grp_name, dsets in self._buffer.items():
-            if grp_name not in self.file:
-                self.file.create_group(grp_name)
-            grp = self.file[grp_name]
-            
-            for dset_name, data_list in dsets.items():
-                if not data_list:
-                    continue
-                    
-                # 将缓存的一批数据拼成矩阵: shape (N, ...)
-                chunk_data = np.stack(data_list, axis=0)
+        with h5py.File(self.filepath, 'a') as f:
+            for key, data_list in self._buffer.items():
+                group_name, dataset_name = key.split('/')
+                grp = f.require_group(group_name)
                 
-                if dset_name not in grp:
-                    # 首次遇到该数据集：开启 maxshape，允许沿时间轴(axis=0)无限延伸
-                    data_shape = chunk_data.shape[1:]
-                    grp.create_dataset(
-                        dset_name,
-                        data=chunk_data,
-                        maxshape=(None, *data_shape),
-                        chunks=True  # 开启分块存储，极大提升读写性能
-                    )
+                new_data = np.array(data_list)
+                
+                if dataset_name not in grp:
+                    # 首次创建支持无限追加的数据集
+                    maxshape = (None,) + new_data.shape[1:]
+                    grp.create_dataset(dataset_name, data=new_data, maxshape=maxshape, chunks=True)
                 else:
-                    # 追加写入：拉长数据集，放入新数据
-                    dset = grp[dset_name]
-                    old_size = dset.shape[0]
-                    new_size = old_size + chunk_data.shape[0]
+                    # 扩容并追加数据
+                    dset = grp[dataset_name]
+                    old_len = dset.shape[0]
+                    dset.resize(old_len + new_data.shape[0], axis=0)
+                    dset[old_len:] = new_data
                     
-                    dset.resize(new_size, axis=0)
-                    dset[old_size:new_size] = chunk_data
-                    
-                # 清空已落盘的缓存
-                self._buffer[grp_name][dset_name] = []
-                
-        self._buffer_count = 0
+        # 清空内存缓冲
+        self._buffer.clear()
 
     def close(self):
-        """确保在程序结束或异常退出时，残余缓存全部落盘。"""
+        """仿真结束时强制写出剩余数据"""
         self.flush()
-        self.file.close()
-        
-    def __enter__(self):
-        """支持 Python 的 with 语句上下文管理"""
-        return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()

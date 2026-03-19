@@ -1,5 +1,5 @@
 import numpy as np
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.types import CoordinateFrame, Telecommand
 
 class GNC_Subsystem:
     """
@@ -22,25 +22,23 @@ class GNC_Subsystem:
         self.is_active = True
         self.control_mode = "STANDBY"
 
-    def process_telecommand(self, packet: dict):
-        """
-        处理地面上行的遥控指令包
-        :param packet: 包含 header 和 payload 的标准化指令字典
-        """
-        payload = packet.get("payload", {})
-        cmd_type = packet.get("header", {}).get("type", "UNKNOWN")
+    def process_telecommand(self, packet: Telecommand):
+        """处理地面上行的遥控指令，此时 packet 已经是 Telecommand 对象"""
         
-        # 【防呆校验 1】拦截坐标系错误的地面指令
-        target_frame = payload.get("frame")
-        if target_frame != self.operating_frame:
+        # 1. 强制契约校验：如果指令坐标系与 GNC 运行坐标系不符，直接拒收！
+        if packet.frame != self.operating_frame:
             raise ValueError(
-                f"[GNC 报错] 指令坐标系拒收！航天器 {self.sc_id} 的 GNC 运行在 {self.operating_frame.name}，"
-                f"但地面站下发的指令基于 {target_frame.name}。"
+                f"[GNC Error] Frame Mismatch! "
+                f"GNC is in {self.operating_frame.name}, "
+                f"but Command is in {packet.frame.name}."
             )
             
-        if cmd_type in ["ORBIT_MAINTENANCE", "ORBIT_TRANSFER"]:
-            self.control_mode = cmd_type
-            self.target_state = np.array(payload.get("target_state"), dtype=np.float64)
+        # 2. 解析对象属性 (不再使用字典的 .get())
+        if packet.cmd_type == "ORBIT_MAINTENANCE":
+            self.target_state = np.copy(packet.target_state)
+            self.control_mode = packet.cmd_type
+            self.is_active = True
+            print(f"[{self.sc_id} GNC] Accepted command: {packet.cmd_type}")
 
     def update_navigation(self, obs_state: np.ndarray, obs_frame: CoordinateFrame):
         """

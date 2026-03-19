@@ -1,5 +1,5 @@
 import numpy as np
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.types import CoordinateFrame, Telecommand
 
 class GroundStation:
     """
@@ -48,26 +48,12 @@ class GroundStation:
         # 返回数据并盖上地面站的坐标系印章
         return observed_state, self.operating_frame
 
-    def generate_telecommand(self, cmd_type: str, target_state: np.ndarray, target_frame: CoordinateFrame) -> dict:
-        """
-        生成标准化的遥控指令包 (Telecommand Packet)。
-        
-        :param cmd_type: 指令类型 (如 "ORBIT_MAINTENANCE", "ORBIT_TRANSFER")
-        :param target_state: 期望的目标状态 [x, y, z, vx, vy, vz]
-        :param target_frame: 该目标状态所在的坐标系
-        :return: 序列化的指令字典
-        """
-        command_packet = {
-            "header": {
-                "source": self.name,
-                "type": cmd_type
-            },
-            "payload": {
-                "target_state": np.array(target_state, dtype=np.float64),
-                "frame": target_frame  # 明确告诉航天器目标点在哪个坐标系
-            }
-        }
-        return command_packet
+    def generate_telecommand(self, cmd_type, target_state, target_frame):
+        return Telecommand(
+            cmd_type=cmd_type, 
+            target_state=target_state, 
+            frame=target_frame
+        )    
 
     def __repr__(self):
         return (f"GroundStation[{self.name}] | Frame: {self.operating_frame.name} | "

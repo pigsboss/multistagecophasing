@@ -1,122 +1,167 @@
+# main.py
 import os
 import numpy as np
 
-# 导入核心域：物理实体与信息系统
-from core.types import CoordinateFrame
-from core.spacecraft import SpacecraftPointMass
-from core.environment import CelestialEnvironment
-from core.ground_station import GroundStation
-from core.gnc_subsystem import GNC_Subsystem
+# 导入契约与核心领域模型
+from mission_sim.core.types import CoordinateFrame, Telecommand
+from mission_sim.core.environment import CelestialEnvironment
+from mission_sim.core.spacecraft import SpacecraftPointMass
+from mission_sim.core.ground_station import GroundStation
+from mission_sim.core.gnc_subsystem import GNC_Subsystem
 
-# 导入工具域：持久化记录与可视化
-from utils.loggers import HDF5Logger
-from utils.visualizer import L1Visualizer
+# 导入基础设施
+from mission_sim.utils.math_tools import get_lqr_gain
+from mission_sim.utils.loggers import HDF5Logger
+from mission_sim.utils.visualizer import L1Visualizer
 
-def main():
-    print("="*60)
-    print("🚀 [Level 1] 单航天器平动点轨道维持仿真 - 启动")
-    print("="*60)
-    
-    # --- 1. 仿真全局配置 ---
-    dt = 1.0                # 动力学积分步长 (秒)
-    total_time = 3600 * 2   # 仿真总时长 (2小时)
-    steps = int(total_time / dt)
-    log_interval = 10       # 每 10 步落盘一次数据
-    
-    # 确保输出目录存在
-    out_dir = "output"
-    os.makedirs(out_dir, exist_ok=True)
-    h5_filepath = os.path.join(out_dir, "L1_simulation.h5")
-    
-    # 全局强制契约：日地旋转系
-    MISSION_FRAME = CoordinateFrame.SUN_EARTH_ROTATING
-    
-    # --- 2. 实例化系统组件 ---
-    env = CelestialEnvironment(region="SUN_EARTH_L2", initial_epoch=0.0)
-    
-    # 目标标称点 (L2 理论位置)
-    X_E = (1.0 - env.mu) * env.AU
-    X_L2 = X_E + 1.508e9
-    target_state = np.array([X_L2, 0.0, 0.0, 0.0, 178.5, 0.0], dtype=np.float64)
-    
-    # 航天器初始状态 (故意在 3D 空间中制造初始偏差，便于观察 GNC 动态响应)
-    initial_offset = np.array([1000.0, -500.0, 200.0, 0.0, 0.0, 0.0])
-    initial_state = target_state + initial_offset
-    
-    sc = SpacecraftPointMass(sc_id="Probe-Alpha", initial_state=initial_state, frame=MISSION_FRAME)
-    gs = GroundStation(name="DeepSpace_Net", operating_frame=MISSION_FRAME, pos_noise_std=2.0, vel_noise_std=0.001)
-    gnc = GNC_Subsystem(sc_id=sc.id, operating_frame=MISSION_FRAME)
-    
-    # 简单的 LQR/PD 三轴反馈增益矩阵
-    K_LQR = np.zeros((3, 6))
-    K_LQR[0,0], K_LQR[1,1], K_LQR[2,2] = 0.005, 0.005, 0.005  # 位置刚度
-    K_LQR[0,3], K_LQR[1,4], K_LQR[2,5] = 0.8, 0.8, 0.8        # 速度阻尼
-
-    # --- 3. 核心推演循环 (集成 HDF5 增量记录) ---
-    print(f"[*] 开启主控循环，共计 {steps} 步，数据将增量存入: {h5_filepath}")
-    
-    with HDF5Logger(h5_filepath, flush_interval=100) as logger:
-        # 将坐标系契约作为元数据永久刻印在 HDF5 文件中
-        logger.set_metadata(path=f"/{sc.id}", meta_dict={"frame": MISSION_FRAME})
+class SimulationRunner:
+    """
+    MCPC 仿真引擎入口
+    负责读取配置、组装 Core 组件、调用 Utils 工具，驱动时间步进主循环。
+    """
+    def __init__(self):
+        # --- 1. 仿真全局配置 ---
+        self.dt = 0.1                     # 积分步长 (s)
+        self.sim_time = 2000.0            # 总仿真时间 (s)
+        self.steps = int(self.sim_time / self.dt)
+        self.frame = CoordinateFrame.SUN_EARTH_ROTATING
         
-        for i in range(steps):
-            t = i * dt
-            
-            # --- 信息域：测控与指令 ---
-            obs_state, obs_frame = gs.track_spacecraft(sc.state, sc.frame)
-            cmd_packet = gs.generate_telecommand("ORBIT_MAINTENANCE", target_state, MISSION_FRAME)
-            
-            # --- 计算域：GNC 算法 ---
-            gnc.process_telecommand(cmd_packet)
-            gnc.update_navigation(obs_state, obs_frame)
-            force_cmd, force_frame = gnc.compute_control_force(K_LQR)
-            
-            # --- 物理域：动力学推演 ---
-            sc.apply_thrust(force_cmd, force_frame)
-            grav_accel, grav_frame = env.get_gravity_acceleration(sc.state, sc.frame)
-            derivative = sc.get_derivative(grav_accel, grav_frame)
-            
-            # Euler 积分推进
-            sc.state += derivative * dt  
-            sc.consume_mass(m_dot=0.0001, dt=dt) 
-            
-            # 状态重置与时间推移
-            sc.clear_thrust()
-            env.step_time(dt) 
-            
-            # --- 数据高频采样落盘 ---
-            if i % log_interval == 0:
-                logger.log(sc.id, "time", t)
-                logger.log(sc.id, "true_state", sc.state)
-                logger.log(sc.id, "target_state", target_state)
-                logger.log(sc.id, "thrust", force_cmd)
-                
-            # 通知 logger 时间步推移，触发缓存自动 flush
-            logger.step()
+        # --- 2. 物理域初始化 (Physical Domain) ---
+        self.env = CelestialEnvironment(region="SUN_EARTH_L2")
+        
+        # 目标绝对静止 (位置固定在L2，相对速度为0)
+        self.target_state = np.array([1.511e11, 0.0, 0.0, 0.0, 0.0, 0.0])
+        # 初始注入偏差：X 偏移 1000m，Y 偏移 200m
+        init_state = self.target_state + np.array([1000.0, 200.0, 0.0, 0.0, 0.0, 0.0])
+        
+        self.sc = SpacecraftPointMass(
+            sc_id="Chief_Alpha", 
+            initial_state=init_state, 
+            frame=self.frame, 
+            initial_mass=1000.0
+        )
+        
+        # --- 3. 信息域初始化 (Information Domain) ---
+        self.gs = GroundStation(name="DSN_Network", operating_frame=self.frame, pos_noise_std=0.01)
+        self.gnc = GNC_Subsystem(sc_id="Chief_Alpha", operating_frame=self.frame)
+        
+        # --- 4. 最优控制律解算 ---
+        self.K = self._compute_optimal_gain()
+        
+        # --- 5. 数据持久化初始化 ---
+        os.makedirs("data", exist_ok=True)
+        self.logger = HDF5Logger(filepath="data/L1_simulation_data.h5", flush_interval=500)
+        self._setup_logger_metadata()
 
-    print("[*] 物理推演结束。所有高维张量已安全落盘。")
-    print("-" * 60)
-    
-    # --- 4. 离线数据可视化 (读取 HDF5 进行后处理) ---
-    print("📊 正在启动数据可视化引擎...")
-    vis = L1Visualizer(h5_filepath, sc.id)
-    
-    # 1. 状态时序曲线
-    state_plot_path = os.path.join(out_dir, "L1_state_history.png")
-    vis.plot_state_history(save_path=state_plot_path)
-    
-    # 2. GNC 推力活动时序
-    gnc_plot_path = os.path.join(out_dir, "L1_gnc_activity.png")
-    vis.plot_gnc_activity(save_path=gnc_plot_path)
-    
-    # 3. 带有矢量推力的 3D 轨迹动画
-    # 注意: mp4 渲染需要系统级安装 ffmpeg。如果遇到报错，可将后缀改为 .gif
-    anim_plot_path = os.path.join(out_dir, "L1_trajectory.mp4") 
-    vis.create_animation(save_path=anim_plot_path, downsample=10, thrust_scale=30.0)
+    def _compute_optimal_gain(self):
+        """构造物理量纲下的 A/B 矩阵，求解 LQR 增益"""
+        # 日地系统真实物理常数
+        gamma_L = 3.9405  
+        omega = 1.991e-7  
+        omega2 = omega**2 
+        
+        # 状态空间方程: dx = Ax + Bu
+        A = np.zeros((6, 6))
+        A[0:3, 3:6] = np.eye(3)
+        A[3, 0] = (2 * gamma_L + 1) * omega2
+        A[4, 1] = (1 - gamma_L) * omega2
+        A[5, 2] = -gamma_L * omega2
+        A[3, 4] = 2 * omega
+        A[4, 3] = -2 * omega
+        
+        B = np.zeros((6, 3))
+        B[3:6, 0:3] = np.eye(3) / self.sc.mass
+        
+        # 权重配置 (针对真实物理量级的调优)
+        Q = np.diag([1.0, 1.0, 1.0, 1e4, 1e4, 1e4])
+        R = np.diag([1.0, 1.0, 1.0]) 
+        
+        K = get_lqr_gain(A, B, Q, R)
+        print(f"[Init] LQR Optimal Gain Matrix Synthesized. K[0,0] = {K[0,0]:.4e}")
+        return K
 
-    print("="*60)
-    print("✅ Level 1 闭环仿真全流程执行完毕！所有产物已存放于 output/ 目录。")
-    print("="*60)
+    def _setup_logger_metadata(self):
+        """记录仿真元数据"""
+        meta = {
+            "dt": self.dt,
+            "sim_time": self.sim_time,
+            "target_state": self.target_state,
+            "control_method": "LQR_Optimal"
+        }
+        self.logger.set_metadata("simulation_info", meta)
+
+    def execute_time_loop(self):
+        """核心主循环：二维正交解耦的实战演练"""
+        print(f"\n🚀 Starting L1 Simulation: {self.steps} steps...")
+        
+        for step in range(self.steps):
+            current_time = step * self.dt
+            
+            # --- 数据记录 ---
+            self.logger.log("Spacecraft", "state", self.sc.state)
+            
+            # --- 信息域交互 ---
+            # 1. 测站观测真实物理状态并加噪
+            obs_state, obs_frame = self.gs.track_spacecraft(self.sc.state, self.sc.frame)
+            
+            # 2. 生成带坐标系契约的上行指令
+            cmd = self.gs.generate_telecommand(
+                cmd_type="ORBIT_MAINTENANCE", 
+                target_state=self.target_state, 
+                target_frame=self.frame
+            )
+            
+            # 3. GNC 大脑处理指令与导航
+            self.gnc.process_telecommand(cmd)
+            self.gnc.update_navigation(obs_state, obs_frame)
+            
+            # 4. 基于 LQR 计算推力
+            force_vector, force_frame = self.gnc.compute_control_force(self.K)
+            self.logger.log("GNC", "thrust_cmd", force_vector)
+            
+            # --- 物理域演化 ---
+            # 1. 物理引擎接受外部推力 (内部强制校验 CoordinateFrame)
+            self.sc.apply_thrust(force_vector, force_frame)
+            
+            # 2. 获取宇宙环境的真实加速度
+            grav_accel, grav_frame = self.env.get_gravity_acceleration(self.sc.state, self.sc.frame)
+            
+            # 3. 动力学积分
+            deriv = self.sc.get_derivative(grav_accel, grav_frame)
+            self.sc.state += deriv * self.dt
+            
+            # 4. 清理上一步作动器状态
+            self.sc.clear_thrust()
+
+            # 进度打印
+            if step % 2000 == 0 and step > 0:
+                err_norm = np.linalg.norm(self.sc.state - self.target_state)
+                print(f"  [{current_time:6.1f}s] Error Norm: {err_norm:8.2f} m")
+
+        # --- 收尾与持久化 ---
+        self.logger.flush()
+        self.logger.close()
+        
+        final_err = np.linalg.norm(self.sc.state - self.target_state)
+        print(f"✅ Simulation Complete! Final Error: {final_err:.2f} m")
+
+    def run_post_processing(self):
+        """调用可视化基础设施"""
+        print("\n📊 Generating visualization assets...")
+        vis = L1Visualizer(filepath="data/L1_simulation_data.h5", sc_id="Chief_Alpha")
+        
+        # 1. 轨迹收敛图
+        vis.plot_state_history(save_path="data/L1_trajectory.png")
+        
+        # 2. 控制指令图
+        vis.plot_gnc_activity(save_path="data/L1_gnc_thrust.png")
+        
+        # 3. 3D 动态渲染 (降采样 100 倍，即 20000 帧抽取 200 帧生成 GIF)
+        vis.create_animation(save_path="data/L1_animation.gif", downsample=100)
+        
+        print("🎉 All tasks finished.")
 
 if __name__ == "__main__":
-    main()
+    runner = SimulationRunner()
+    runner.execute_time_loop()
+    runner.run_post_processing()
