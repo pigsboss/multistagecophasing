@@ -10,6 +10,7 @@ MCPC 框架通用仿真入口
     python run.py --scene sun_earth_l2 --level 1
     python run.py --scene sun_earth_l2 --level 1 --config config.yaml
     python run.py --scene sun_earth_l2 --level 1 --simulation_days 30 --time_step 60
+    python run.py --scene sun_earth_l2 --level 1 --quiet                 # 静默模式
 """
 
 import sys
@@ -103,6 +104,7 @@ def main():
     parser.add_argument("--data_dir", help="数据输出目录")
     parser.add_argument("--enable_visualization", action="store_true", help="启用可视化")
     parser.add_argument("--disable_visualization", action="store_false", dest="enable_visualization", help="禁用可视化")
+    parser.add_argument("--quiet", action="store_true", help="静默模式，仅输出错误信息（不输出进度等）")
     # 其他参数可通过 --key value 的形式传递，但 argparse 无法直接处理任意键值对。
     # 这里简化，用户可以添加额外参数，我们通过剩余参数收集，然后设置 config[key] = value
     # 为了支持任意参数，我们允许使用 --key value 的任意组合，并存入 config
@@ -143,11 +145,15 @@ def main():
         "log_buffer_size": 500,
         "log_compression": True,
         "progress_interval": 0.05,
+        "verbose": True,   # 默认详细输出
     }
 
     # 合并配置：命令行参数覆盖文件配置，再覆盖默认
     cli_args = {k: v for k, v in vars(args).items() if v is not None and k not in ["scene", "level", "config", "extra"]}
     cli_args.update(extra_args)  # 额外参数也作为命令行参数覆盖
+
+    # 处理静默模式：覆盖 verbose 配置
+    cli_args["verbose"] = not args.quiet
 
     config = merge_config(default_config, file_config, cli_args)
 

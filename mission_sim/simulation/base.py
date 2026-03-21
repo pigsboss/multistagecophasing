@@ -35,6 +35,7 @@ class BaseSimulation(ABC):
                 - simulation_days: 仿真天数
                 - time_step: 积分步长 (s)
                 - data_dir: 数据输出目录
+                - verbose: 是否输出详细信息（默认 True）
                 其他字段由子类定义。
         """
         self.config = config
@@ -61,8 +62,12 @@ class BaseSimulation(ABC):
             f"{self.config.get('mission_name', 'mission').replace(' ', '_')}_{self.mission_id}.h5"
         )
 
-        # 打印启动信息
-        self._print_startup_info()
+        # 控制输出详细程度
+        self.verbose = self.config.get("verbose", True)
+
+        # 打印启动信息（仅当 verbose 开启）
+        if self.verbose:
+            self._print_startup_info()
 
     def _print_startup_info(self):
         """打印启动信息（子类可重写以定制输出）"""
@@ -122,15 +127,18 @@ class BaseSimulation(ABC):
         初始化数据记录器。
         默认使用 HDF5Logger，子类可重写以使用其他记录方式或扩展元数据。
         """
-        metadata = SimulationMetadata.create_mission_metadata(
-            mission_name=self.config["mission_name"],
-            config={
-                "simulation_days": self.config["simulation_days"],
-                "time_step": self.config["time_step"],
-                "mission_id": self.mission_id,
-                **{k: v for k, v in self.config.items() if k not in ["mission_name", "simulation_days", "time_step"]}
-            }
-        )
+        # 构建元数据字典
+        metadata = {
+            "mission_name": self.config["mission_name"],
+            "simulation_days": self.config["simulation_days"],
+            "time_step": self.config["time_step"],
+            "spacecraft_mass": self.spacecraft.mass,
+            "control_type": "LQR",
+            "mission_id": self.mission_id,
+            "ephemeris_period_days": self.ephemeris.times[-1] / 86400
+        }
+    
+        # 使用 HDF5Logger 初始化文件
         self.logger = HDF5Logger(
             filepath=self.h5_file,
             buffer_size=self.config.get("log_buffer_size", 500),
@@ -138,7 +146,9 @@ class BaseSimulation(ABC):
             auto_flush=True
         )
         self.logger.initialize_file(metadata)
-        print(f"[日志] 数据文件: {self.h5_file}")
+    
+        if self.verbose:
+            print(f"[日志] 数据文件: {self.h5_file}")
 
     def _execute_simulation_loop(self):
         """
@@ -150,7 +160,8 @@ class BaseSimulation(ABC):
         self.total_steps = int(sim_seconds / dt)
         progress_steps = max(1, int(self.total_steps * self.config.get("progress_interval", 0.05)))
 
-        print(f"\n开始闭环仿真，总步数: {self.total_steps}, 步长: {dt} 秒")
+        if self.verbose:
+            print(f"\n开始闭环仿真，总步数: {self.total_steps}, 步长: {dt} 秒")
         for step in range(self.total_steps):
             self.current_step = step
             epoch = step * dt
@@ -171,11 +182,12 @@ class BaseSimulation(ABC):
             if step % 10 == 0:
                 self._log_step(epoch)
 
-            # 6. 进度报告
-            if step % progress_steps == 0 and step > 0:
+            # 6. 进度报告（仅当 verbose 开启）
+            if self.verbose and step % progress_steps == 0 and step > 0:
                 self._report_progress(step, epoch, force_cmd)
 
-        print("仿真主循环完成")
+        if self.verbose:
+            print("仿真主循环完成")
 
     # ---------- 主循环中的 hook 方法 ----------
     def _get_observation(self, epoch: float):
@@ -286,16 +298,19 @@ class BaseSimulation(ABC):
                         f"{self.config['simulation_days']},"
                         f"{np.linalg.norm(self.gnc_system.last_tracking_error[0:3]):.2f},"
                         f"{np.linalg.norm(self.gnc_system.last_tracking_error[3:6]) * 1000:.2f}\n")
-            print(f"✅ 燃料账单已保存: {fuel_bill_path}")
+            if self.verbose:
+                print(f"✅ 燃料账单已保存: {fuel_bill_path}")
         except Exception as e:
-            print(f"⚠️ 燃料账单保存失败: {e}")
+            if self.verbose:
+                print(f"⚠️ 燃料账单保存失败: {e}")
 
         # 可视化
         if self.config.get("enable_visualization", False):
             self._generate_visualization()
 
-        # 打印汇总信息
-        self._print_summary()
+        # 打印汇总信息（仅当 verbose 开启）
+        if self.verbose:
+            self._print_summary()
 
         return True
 
@@ -307,9 +322,11 @@ class BaseSimulation(ABC):
             vis.plot_3d_trajectory(save_path=f"{base}_trajectory.png")
             vis.plot_tracking_error(save_path=f"{base}_errors.png")
             vis.plot_control_effort(save_path=f"{base}_control.png")
-            print("✅ 可视化报告生成完成")
+            if self.verbose:
+                print("✅ 可视化报告生成完成")
         except Exception as e:
-            print(f"⚠️ 可视化失败: {e}")
+            if self.verbose:
+                print(f"⚠️ 可视化失败: {e}")
 
     def _print_summary(self):
         """打印仿真结果汇总"""
@@ -348,16 +365,20 @@ class BaseSimulation(ABC):
 
     def _emergency_shutdown(self):
         """紧急关闭处理（在异常或中断时调用）"""
-        print("\n⚠️ 执行紧急关闭...")
+        if self.verbose:
+            print("\n⚠️ 执行紧急关闭...")
         if self.logger:
             try:
                 self.logger.close()
-                print(f"✅ 已保存数据到: {self.h5_file}")
+                if self.verbose:
+                    print(f"✅ 已保存数据到: {self.h5_file}")
             except Exception as e:
-                print(f"❌ 数据保存失败: {e}")
+                if self.verbose:
+                    print(f"❌ 数据保存失败: {e}")
         if self.current_step > 0:
             completed_days = (self.current_step * self.config["time_step"]) / 86400
-            print(f"   已完成 {completed_days:.2f} 天仿真")
+            if self.verbose:
+                print(f"   已完成 {completed_days:.2f} 天仿真")
 
     def get_statistics(self) -> dict:
         """获取仿真统计信息"""
@@ -386,7 +407,8 @@ class BaseSimulation(ABC):
         try:
             self.simulation_start_time = time.time()
             if not self._generate_nominal_orbit():
-                print("⚠️ 使用备用轨道")
+                if self.verbose:
+                    print("⚠️ 使用备用轨道")
                 self._generate_fallback_orbit()
             self._initialize_physical_domain()
             self._initialize_information_domain()
@@ -395,12 +417,17 @@ class BaseSimulation(ABC):
             self._execute_simulation_loop()
             return self._finalize_simulation()
         except KeyboardInterrupt:
-            print("\n⏹️ 仿真被用户中断")
+            if self.verbose:
+                print("\n⏹️ 仿真被用户中断")
             self._emergency_shutdown()
             return False
         except Exception as e:
-            print(f"\n❌ 仿真运行失败: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
+            if self.verbose:
+                print(f"\n❌ 仿真运行失败: {type(e).__name__}: {e}")
+                import traceback
+                traceback.print_exc()
+            else:
+                # 静默模式也打印错误，但简短一些
+                print(f"❌ 仿真运行失败: {e}")
             self._emergency_shutdown()
             return False
