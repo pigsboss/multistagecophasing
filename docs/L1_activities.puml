@@ -11,12 +11,21 @@ start
 
 partition "1. 预处理阶段 (Pre-processing)" {
     :加载 L1 仿真配置 (轨道类型、总时长、步长 dt);
-    :初始化 CelestialEnvironment (按需加载引力与光压模型);
-    :调用 TrajectoryGenerator (多态工厂);
-    :算法解算 (解析外推 / 微分修正 / 历表积分);
-    :生成并缓存全局标称轨道离散星历表 X_nominal(t);
+    :初始化 CelestialEnvironment (力学注册表);
+    :根据轨道类型选择 TrajectoryGenerator 工厂;
+    if (轨道类型?) then (开普勒)
+        :KeplerianGenerator (二体解析);
+    elseif (J2摄动)
+        :J2KeplerianGenerator (数值积分+J2);
+    elseif (平动点 Halo)
+        :HaloDifferentialCorrector (微分修正);
+    else (其他)
+        :... 扩展生成器;
+    endif
+    :算法解算并生成全局标称轨道离散星历表 X_nominal(t);
     :初始化 SpacecraftPointMass 并注入初始偏差;
     :初始化 HDF5Logger;
+    :（可选）注册力学模型: CRTBP / J2 / SRP / 大气阻力;
 }
 
 :进入时间推演主循环 (t = 0);
@@ -31,7 +40,7 @@ while (t < sim_time?) is (Yes)
             :从 X_nominal(t) 星历表插值获取当前标称状态;
             :封装为 Telecommand 发送给 GNC;
         else (No)
-            :测控盲区：GNC 强制依赖星上轨道外推 (Propagator);
+            :测控盲区：调用 GNC 内置外推器更新导航状态;
         endif
     }
 
@@ -44,7 +53,7 @@ while (t < sim_time?) is (Yes)
 
     partition "4. 物理底座与执行层 (Plant & Actuation)" {
         :SpacecraftPointMass 接收并施加 F_cmd;
-        :CelestialEnvironment 根据坐标系校验并计算主导摄动力\n(如 CRTBP多体引力 + Cannonball太阳光压);
+        :CelestialEnvironment 根据坐标系校验并计算总加速度\n(遍历已注册的力学模型: CRTBP/J2/SRP/大气阻力等);
         :汇总状态导数 (Velocity, Total_Acceleration);
         :执行数值动力学积分 (Runge-Kutta / Euler);
         :更新航天器物理真值状态;
@@ -66,6 +75,7 @@ endwhile (No)
 partition "6. 后处理阶段 (Post-processing)" {
     :HDF5Logger 强制落盘 (Flush) 并关闭文件;
     :提取累计 ΔV，生成 Station Keeping 燃料基准底账;
+    :（新增）将燃料账单写入 CSV/JSON 文件;
     :调用 Visualizer 生成 3D 标称轨道偏离度报告;
     :绘制 GNC 控制活动 (打火) 时序图;
 }

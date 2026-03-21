@@ -1,5 +1,5 @@
 @startuml
-title MCPC 框架 L1 级静态类图 (基于代码实现)
+title MCPC 框架 L1 级静态类图 (基于代码实现 + 开发计划)
 
 skinparam classAttributeIconSize 0
 skinparam monochrome false
@@ -46,22 +46,41 @@ package "mission_sim.core.trajectory" #E8F8F5 {
         + {abstract} generate(config: dict) : Ephemeris
     }
 
-    class KeplerianGenerator {
-        - mu : float
-        + generate(config: dict) : Ephemeris
+    package "generators" #E8F8F5 {
+        class KeplerianGenerator {
+            - mu : float
+            + generate(config: dict) : Ephemeris
+            - _kepler_solver(M: float, e: float) : float
+        }
+
+        class J2KeplerianGenerator {
+            - mu : float
+            - j2_model : J2Gravity
+            + generate(config: dict) : Ephemeris
+            - _elements_to_cartesian(elements) : np.ndarray
+        }
+
+        class HaloDifferentialCorrector {
+            - mu : float
+            - OMEGA : float
+            - AU : float
+            + generate(config: dict) : Ephemeris
+            - _crtbp_equations(t, state) : np.ndarray
+            - _find_period(state0) : float
+            - _closure_conditions(state0, tf) : np.ndarray
+            - _robust_initial_guess(Az) : tuple
+        }
+
+        BaseTrajectoryGenerator <|-- KeplerianGenerator
+        BaseTrajectoryGenerator <|-- J2KeplerianGenerator
+        BaseTrajectoryGenerator <|-- HaloDifferentialCorrector
+        BaseTrajectoryGenerator ..> Ephemeris : <<creates>>
     }
 
-    class HaloDifferentialCorrector {
-        - mu : float
-        - OMEGA : float
-        - AU : float
-        + generate(config: dict) : Ephemeris
-        ' 私有方法省略，保持简洁
+    ' 工厂函数
+    class TrajectoryFactory <<utility>> {
+        + {static} create_generator(orbit_type: str, **kwargs) : BaseTrajectoryGenerator
     }
-
-    BaseTrajectoryGenerator <|-- KeplerianGenerator
-    BaseTrajectoryGenerator <|-- HaloDifferentialCorrector
-    BaseTrajectoryGenerator ..> Ephemeris : <<creates>>
 }
 
 ' ==========================================
@@ -102,18 +121,47 @@ package "mission_sim.core.physics" #EAEDED {
 
     class Gravity_CRTBP {
         - mu : float
-        ' 其他物理常数省略，保持简洁
+        - OMEGA : float
+        - AU : float
+        - GM_SUN : float
+        - GM_EARTH : float
+        - pos_sun : np.ndarray
+        - pos_earth : np.ndarray
         + compute_accel(state: np.ndarray, epoch: float) : np.ndarray
     }
 
-    ' 未实现，标记为 TODO
-    class Cannonball_SRP <<未实现>> {
+    class J2Gravity {
+        - mu_earth : float
+        - j2 : float
+        - r_earth : float
+        - _prefactor : float
+        + compute_accel(state: np.ndarray, epoch: float) : np.ndarray
+    }
+
+    class Cannonball_SRP {
+        - area_to_mass : float
+        - reflectivity : float
+        - AU : float
+        - mu : float
+        - P_solar : float
+        - sun_position : np.ndarray
+        - _constant_factor : float
+        + compute_accel(state: np.ndarray, epoch: float) : np.ndarray
+    }
+
+    class AtmosphericDrag {
+        - area_to_mass : float
+        - Cd : float
+        - rho0 : float
+        - scale_height : float
         + compute_accel(state: np.ndarray, epoch: float) : np.ndarray
     }
 
     CelestialEnvironment o-- IForceModel
     IForceModel <|.. Gravity_CRTBP
+    IForceModel <|.. J2Gravity
     IForceModel <|.. Cannonball_SRP
+    IForceModel <|.. AtmosphericDrag
 }
 
 ' ==========================================
@@ -135,19 +183,34 @@ package "mission_sim.core.gnc" #FDF2E9 {
         + __repr__()
     }
 
+    abstract class Propagator {
+        + {abstract} propagate(state: np.ndarray, dt: float) : np.ndarray
+    }
+
+    class SimplePropagator {
+        + propagate(state: np.ndarray, dt: float) : np.ndarray
+    }
+
+    class KeplerPropagator {
+        - mu : float
+        + propagate(state: np.ndarray, dt: float) : np.ndarray
+    }
+
     class GNC_Subsystem {
         + sc_id : str
         + operating_frame : CoordinateFrame
         - current_nav_state : np.ndarray
         - ref_ephemeris : Ephemeris | None
+        - _propagator : Propagator | None
         - last_control_force : np.ndarray
         - last_tracking_error : np.ndarray
         - last_target_state : np.ndarray
         - total_control_calls : int
         - force_shape_warnings : int
         + load_reference_trajectory(eph: Ephemeris)
-        + update_navigation(obs_state: np.ndarray, frame: CoordinateFrame)
+        + update_navigation(obs_state: np.ndarray, frame: CoordinateFrame, dt: float = 0.0)
         + compute_control_force(epoch: float, K_matrix: np.ndarray) : tuple[np.ndarray, CoordinateFrame]
+        + set_propagator(propagator: Propagator)
         + get_tracking_error(epoch: float) : np.ndarray
         + get_performance_metrics() : dict
         + reset()
@@ -155,6 +218,9 @@ package "mission_sim.core.gnc" #FDF2E9 {
     }
 
     GNC_Subsystem o-- Ephemeris : 追踪参考轨迹
+    GNC_Subsystem o-- Propagator : 盲区外推
+    Propagator <|-- SimplePropagator
+    Propagator <|-- KeplerPropagator
 }
 
 ' ==========================================
@@ -234,6 +300,6 @@ L1MissionSimulation *-- SpacecraftPointMass
 L1MissionSimulation *-- GroundStation
 L1MissionSimulation *-- GNC_Subsystem
 L1MissionSimulation *-- HDF5Logger
-L1MissionSimulation ..> BaseTrajectoryGenerator : 预处理调用
+L1MissionSimulation ..> TrajectoryFactory : 使用工厂创建生成器
 
 @enduml

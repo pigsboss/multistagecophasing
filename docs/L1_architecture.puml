@@ -17,9 +17,10 @@ package "1. 预处理阶段 (Pre-processing)" #F8F9FA {
     
     note left of TG
       **全域标称轨道生成 (多态实现)**
-      - 解析根数+J2外推 (LEO/GEO)
-      - 微分修正 (Halo/Lissajous/NRHO)
-      - 高精度历表积分 (Deep Space/Trailing)
+      - 开普勒解析 (KeplerianGenerator)
+      - J2摄动数值积分 (J2KeplerianGenerator)
+      - 微分修正 (HaloDifferentialCorrector)
+      - 未来扩展: Lissajous, NRHO, Earth-trailing
     end note
 }
 
@@ -32,6 +33,15 @@ package "2. 测量与信息层 (Perception)" #EBF5FB {
       - 离散时间采样率控制
       - 轨道特异性高斯白噪声注入
     end note
+    
+    component "Propagator\n(盲区外推器)" as PROP #D6EAF8
+    
+    note right of PROP
+      **星上自主外推**
+      - SimplePropagator (速度恒定)
+      - KeplerPropagator (二体RK4)
+      - 未来扩展: J2/CRTBP外推
+    end note
 }
 
 package "3. 控制与算法层 (Logic)" #FDF2E9 {
@@ -41,6 +51,7 @@ package "3. 控制与算法层 (Logic)" #FDF2E9 {
       **控制器 (Station Keeping)**
       - 泛化误差解算: e(t) = X_nav(t) - X_nominal(t)
       - LQR / 轨道最优控制律计算
+      - 盲区时调用 Propagator 外推导航状态
     end note
 }
 
@@ -50,8 +61,9 @@ package "4. 物理底座与执行层 (Plant & Actuation)" #EAEDED {
     
     note right of ENV
       **环境可插拔引擎 (隔离与解耦)**
-      - LEO: 高阶非球形引力 + 大气阻力
-      - 平动点: 多体引力(CRTBP) + Cannonball 光压
+      - LEO/GEO: J2Gravity + AtmosphericDrag
+      - 平动点: Gravity_CRTBP + Cannonball_SRP
+      - 深空: 高精度历表 + 光压
     end note
     
     note right of SC
@@ -69,6 +81,7 @@ package "5. 后处理阶段 (Post-processing)" #F5EEF8 {
       **定标与报告输出**
       - Station Keeping 燃料预算底账
       - 3D 标称轨道偏离度
+      - 燃料账单文件 (CSV/JSON)
     end note
 }
 
@@ -79,9 +92,10 @@ package "5. 后处理阶段 (Post-processing)" #F5EEF8 {
 ' 1. 预处理流
 TG -down-> Ephemeris : "[1] 触发工厂\n生成当前任务类型基准星历"
 
-' 2. 测量感知流
+' 2. 测量感知流 (含外推器)
 SC -up-> GS : "物理真值\n(受测控可视弧段限制)"
 GS -down-> GNC : "[2] 注入带噪遥测数据\n更新 X_nav(t)"
+PROP -up-> GNC : "盲区时调用\n外推导航状态"
 
 ' 3. 控制决策流
 Ephemeris -down-> GNC : "[3] 根据当前 t 插值\n获取目标状态 X_nominal(t)"
@@ -93,5 +107,6 @@ ENV -right-> SC : "注入主导摄动力\n(按需动态加载)"
 ' 5. 持久化与定标流
 SC -right-> Logger : "[5] 高频物理状态与\n累计 ΔV 消耗量落盘"
 GNC -right-> Logger : "[5] 记录 GNC 追踪误差\n与打火指令"
+Logger -down-> Logger : "生成燃料账单文件"
 
 @enduml
