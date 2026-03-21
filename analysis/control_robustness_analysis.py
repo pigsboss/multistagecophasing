@@ -5,6 +5,10 @@
 输出统计图表和性能报告。
 """
 
+# 在 _run_single_simulation 方法中：
+   # 原 L1MissionSimulation
+
+
 import os
 import sys
 import time
@@ -17,7 +21,7 @@ from tqdm import tqdm
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from mission_sim.main_L1_runner import L1MissionSimulation
+from mission_sim.simulation.threebody.sun_earth_l2 import SunEarthL2L1Simulation
 from mission_sim.utils.logger import HDF5Logger
 
 
@@ -104,64 +108,48 @@ class ControlRobustnessAnalyzer:
 
         return config
 
+
     def _run_single_simulation(self, config: Dict[str, Any]) -> Optional[RobustnessMetrics]:
-        """
-        运行单次仿真，返回性能指标。
-        """
         try:
-            sim = L1MissionSimulation(config)
+            sim = SunEarthL2L1Simulation(config)
             start_time = time.time()
             success = sim.run()
             elapsed = time.time() - start_time
-
+    
             if not success:
                 print(f"  [警告] 仿真失败，跳过")
                 return None
-
-            # 从仿真对象获取最终指标
+    
             stats = sim.get_statistics()
             final_pos_err = stats.get("final_position_error", np.nan)
             final_vel_err = stats.get("final_velocity_error", np.nan)
             total_dv = stats.get("accumulated_dv", np.nan)
-
-            # 从 HDF5 文件加载更多指标
-            if os.path.exists(sim.h5_file):
+    
+            # --- 修改点：使用绝对路径，并用 with 语句安全打开文件 ---
+            h5_file_abs = os.path.abspath(sim.h5_file)
+            if os.path.exists(h5_file_abs):
                 try:
-                    logger = HDF5Logger(sim.h5_file)
-                    # 读取所有数据
-                    data = logger.load_all_data()
-                    # 位置误差 RMS
-                    errors = data.get('tracking_errors', np.array([]))
-                    if len(errors) > 0:
-                        rms_pos = np.sqrt(np.mean(errors[:, 0:3]**2))
-                        rms_vel = np.sqrt(np.mean(errors[:, 3:6]**2))
-                        # 收敛时间：误差首次降至阈值以下 (位置误差 < 1000m)
-                        threshold = 1000.0
-                        times = data.get('epochs', np.array([]))
-                        idx = np.where(np.linalg.norm(errors[:, 0:3], axis=1) < threshold)[0]
-                        conv_time = times[idx[0]] if len(idx) > 0 else np.nan
-                    else:
-                        rms_pos = rms_vel = conv_time = np.nan
+                    with h5py.File(h5_file_abs, 'r') as f:
+                        errors = f['tracking_errors'][:]
+                        if len(errors) > 0:
+                            rms_pos = np.sqrt(np.mean(errors[:, 0:3]**2))
+                            rms_vel = np.sqrt(np.mean(errors[:, 3:6]**2))
+                            threshold = 1000.0
+                            times = f['epochs'][:]
+                            idx = np.where(np.linalg.norm(errors[:, 0:3], axis=1) < threshold)[0]
+                            conv_time = times[idx[0]] if len(idx) > 0 else np.nan
+                        else:
+                            rms_pos = rms_vel = conv_time = np.nan
+    
+                        forces = f['control_forces'][:]
+                        max_force = np.max(np.linalg.norm(forces, axis=1)) if len(forces) > 0 else np.nan
                 except Exception as e:
                     print(f"  [警告] 读取 HDF5 数据失败: {e}")
-                    rms_pos = rms_vel = conv_time = np.nan
-                finally:
-                    logger.close()
+                    rms_pos = rms_vel = conv_time = max_force = np.nan
             else:
-                rms_pos = rms_vel = conv_time = np.nan
-
-            # 提取控制力最大值（从 HDF5）
-            max_force = np.nan
-            if os.path.exists(sim.h5_file):
-                try:
-                    logger = HDF5Logger(sim.h5_file)
-                    forces = logger.load_data('control_forces')
-                    if len(forces) > 0:
-                        max_force = np.max(np.linalg.norm(forces, axis=1))
-                    logger.close()
-                except:
-                    pass
-
+                print(f"  [警告] HDF5 文件不存在: {h5_file_abs}")
+                rms_pos = rms_vel = conv_time = max_force = np.nan
+    
             metrics = RobustnessMetrics(
                 mission_id=sim.mission_id,
                 position_error_final=final_pos_err,
@@ -175,10 +163,13 @@ class ControlRobustnessAnalyzer:
                 parameters=config
             )
             return metrics
-
+    
         except Exception as e:
             print(f"  [错误] 仿真异常: {e}")
+            import traceback
+            traceback.print_exc()  # 输出完整堆栈便于调试
             return None
+    
 
     def _generate_param_combinations(self) -> List[Dict[str, Any]]:
         """

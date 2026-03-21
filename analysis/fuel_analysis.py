@@ -18,7 +18,8 @@ from tqdm import tqdm
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from mission_sim.main_L1_runner import L1MissionSimulation
+
+from mission_sim.simulation.threebody.sun_earth_l2 import SunEarthL2L1Simulation
 from mission_sim.utils.logger import HDF5Logger
 from mission_sim.core.types import CoordinateFrame
 
@@ -105,8 +106,8 @@ class FuelAnalyzer:
         orbit_type = params.get("orbit_type", "Halo")
         if orbit_type == "Halo":
             # Halo 轨道默认配置（日地 L2）
-            config.setdefault("Az_target", 0.05)
-            config.setdefault("dt_orbital", 0.001)
+            config.setdefault("Az", 0.05)
+            config.setdefault("dt", 0.001)
             # 可选：使用初始猜测加速收敛
             config.setdefault("initial_guess", [1.01106, 0.05, 0.0105])
         elif orbit_type == "Keplerian":
@@ -150,7 +151,7 @@ class FuelAnalyzer:
         运行单次仿真，返回燃料相关指标。
         """
         try:
-            sim = L1MissionSimulation(config)
+            sim = SunEarthL2L1Simulation(config)
             start_time = time.time()
             success = sim.run()
             elapsed = time.time() - start_time

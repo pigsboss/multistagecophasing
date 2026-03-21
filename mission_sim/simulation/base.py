@@ -57,10 +57,10 @@ class BaseSimulation(ABC):
         # 输出目录和文件
         self.data_dir = self.config.get("data_dir", "data")
         os.makedirs(self.data_dir, exist_ok=True)
-        self.h5_file = os.path.join(
+        self.h5_file = os.path.abspath(os.path.join(
             self.data_dir,
             f"{self.config.get('mission_name', 'mission').replace(' ', '_')}_{self.mission_id}.h5"
-        )
+        ))
 
         # 控制输出详细程度
         self.verbose = self.config.get("verbose", True)

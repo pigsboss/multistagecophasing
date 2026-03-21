@@ -38,7 +38,7 @@ class HDF5Logger:
             compression: 是否启用数据压缩
             auto_flush: 是否在每次记录后自动检查并刷新缓冲区
         """
-        self.filepath = filepath
+        self.filepath = os.path.abspath(filepath)
         self.buffer_size = buffer_size
         self.compression = compression
         self.auto_flush = auto_flush
