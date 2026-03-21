@@ -6,7 +6,7 @@ class CRTBP:
     def __init__(self, mu, length_unit=1.495978707e11, time_unit=1.990986e-7):
         self.mu = mu
         self.L = length_unit      # 特征长度（AU 或地月距离）
-        self.T = time_unit        # 特征时间倒数（ω）
+        self.omega = time_unit        # 特征时间倒数（ω）
         # 物理量转换系数
         self.vel_scale = self.L * self.T
 

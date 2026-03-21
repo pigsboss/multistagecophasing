@@ -1,9 +1,11 @@
 """三体场景仿真基类"""
 from mission_sim.simulation.base import BaseSimulation
+from mission_sim.core.types import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment
 from mission_sim.core.gnc.ground_station import GroundStation
 from mission_sim.core.gnc.gnc_subsystem import GNC_Subsystem
-from mission_sim.models.threebody.base import CRTBP
+from mission_sim.core.dynamics.threebody.base import CRTBP
+from mission_sim.core.physics.spacecraft import SpacecraftPointMass
 
 class ThreeBodyBaseSimulation(BaseSimulation):
     def __init__(self, config):

@@ -43,7 +43,7 @@ class SunEarthL2L1Simulation(ThreeBodyBaseSimulation):
         states_phys = sol.y.T.copy()
         states_phys[:, 0:3] *= self.crtbp.L
         states_phys[:, 3:6] *= self.crtbp.vel_scale
-        times_phys = sol.t / self.crtbp.T
+        times_phys = sol.t / self.crtbp.omega
         self.ephemeris = Ephemeris(times_phys, states_phys,
                                    CoordinateFrame.SUN_EARTH_ROTATING)
 
@@ -51,7 +51,7 @@ class SunEarthL2L1Simulation(ThreeBodyBaseSimulation):
         # 基于 CRTBP 线性化的 LQR
         mu = self.crtbp.mu
         gamma = np.cbrt(mu / 3.0)
-        omega = self.crtbp.T  # 特征角速度
+        omega = self.crtbp.omega  # 特征角速度
         A = np.zeros((6,6))
         A[0:3,3:6] = np.eye(3)
         A[3,0] = (2*gamma+1)*omega**2
