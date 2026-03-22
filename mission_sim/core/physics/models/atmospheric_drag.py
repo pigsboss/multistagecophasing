@@ -54,8 +54,7 @@ def _atmospheric_drag_accel(
 
     # 阻力加速度: a = -0.5 * Cd * (A/m) * rho * v * v_dir
     factor = -0.5 * Cd * area_to_mass * rho * v
-    acc = factor * vel / v
-
+    acc = factor * vel
     return acc.astype(np.float64)
 
 

@@ -80,27 +80,28 @@ def test_atmospheric_drag_acceleration():
 
     drag = AtmosphericDrag(area_to_mass=area_to_mass, Cd=Cd, rho0=rho0, H=H, h0=h0, R_earth=R_earth)
 
-    # 场景1：200 km 高度，速度沿 X 正方向
-    altitude = 200e3
+    # 场景1：100 km 高度，速度沿 X 正方向
+    altitude = 100e3
     r = R_earth + altitude
     pos = np.array([r, 0, 0])
-    vel = np.array([7700.0, 0, 0])   # 典型 LEO 速度
+    v_mag = np.sqrt(3.986004418e14 / r)
+    vel = np.array([0.0, v_mag, 0.0])   # 典型 LEO 速度
     state = np.concatenate([pos, vel])
 
     acc = drag.compute_accel(state, 0.0)
 
     # 验证加速度方向与速度相反
     assert np.dot(acc, vel) < 0
-    # 验证加速度主要沿 -X 方向
-    assert acc[0] < 0
-    assert abs(acc[1]) < 1e-6
+    # 验证加速度主要沿 -Y 方向
+    assert acc[1] < 0
+    assert abs(acc[0]) < 1e-6
     assert abs(acc[2]) < 1e-6
 
-    # 验证密度计算：高度 200 km 密度应小于海平面密度
+    # 验证密度计算：高度 100 km 密度应小于海平面密度
     # 根据指数模型，密度 = rho0 * exp(-(h - h0)/H)
     expected_rho = rho0 * np.exp(-(altitude - h0) / H)
     v = np.linalg.norm(vel)
-    expected_acc_magnitude = 0.5 * Cd * area_to_mass * expected_rho * v**2
+    expected_acc_magnitude = 0.5 * Cd * area_to_mass * expected_rho * v_mag**2.0
     computed_magnitude = np.linalg.norm(acc)
     assert np.allclose(computed_magnitude, expected_acc_magnitude, rtol=1e-6)
 
