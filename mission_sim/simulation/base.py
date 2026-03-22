@@ -144,16 +144,17 @@ class BaseSimulation(ABC):
             "ephemeris_period_days": self.ephemeris.times[-1] / 86400,
             "integrator": self.integrator_type,
         }
-    
-        # 使用 HDF5Logger 初始化文件
+
+        # 使用 HDF5Logger 初始化文件，传递 verbose 参数
         self.logger = HDF5Logger(
             filepath=self.h5_file,
             buffer_size=self.config.get("log_buffer_size", 500),
             compression=self.config.get("log_compression", True),
-            auto_flush=True
+            auto_flush=True,
+            verbose=self.verbose   # 将仿真详细程度传递给记录器
         )
         self.logger.initialize_file(metadata)
-    
+
         if self.verbose:
             print(f"[日志] 数据文件: {self.h5_file}")
 
@@ -331,28 +332,29 @@ class BaseSimulation(ABC):
     # ---------- 后处理 hook ----------
     def _finalize_simulation(self) -> bool:
         """
-        仿真后处理：关闭日志、生成燃料账单、可视化。
+        仿真后处理：关闭日志、生成燃料账单（可选）、可视化。
         子类可重写以增加自定义后处理逻辑。
         """
         self.simulation_end_time = time.time()
         if self.logger:
             self.logger.close()
 
-        # 燃料账单 CSV
-        fuel_bill_path = os.path.join(self.data_dir, f"fuel_bill_{self.mission_id}.csv")
-        try:
-            with open(fuel_bill_path, 'w') as f:
-                f.write("mission_id,total_dv_mps,avg_dv_per_day_mps,simulation_days,final_position_error_m,final_velocity_error_mms\n")
-                f.write(f"{self.mission_id},{self.spacecraft.accumulated_dv:.6f},"
-                        f"{self.spacecraft.accumulated_dv / self.config['simulation_days']:.6f},"
-                        f"{self.config['simulation_days']},"
-                        f"{np.linalg.norm(self.gnc_system.last_tracking_error[0:3]):.2f},"
-                        f"{np.linalg.norm(self.gnc_system.last_tracking_error[3:6]) * 1000:.2f}\n")
-            if self.verbose:
-                print(f"✅ 燃料账单已保存: {fuel_bill_path}")
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ 燃料账单保存失败: {e}")
+        # 可选：生成燃料账单 CSV（默认关闭，数据已保存在 HDF5 中）
+        if self.config.get("save_fuel_bill", False):
+            fuel_bill_path = os.path.join(self.data_dir, f"fuel_bill_{self.mission_id}.csv")
+            try:
+                with open(fuel_bill_path, 'w') as f:
+                    f.write("mission_id,total_dv_mps,avg_dv_per_day_mps,simulation_days,final_position_error_m,final_velocity_error_mms\n")
+                    f.write(f"{self.mission_id},{self.spacecraft.accumulated_dv:.6f},"
+                            f"{self.spacecraft.accumulated_dv / self.config['simulation_days']:.6f},"
+                            f"{self.config['simulation_days']},"
+                            f"{np.linalg.norm(self.gnc_system.last_tracking_error[0:3]):.2f},"
+                            f"{np.linalg.norm(self.gnc_system.last_tracking_error[3:6]) * 1000:.2f}\n")
+                if self.verbose:
+                    print(f"✅ 燃料账单已保存: {fuel_bill_path}")
+            except Exception as e:
+                if self.verbose:
+                    print(f"⚠️ 燃料账单保存失败: {e}")
 
         # 可视化
         if self.config.get("enable_visualization", False):

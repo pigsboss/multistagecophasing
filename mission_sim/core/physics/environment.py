@@ -37,16 +37,18 @@ class CelestialEnvironment:
     职责：作为力学注册表，管理多种摄动力模型，并向航天器提供统一的总加速度。
     """
 
-    def __init__(self, computation_frame: CoordinateFrame, initial_epoch: float = 0.0):
+    def __init__(self, computation_frame: CoordinateFrame, initial_epoch: float = 0.0, verbose: bool = True):
         """
         初始化环境引擎。
 
         Args:
             computation_frame: 该环境引擎执行物理计算的基础坐标系 (强契约)
             initial_epoch: 初始历元时间 (s)
+            verbose: 是否输出详细信息
         """
         self.computation_frame = computation_frame
         self.epoch = float(initial_epoch)
+        self.verbose = verbose
 
         # 核心：力学模型注册表 (解耦具体的物理公式)
         self._force_registry: list[IForceModel] = []
@@ -65,7 +67,8 @@ class CelestialEnvironment:
             raise TypeError("注册的力学模型必须实现 IForceModel 接口。")
 
         self._force_registry.append(force_model)
-        print(f"[Environment] 成功注册力学模型: {force_model.__class__.__name__}")
+        if self.verbose:
+            print(f"[Environment] 成功注册力学模型: {force_model.__class__.__name__}")
 
     def step_time(self, dt: float) -> None:
         """

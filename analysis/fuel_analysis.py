@@ -67,7 +67,7 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
         elapsed = time.time() - start_time
 
         if not success:
-            print(f"  [Warning] Simulation failed, skipping")
+            # Silent fail in worker
             return None
 
         # Get basic statistics from simulation object
@@ -84,10 +84,9 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
                     forces = f['control_forces'][:]
                     if len(forces) > 0:
                         max_force = np.max(np.linalg.norm(forces, axis=1))
-            except Exception as e:
-                print(f"  [Warning] Failed to read control force data: {e}")
-        else:
-            print(f"  [Warning] HDF5 file not found: {h5_file_abs}")
+            except Exception:
+                # Silent fail
+                pass
 
         # Calculate average delta-V per day
         sim_days = config.get("simulation_days", 30)
@@ -108,10 +107,8 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
         )
         return metrics
 
-    except Exception as e:
-        print(f"  [Error] Simulation exception: {e}")
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        # Silent fail in worker
         return None
 
 
@@ -122,7 +119,7 @@ class FuelAnalyzer:
     generates reports and charts.
     """
 
-    # Default base configuration
+    # Default base configuration (suppress verbose output)
     DEFAULT_BASE_CONFIG = {
         "mission_name": "Fuel_Analysis",
         "time_step": 10.0,
@@ -132,6 +129,8 @@ class FuelAnalyzer:
         "data_dir": "data/fuel_analysis",
         "log_level": "WARNING",
         "integrator": "rk4",            # Default integrator
+        "verbose": False,               # Suppress simulation internal output
+        "save_fuel_bill": False,        # Do not generate CSV fuel bills
     }
 
     # Default scan parameters
@@ -455,7 +454,7 @@ def main():
         "simulation_days": [30]                       # Simulation duration (days)
     }
 
-    # Base configuration
+    # Base configuration (suppress verbose output, disable CSV)
     base_config = {
         "time_step": 10.0,
         "log_buffer_size": 200,
@@ -463,6 +462,8 @@ def main():
         "data_dir": "data/fuel_analysis",
         "log_level": "WARNING",
         "integrator": "rk4",   # Can be changed to "rk45" for variable-step integration
+        "verbose": False,      # Suppress simulation internal output
+        "save_fuel_bill": False,  # Do not generate CSV fuel bills
     }
 
     # Create analyzer

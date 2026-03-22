@@ -19,16 +19,18 @@ class GNC_Subsystem:
           支持在测控盲区时使用外推器更新导航状态。
     """
 
-    def __init__(self, sc_id: str, operating_frame: CoordinateFrame):
+    def __init__(self, sc_id: str, operating_frame: CoordinateFrame, verbose: bool = True):
         """
         初始化 GNC 子系统
 
         Args:
             sc_id: 航天器标识符
             operating_frame: GNC 算法的工作基准坐标系 (强契约)
+            verbose: 是否输出详细信息
         """
         self.sc_id = sc_id
         self.operating_frame = operating_frame
+        self.verbose = verbose
 
         # 导航滤波器输出状态 (初始为空)
         self.current_nav_state = np.zeros(6, dtype=np.float64)
@@ -48,7 +50,8 @@ class GNC_Subsystem:
         self.total_control_calls = 0
         self.force_shape_warnings = 0
 
-        print(f"✅ [{self.sc_id} GNC] 初始化完成，工作坐标系: {self.operating_frame.name}")
+        if self.verbose:
+            print(f"✅ [{self.sc_id} GNC] 初始化完成，工作坐标系: {self.operating_frame.name}")
 
     def set_propagator(self, propagator: Propagator):
         """
@@ -58,7 +61,8 @@ class GNC_Subsystem:
             propagator: 外推器实例（继承自 Propagator）
         """
         self._propagator = propagator
-        print(f"✅ [{self.sc_id} GNC] 已注入外推器: {propagator.__class__.__name__}")
+        if self.verbose:
+            print(f"✅ [{self.sc_id} GNC] 已注入外推器: {propagator.__class__.__name__}")
 
     def load_reference_trajectory(self, eph: Ephemeris) -> None:
         """
@@ -79,12 +83,12 @@ class GNC_Subsystem:
             )
 
         self.ref_ephemeris = eph
-        duration_hours = (eph.times[-1] - eph.times[0]) / 3600.0
-
-        print(f"✅ [{self.sc_id} GNC] 成功锁定动态基准星历")
-        print(f"   星历时长: {duration_hours:.1f} 小时")
-        print(f"   星历点数: {len(eph.times)}")
-        print(f"   时间范围: {eph.times[0]:.1f} 到 {eph.times[-1]:.1f} 秒")
+        if self.verbose:
+            duration_hours = (eph.times[-1] - eph.times[0]) / 3600.0
+            print(f"✅ [{self.sc_id} GNC] 成功锁定动态基准星历")
+            print(f"   星历时长: {duration_hours:.1f} 小时")
+            print(f"   星历点数: {len(eph.times)}")
+            print(f"   时间范围: {eph.times[0]:.1f} 到 {eph.times[-1]:.1f} 秒")
 
     def update_navigation(self, obs_state: Optional[np.ndarray], frame: CoordinateFrame, dt: float = 0.0) -> None:
         """
@@ -106,8 +110,6 @@ class GNC_Subsystem:
             # 外推导航状态
             if dt > 0:
                 self.current_nav_state = self._propagator.propagate(self.current_nav_state, dt)
-                # 可选：打印调试信息（频率太高，暂时注释）
-                # print(f"[{self.sc_id} GNC] 盲区外推，dt={dt:.1f}s")
             return
 
         # 有观测时正常更新
@@ -115,7 +117,8 @@ class GNC_Subsystem:
             # 既无观测也无外推器，保持原状态（警告仅一次）
             if not hasattr(self, "_warned_no_propagator"):
                 self._warned_no_propagator = True
-                print(f"⚠️ [{self.sc_id} GNC] 盲区且无外推器，导航状态冻结")
+                if self.verbose:
+                    print(f"⚠️ [{self.sc_id} GNC] 盲区且无外推器，导航状态冻结")
             return
 
         # 类型校验
@@ -138,8 +141,8 @@ class GNC_Subsystem:
         # 更新导航状态
         self.current_nav_state = np.copy(obs_state.astype(np.float64))
 
-        # 调试信息
-        if self.total_control_calls % 1000 == 0:
+        # 调试信息（仅当 verbose 开启）
+        if self.verbose and self.total_control_calls % 1000 == 0:
             pos_norm = np.linalg.norm(obs_state[0:3])
             vel_norm = np.linalg.norm(obs_state[3:6])
             print(f"  [{self.sc_id} GNC] 导航更新: 位置={pos_norm:.1f}m, 速度={vel_norm:.4f}m/s")
@@ -170,7 +173,8 @@ class GNC_Subsystem:
             target_state = self.ref_ephemeris.get_interpolated_state(epoch)
             self.last_target_state = np.copy(target_state)
         except Exception as e:
-            print(f"⚠️ [{self.sc_id} GNC] 星历插值失败: {e}")
+            if self.verbose:
+                print(f"⚠️ [{self.sc_id} GNC] 星历插值失败: {e}")
             target_state = self.last_target_state
 
         # 计算追踪误差
@@ -186,12 +190,13 @@ class GNC_Subsystem:
             control_force = self._standardize_control_force(raw_force)
             self.last_control_force = np.copy(control_force)
         except Exception as e:
-            print(f"⚠️ [{self.sc_id} GNC] 控制力计算失败: {e}")
+            if self.verbose:
+                print(f"⚠️ [{self.sc_id} GNC] 控制力计算失败: {e}")
             control_force = np.zeros(3, dtype=np.float64)
             self.last_control_force = control_force
 
-        # 调试输出（降频）
-        if self.total_control_calls % 1000 == 0:
+        # 调试输出（仅当 verbose 开启）
+        if self.verbose and self.total_control_calls % 1000 == 0:
             err_pos = np.linalg.norm(error[0:3])
             err_vel = np.linalg.norm(error[3:6]) * 1000
             force_norm = np.linalg.norm(control_force)
@@ -212,7 +217,8 @@ class GNC_Subsystem:
         if K_matrix.shape == expected_shape:
             return K_matrix
 
-        print(f"⚠️ [{self.sc_id} GNC] K矩阵形状不匹配: 当前 {K_matrix.shape}，期望 {expected_shape}。尝试进行安全重塑...")
+        if self.verbose:
+            print(f"⚠️ [{self.sc_id} GNC] K矩阵形状不匹配: 当前 {K_matrix.shape}，期望 {expected_shape}。尝试进行安全重塑...")
 
         # 尝试安全的形状修正逻辑 (仅处理明确可推导的降维/展平情况)
         try:
@@ -221,13 +227,15 @@ class GNC_Subsystem:
                 if K_matrix.shape == (6,):
                     K_matrix = K_matrix.reshape(1, 6)
                 K_matrix = np.tile(K_matrix, (3, 1))
-                print(f"  [{self.sc_id} GNC] 已将 1D 增益广播为 3D: {K_matrix.shape}")
+                if self.verbose:
+                    print(f"  [{self.sc_id} GNC] 已将 1D 增益广播为 3D: {K_matrix.shape}")
                 return K_matrix
 
             # 如果是纯粹的展平数组且元素数量匹配，则重塑
             if K_matrix.size == 18:
                 K_matrix = K_matrix.reshape(expected_shape)
-                print(f"  [{self.sc_id} GNC] 已重塑为标准维度: {K_matrix.shape}")
+                if self.verbose:
+                    print(f"  [{self.sc_id} GNC] 已重塑为标准维度: {K_matrix.shape}")
                 return K_matrix
 
         except Exception as e:
@@ -260,7 +268,7 @@ class GNC_Subsystem:
                         return raw_force.reshape(3).astype(np.float64)
                 except:
                     pass
-        if self.force_shape_warnings < 5:
+        if self.verbose and self.force_shape_warnings < 5:
             print(f"⚠️ [{self.sc_id} GNC] 控制力格式异常: {type(raw_force)}")
             self.force_shape_warnings += 1
         return np.zeros(3, dtype=np.float64)
@@ -292,7 +300,8 @@ class GNC_Subsystem:
         self.last_tracking_error = np.zeros(6, dtype=np.float64)
         self.total_control_calls = 0
         self.force_shape_warnings = 0
-        print(f"[{self.sc_id} GNC] 已重置")
+        if self.verbose:
+            print(f"[{self.sc_id} GNC] 已重置")
 
     def __repr__(self) -> str:
         metrics = self.get_performance_metrics()

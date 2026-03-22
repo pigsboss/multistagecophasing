@@ -28,7 +28,8 @@ class HDF5Logger:
                  filepath: str = "data/simulation.h5", 
                  buffer_size: int = 1000,
                  compression: bool = True,
-                 auto_flush: bool = True):
+                 auto_flush: bool = True,
+                 verbose: bool = True):
         """
         初始化 HDF5 记录器
         
@@ -37,11 +38,13 @@ class HDF5Logger:
             buffer_size: 内存缓冲区大小（记录条数）
             compression: 是否启用数据压缩
             auto_flush: 是否在每次记录后自动检查并刷新缓冲区
+            verbose: 是否输出详细日志信息
         """
         self.filepath = os.path.abspath(filepath)
         self.buffer_size = buffer_size
         self.compression = compression
         self.auto_flush = auto_flush
+        self.verbose = verbose
         
         # 确保输出目录存在
         os.makedirs(os.path.dirname(os.path.abspath(filepath)), exist_ok=True)
@@ -58,8 +61,9 @@ class HDF5Logger:
         self.total_steps = 0
         self.creation_time = datetime.now().isoformat()
         
-        print(f"[HDF5Logger] 初始化完成，文件: {filepath}")
-        print(f"[HDF5Logger] 缓冲区大小: {buffer_size}, 压缩: {compression}")
+        if self.verbose:
+            print(f"[HDF5Logger] 初始化完成，文件: {filepath}")
+            print(f"[HDF5Logger] 缓冲区大小: {buffer_size}, 压缩: {compression}")
     
     def _init_buffers(self):
         """初始化内存缓冲区数据结构"""
@@ -79,9 +83,11 @@ class HDF5Logger:
         backup_path = self.filepath + f".backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         try:
             os.rename(self.filepath, backup_path)
-            print(f"[HDF5Logger] 已备份旧文件: {backup_path}")
+            if self.verbose:
+                print(f"[HDF5Logger] 已备份旧文件: {backup_path}")
         except Exception as e:
-            print(f"[HDF5Logger] 备份失败: {e}")
+            if self.verbose:
+                print(f"[HDF5Logger] 备份失败: {e}")
     
     def initialize_file(self, metadata: Optional[Dict[str, Any]] = None):
         """
@@ -136,7 +142,8 @@ class HDF5Logger:
             f.attrs['logger_compression'] = self.compression
         
         self.is_initialized = True
-        print(f"[HDF5Logger] 文件结构初始化完成")
+        if self.verbose:
+            print(f"[HDF5Logger] 文件结构初始化完成")
     
     def log_step(self, 
                  epoch: float,
@@ -237,7 +244,7 @@ class HDF5Logger:
     def _standardize_control_force(self, control_force):
         """
         标准化控制力输入
-        支持标量、1维数组、3维数组等多种格式
+        支持标量、列表、元组、1维数组、3维数组等多种格式
         
         Args:
             control_force: 原始控制力输入
@@ -245,10 +252,13 @@ class HDF5Logger:
         Returns:
             标准化后的控制力数组 (3,)
         """
+        # 如果是列表或元组，转换为 numpy 数组
+        if isinstance(control_force, (list, tuple)):
+            control_force = np.array(control_force, dtype=np.float64)
+
         if isinstance(control_force, (int, float, np.number)):
             # 标量 -> 转换为数组 [force, 0, 0]
             return np.array([float(control_force), 0.0, 0.0], dtype=np.float64)
-        
         elif isinstance(control_force, np.ndarray):
             if control_force.shape == ():
                 # 0维数组 -> 转换为标量数组
@@ -269,15 +279,17 @@ class HDF5Logger:
                         return control_force.reshape(3).astype(np.float64)
                     else:
                         # 无法处理，返回零向量
-                        print(f"⚠️ 警告: 无法处理 control_force 形状 {control_force.shape}，使用零向量")
+                        if self.verbose:
+                            print(f"⚠️ 警告: 无法处理 control_force 形状 {control_force.shape}，使用零向量")
                         return np.zeros(3, dtype=np.float64)
                 except:
-                    print(f"⚠️ 警告: 处理 control_force 时出错，使用零向量")
+                    if self.verbose:
+                        print(f"⚠️ 警告: 处理 control_force 时出错，使用零向量")
                     return np.zeros(3, dtype=np.float64)
-        
         else:
             # 未知类型，返回零向量
-            print(f"⚠️ 警告: control_force 类型 {type(control_force)} 不支持，使用零向量")
+            if self.verbose:
+                print(f"⚠️ 警告: control_force 类型 {type(control_force)} 不支持，使用零向量")
             return np.zeros(3, dtype=np.float64)
     
     def flush(self):
@@ -314,7 +326,8 @@ class HDF5Logger:
                     dataset.attrs['last_update'] = datetime.now().isoformat()
             
             written_count = self.buffer_count
-            print(f"[HDF5Logger] 已写入 {written_count} 条记录，总计 {self.total_steps} 条")
+            if self.verbose:
+                print(f"[HDF5Logger] 已写入 {written_count} 条记录，总计 {self.total_steps} 条")
             
             # 清空缓冲区
             self._init_buffers()
@@ -322,7 +335,8 @@ class HDF5Logger:
             return written_count
             
         except Exception as e:
-            print(f"[HDF5Logger] 写入失败: {e}")
+            if self.verbose:
+                print(f"[HDF5Logger] 写入失败: {e}")
             # 保留缓冲区数据，下次尝试
             return 0
     
@@ -346,13 +360,15 @@ class HDF5Logger:
                 f.attrs['file_size_bytes'] = total_size
                 f.attrs['file_size_mb'] = total_size / (1024 * 1024)
             
-            print(f"[HDF5Logger] 记录器已关闭，文件: {self.filepath}")
-            print(f"[HDF5Logger] 总计记录: {self.total_steps} 条")
+            if self.verbose:
+                print(f"[HDF5Logger] 记录器已关闭，文件: {self.filepath}")
+                print(f"[HDF5Logger] 总计记录: {self.total_steps} 条")
             
             return True
             
         except Exception as e:
-            print(f"[HDF5Logger] 关闭失败: {e}")
+            if self.verbose:
+                print(f"[HDF5Logger] 关闭失败: {e}")
             return False
     
     def get_statistics(self) -> Dict[str, Any]:
@@ -431,7 +447,8 @@ class HDF5Logger:
     def __del__(self):
         """析构函数，确保资源正确释放"""
         if hasattr(self, 'buffer_count') and self.buffer_count > 0:
-            print(f"[HDF5Logger] 析构函数: 尝试刷新剩余 {self.buffer_count} 条记录")
+            if self.verbose:
+                print(f"[HDF5Logger] 析构函数: 尝试刷新剩余 {self.buffer_count} 条记录")
             try:
                 self.close()
             except:

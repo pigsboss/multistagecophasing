@@ -68,7 +68,8 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
         elapsed = time.time() - start_time
 
         if not success:
-            print(f"  [Warning] Simulation failed, skipping")
+            # Use logging instead of print to avoid cluttering in parallel runs
+            # Since this runs in worker, we can just return None and rely on main progress bar
             return None
 
         # Get basic statistics from simulation object
@@ -99,10 +100,9 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
                     forces = f['control_forces'][:]
                     max_force = np.max(np.linalg.norm(forces, axis=1)) if len(forces) > 0 else np.nan
             except Exception as e:
-                print(f"  [Warning] Failed to read HDF5 data: {e}")
+                # Silent fail in worker, just set to nan
                 rms_pos = rms_vel = conv_time = max_force = np.nan
         else:
-            print(f"  [Warning] HDF5 file not found: {h5_file_abs}")
             rms_pos = rms_vel = conv_time = max_force = np.nan
 
         metrics = RobustnessMetrics(
@@ -120,9 +120,7 @@ def _run_single_simulation(config: Dict[str, Any], mission_id: str) -> Optional[
         return metrics
 
     except Exception as e:
-        print(f"  [Error] Simulation exception: {e}")
-        import traceback
-        traceback.print_exc()
+        # Silent fail
         return None
 
 
@@ -144,6 +142,8 @@ class ControlRobustnessAnalyzer:
         "data_dir": "data/robustness_analysis",
         "log_level": "WARNING",
         "integrator": "rk4",             # Default integrator
+        "verbose": False,                # Suppress verbose output in workers
+        "save_fuel_bill": False,         # Do not generate separate CSV files
     }
 
     # Default parameter variation ranges
@@ -447,7 +447,7 @@ def main():
         # "control_gain_scale": [0.5, 1.0, 2.0]   # Uncomment if control gain scaling is supported
     }
 
-    # Base configuration
+    # Base configuration (suppress verbose output, disable CSV files)
     base_config = {
         "simulation_days": 10,
         "time_step": 10.0,
@@ -455,6 +455,8 @@ def main():
         "enable_visualization": False,
         "data_dir": "data/robustness_analysis",
         "integrator": "rk4",   # Can be changed to "rk45" for variable-step integration
+        "verbose": False,      # Suppress simulation internal output
+        "save_fuel_bill": False,  # Do not generate CSV fuel bills
     }
 
     # Create analyzer
