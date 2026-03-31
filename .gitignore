@@ -1,4 +1,4 @@
-analysis/analysis_results/
+analysis_results/
 data/
 *.*~
 *.pyc

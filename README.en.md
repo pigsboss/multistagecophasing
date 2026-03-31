@@ -1,7 +1,8 @@
-# MCPC Framework
+# 🌌 MCPC: Multi-stage Co-Phasing Control Simulation Framework
 
-**Multi-stage Co-Phasing Control** – An industrial‑grade spacecraft dynamics and control simulation framework for distributed spaceborne arrays.  
-MCPC supports nested control from kilometer‑level orbits to nanometer‑level wavefront phasing, serving as the digital backbone for space distributed synthetic aperture interferometry missions (e.g., the *Miyin* mission).
+MCPC is a digital twin and high-fidelity simulation framework engineered for space observatories and large-scale distributed spacecraft swarms. It is designed to evaluate Navigation, Guidance, and Control (GNC) performance in multi-body cooperative missions across deep space and near-Earth orbits.
+
+Adhering strictly to aerospace Systems Engineering paradigms, MCPC utilizes a decoupled architecture of **"3 Core Domains (Spacetime, Physics, Cyber) + 2 Support Domains"**, ensuring a physical and informational separation between the objective laws of the physical world and the subjective intelligence of the cybernetic space.
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -15,181 +16,111 @@ MCPC supports nested control from kilometer‑level orbits to nanometer‑level 
 
 ---
 
-## 🎯 Vision & Multi‑level Control Objectives
+## 🎯 Mission Statement
 
-MCPC adopts a progressive model‑fidelity strategy that gradually approaches real‑world complexity:
+Delivering full-system simulations and digital twins from Level 1 to Level 5:
 
-| Level  | Focus                     | Engineering Goal                                             | Status                              |
-| ------ | ------------------------- | ------------------------------------------------------------ | ----------------------------------- |
-| **L1** | Baseline calibration      | Absolute orbit maintenance, dominant perturbations, ideal thrust, ground‑based tracking | ✅ **Completed** (Sun‑Earth L2 Halo) |
-| **L2** | Cooperative efficiency    | Relative motion, formation reconfiguration, inter‑satellite links | 🔄 In progress                       |
-| **L3** | Principle validation      | Platform‑payload multi‑body coupling, error budget allocation | 📋 Planned                           |
-| **L4** | Engineering qualification | Full 6‑DOF, hardware nonlinearities, hardware‑in‑the‑loop    | 📋 Planned                           |
-| **L5** | Digital twin              | Flexible multi‑body, extreme environments, in‑orbit identification | 📋 Planned                           |
+  * **[L1] Foundation**: Constructing high-fidelity single-spacecraft dynamics (SRP, high-degree gravity, multi-body perturbations) and achieving component-level closed-loop control.
+  * **[L2] Formation**: Simulating multi-satellite relative navigation and precise configuration maintenance.
+  * **[L3] Payload**: Synergizing platform large-angle maneuvers with the payload's micro/nano-meter displacement control.
+  * **[L4] Flexibility**: Introducing low-frequency vibration coupling models for large solar arrays and antennas.
+  * **[L5] Evaluation**: Generating system-level performance reports based on Monte Carlo shooting and end-of-life analysis.
 
-Each level is strictly defined with its own dynamics, measurement, actuation and control assumptions, enabling you to select the right fidelity for your phase of development.
+-----
 
----
+## 🏛️ Architecture & Directory Map
 
-## ✨ Key Architectural Features
+To ensure rigorous code structures, MCPC divides core logic into independent domain models. All cross-domain interactions MUST pass through data packets defined in the `ids.py` (Interface Definition Specification):
 
-- **Orthogonal decomposition**  
-  Missions are classified by their dynamical nature (**two‑body** vs. **three‑body**) and fidelity level (**L1**–**L5**). This ensures maximum code reuse while maintaining precise model granularity.
+```text
+mcpc/
+├── run.py                          # [Entry] Main simulation runner
+├── visualize.py                    # [Entry] Data visualization and reporting
+│
+├── mission_sim/                    # ================= Core Package =================
+│   ├── config/                     # YAML configuration files
+│   │
+│   ├── core/                       # 🌟 [Foreground]: System Core Logic
+│   │   ├── spacetime/              # 🌌 [Spacetime] Absolute base and reference frames
+│   │   │   ├── ids.py              # 📜 Global Contracts: CoordinateFrame, Telecommand, FormationState
+│   │   │   ├── ephemeris/          # Ephemeris Engine: Absolute celestial truths
+│   │   │   └── generators/         # Reference Generators: Halo, Keplerian, etc.
+│   │   │
+│   │   ├── physics/                # 🪐 [Physics] Objective reality and physical laws
+│   │   │   ├── ids.py              # 📜 Physics Code: Constants, Units, Health Status
+│   │   │   ├── environment.py      # Environment Factory: Gravity and SRP integration
+│   │   │   ├── spacecraft.py       # System Entity: Mass and force integration interface
+│   │   │   └── components/         # Component Models (Deadbands, Friction, Noise, NO algorithms)
+│   │   │       ├── actuators/      # Actuator units (Thrusters, Reaction Wheels)
+│   │   │       ├── sensors/        # Sensor units (Star Trackers, ISL hardware)
+│   │   │       └── mechanisms/     # Mechanism units (Fast Steering Mirrors, Delay Lines)
+│   │   │
+│   │   └── cyber/                  # 🧠 [Cyber] Subjective Intelligence (Sensing, Comm, Compute)
+│   │       ├── ids.py              # 📜 Cyber Code: State machines, network protocols
+│   │       ├── models/             # Cognitive Models: Predictive math (CW, STM)
+│   │       ├── networks/           # Network Protocols: ISL data flow and routing delays
+│   │       └── platform_gnc/       # GNC Brain: Filters, Control Laws, Mode Logic
+│   │
+│   ├── simulation/                 # 🎬 [Background]: Orchestration & Clock
+│   │   ├── base.py                 # Main loop and event-driven engine
+│   │   ├── threebody/              # Deep space scenario assembly (L2 Halo, etc.)
+│   │   └── twobody/                # Near-Earth scenario assembly (LEO/GEO, etc.)
+│   │
+│   ├── analysis/                   # ⚖️ [Background]: Engineering Referee
+│   │   └── fuel_analysis.py        # Offline performance and Delta-V billing
+│   │
+│   └── utils/                      # 🛠️ [Infrastructure Layer]
+│       ├── math_tools.py           # Core Math: Rotations, LQR solvers
+│       └── logger.py               # HDF5 high-frequency data bus
+│
+└── tests/                          # 🛡️ Contract-driven unit test suite
+```
 
-- **Strong coordinate frame contract**  
-  Every piece of data exchanged across modules carries a `CoordinateFrame` tag (e.g., `J2000_ECI`, `SUN_EARTH_ROTATING`, `LVLH`). Inconsistent frames raise immediate exceptions, eliminating reference‑frame bugs at the source.
+-----
 
-- **Physical / Information domain decoupling**  
-  - **Physical domain** (`core/physics`) simulates the objective universe: spacecraft only integrate forces, never read control outputs directly.  
-  - **Information domain** (`core/gnc`) mimics onboard computers: navigation filtering and control laws run independently, affecting the physical domain through contract‑enforced commands.
+## ⚙️ Quick Start
 
-- **Real‑world units in optimal control**  
-  LQR controllers are designed using true SI units (e.g., Sun‑Earth angular velocity ~2×10⁻⁷ rad/s), avoiding numerical issues from non‑dimensionalization.
-
-- **High‑performance data pipeline**  
-  `HDF5Logger` uses memory buffering and compression to prevent I/O bottlenecks and memory overflow, even for month‑long simulations with high sampling rates.
-
----
-
-## 🚀 Quick Start
-
-### 1. Clone the repository
+### 1\. Environment Setup
 
 ```bash
-git clone https://github.com/your-org/mcpc.git
-cd mcpc
+# Clone the repository
+git clone https://github.com/your-username/multistagecophasing.git
+cd multistagecophasing
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+
+# Install dependencies
+pip install -r mission_sim/requirements.txt
 ```
 
-### 2. Install dependencies
+### 2\. Run First Simulation
+
+For example, to run an L1 Sun-Earth L2 Halo station-keeping simulation based on the CRTBP model:
 
 ```bash
-pip install -r requirements.txt
+python run.py --scene sun_earth_l2 --level 1 --simulation_days 30
 ```
 
-### 3. Run a sample simulation (Sun‑Earth L2 Halo orbit, L1 level)
+### 3\. Visualization
+
+Upon completion, full-lifecycle states are recorded into HDF5 files. Generate charts using:
 
 ```bash
-python run.py --scene sun_earth_l2 --level 1 --simulation_days 1 --time_step 60
+python visualize.py --input data/logs/simulation_xxx.h5
 ```
 
-Or use a YAML configuration file (e.g., `config/halo_example.yaml`):
+-----
 
-```yaml
-mission_name: "Halo L1 Test"
-simulation_days: 1
-time_step: 60.0
-Az: 0.05
-```
+## 🛡️ Test-Driven Engineering
+
+MCPC adheres to strict verification standards. Ensure all workflow tests pass before committing:
 
 ```bash
-python run.py --scene sun_earth_l2 --level 1 --config config/halo_example.yaml
+pytest tests/
 ```
 
-### 4. View results
-
-Output is written to the `data/` directory:
-
-- **`*.h5`** – HDF5 file with epochs, nominal/true/nav states, tracking errors, control forces, and accumulated ΔV.
-- **`fuel_bill_*.csv`** – Station‑keeping fuel summary.
-- **`*_trajectory.png`**, **`*_errors.png`**, **`*_control.png`** – Plots (if `enable_visualization` is `True`).
-
-You can also generate a complete HTML report:
-
-```bash
-python visualize.py data/simulation.h5 --report
-```
-
----
-
-## 📂 Project Structure
-
-```
-mission_sim/
-├── core/                     # Core domain models
-│   ├── dynamics/             # Equations of motion (two‑body / three‑body)
-│   ├── physics/              # Physical domain (environment, spacecraft, force models)
-│   ├── gnc/                  # Information domain (GNC, ground station, propagators)
-│   ├── trajectory/           # Ephemeris & orbit generators
-│   └── types.py              # Global types (CoordinateFrame, Telecommand)
-├── simulation/               # Simulation controllers (by scenario)
-│   ├── base.py               # Abstract base class (template method)
-│   ├── threebody/            # Three‑body scenarios (Sun‑Earth L2, etc.)
-│   └── twobody/              # Two‑body scenarios (LEO, GEO, etc.)
-├── utils/                    # Infrastructure
-│   ├── logger.py             # HDF5Logger (buffered, compressed)
-│   ├── math_tools.py         # LQR, LVLH, orbital element conversions
-│   ├── differential_correction.py
-│   └── visualizer_*.py
-├── tests/                    # Unit and integration tests
-├── analysis/                 # Post‑processing scripts (Monte Carlo, fuel analysis)
-├── config/                   # Example YAML configurations
-├── run.py                    # Unified simulation entry point
-├── visualize.py              # Data visualization tool
-└── requirements.txt
-```
-
----
-
-## 🛠️ Extending the Framework
-
-### Adding a new scenario (e.g., LEO)
-
-1. Create a new file `simulation/twobody/leo.py`.
-2. Inherit from `BaseSimulation` (or `TwoBodyBaseSimulation` when available).
-3. Implement the abstract methods:  
-   - `_generate_nominal_orbit()` – use `KeplerianGenerator` or `J2KeplerianGenerator`.  
-   - `_initialize_physical_domain()` – register appropriate force models (`J2Gravity`, `AtmosphericDrag`).  
-   - `_initialize_information_domain()` – create `GroundStation` and `GNC_Subsystem`.  
-   - `_design_control_law()` – compute feedback gain matrix.
-4. Register the scenario in `run.py` under `SCENE_MODULE_MAP`.
-
-### Adding a new force model
-
-1. Create a class in `core/physics/models/` that implements `IForceModel`.
-2. Implement `compute_accel(state, epoch)`.
-3. Register it with `CelestialEnvironment` in your simulation's `_initialize_physical_domain()`.
-
-### Adding a new fidelity level
-
-Within an existing scenario folder, create a new simulation class (e.g., `SunEarthL2L2Simulation`) that inherits from the base scenario class and overrides the relevant methods (e.g., to add relative dynamics for L2).
-
----
-
-## 📊 Analysis Tools
-
-The `analysis/` folder contains scripts for deeper investigation:
-
-- **Control robustness Monte Carlo** – `control_robustness_analysis.py`  
-  Vary initial errors, measurement noise, control gains, and collect statistics on final error, ΔV consumption, convergence time, etc.
-
-- **Fuel consumption analysis** – `fuel_analysis.py`  
-  Scan over orbit types, control gains, and blind intervals to evaluate fuel budgets.
-
-Example usage:
-
-```bash
-cd analysis
-python control_robustness_analysis.py
-```
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please follow the [PEP 8](https://peps.python.org/pep-0008/) style guide and add unit tests for new features.
-
-1. Fork the repository.
-2. Create a feature branch (`git checkout -b feature/amazing-feature`).
-3. Commit your changes (`git commit -m 'Add some amazing feature'`).
-4. Push to the branch (`git push origin feature/amazing-feature`).
-5. Open a Pull Request.
-
----
-
-## 📄 License
-
-Distributed under the Apache License 2.0. See `LICENSE` for more information.
-
----
+-----
 
 **MCPC – From orbit to wavelength, progressively closer to reality.**

@@ -1,8 +1,18 @@
-# MCPC 框架 (Multi-stage Co-Phasing Control)
+# 🌌 MCPC: Multi-stage Co-Phasing Control Simulation Framework
+
+# 多级共相控制仿真框架
 
 **多级共相控制（Multi-stage Co-Phasing Control）** —— 面向分布式航天器阵列高精度协同任务的工业级航天器动力学与控制全数字仿真框架。
 
 MCPC 支持从轨道级（公里级）到波长级（纳米级）的多级嵌套控制，为空间分布式合成孔径干涉成像（如“觅音计划”）、引力波探测等前沿空间科学任务提供全生命周期的数字底座。
+
+本框架严格遵循航天系统工程范式，采用 **“前台三域 (Spacetime, Physics, Cyber) + 后台两域”** 的解耦架构，实现了物理世界客观规律与赛博空间主观智能的物理级断开与信息级隔离。
+
+
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 
 -----
 <div align="center">
@@ -11,123 +21,110 @@ MCPC 支持从轨道级（公里级）到波长级（纳米级）的多级嵌套
 
 -----
 
-## 🌌 顶层设计：基于“3+2”域的架构哲学
+## 🎯 核心使命 (Mission Statement)
 
-为了在全数字仿真中完美复刻航天系统工程，MCPC 独创了 **“前台三域 + 后台两域”** 的正交解耦架构。物理法则、软件算法与数学基底在此被严格隔离。
+从 L1 到 L5 的全系统级仿真与数字孪生：
 
-### 前台业务域（航天器的数字躯体与灵魂）
-
-1.  **基础域 (Foundation) —— 时空方位**：提供客观宇宙的绝对标尺。囊括历元时钟、多体星历（Ephemeris）、参考系转换（J2000 / Rotating / LVLH），是所有计算赖以生存的数学基底。
-2.  **物理域 (Physics) —— 光机电热**：模拟绝对客观的物质世界与硬件。包含天体引力、太阳光压、航天器质量张量、推力器的物理死区与滞后、干涉仪的机械延迟线。**规则：只接受受力，绝不主动思考。**
-3.  **信息域 (Avionics/GNC) —— 感通存算**：模拟主观的星载电子学与飞行软件。包含测量噪声注入（星敏/ISL网络）、轨道/光程差导航滤波、控制律（LQR/MPC）与任务状态机。**规则：只能看到带误差的传感器假象，只能输出理想的电压/推力指令。**
-
-### 后台支撑域（仿真的导演与裁判）
-
-4.  **编排域 (Simulation)**：作为上帝视角的时钟驱动器与隔离墙。负责装配物理域与信息域，并强制执行两者间的数据契约流转。
-5.  **分析域 (Analysis)**：作为系统工程裁判。脱机进行宏观 OPD（光程差）统计、燃料包络计算、冷却时间（观测占空比）评估与蒙特卡洛鲁棒性分析。
+  * **[L1] 基石阶段 (Foundation)**：构建高逼真度的单星动力学环境（光压、高阶重力场、多体摄动），打通组件级闭环。
+  * **[L2] 编队协同 (Formation)**：模拟多星相对导航与精准构型保持。
+  * **[L3] 载荷闭环 (Payload)**：将平台大姿态机动与光学载荷的微米/纳米级位移控制联调。
+  * **[L4] 柔性摄动 (Flexibility)**：引入大型太阳帆板及天线等附件的低频振动耦合模型。
+  * **[L5] 效能评估 (Evaluation)**：基于蒙特卡洛打靶，综合输出编队在寿命末期的系统级效能报告。
 
 -----
 
-## 🎯 项目愿景与多级控制目标
+## 🏛️ 系统架构与目录地图 (Architecture & Directory Map)
 
-MCPC 采用渐进式演进策略，按工程保真度逐级逼近真实世界。严禁在低层级过早引入高保真耦合（如在 L2 纠结飞轮摩擦）：
-
-| 层级 | 工程定位 | 动力学模型 | 测量与执行 | 状态 |
-|------|----------|------------|------------|------|
-| **L1** | **基准定性** | 宏观单质点，轨道特异性主导摄动 | 地基绝对测控，理想推力中心 | ✅ **已完成**（日地 L2 Halo） |
-| **L2** | **协同效能** | **多质点相对运动，姿态锁定解耦** | **截断统计误差 ISL，宏观参数化推力限制** | 🔄 **迭代中** |
-| **L3** | 原理验证 | 平台-载荷双层多体，简化机构运动学 | 载荷光链路初建，多级软硬协同 (FSM/延迟线) | 📋 规划中 |
-| **L4** | 样机鉴定 | 全 6-DOF 刚体姿轨耦合，硬件非线性 | 传感器 Allan 方差温漂，执行器建立延迟 | 📋 规划中 |
-| **L5** | 数字孪生 | 刚柔液多体拓扑（晃动/热弹变形） | 全息异步数据融合，在轨在线辨识 | 📋 规划中 |
-
------
-
-## ✨ 核心工程特性
-
-  - **强坐标系契约**：所有跨模块数据均携带 `CoordinateFrame` 枚举标签，接口处强制校验，彻底杜绝航天工程中致命的参考系混淆灾难。
-  - **物理量纲最优控制**：控制器直接使用真实的 SI 物理单位制（如日地引力常数、系统角速度 \~2×10⁻⁷ rad/s），避免无量纲化带来的系统工程理解鸿沟。
-  - **高性能数据管道**：内置 `HDF5Logger`，采用内存缓冲与压缩增量写入，轻松支撑长达数月的微秒级高频仿真而不爆内存。
-
------
-
-## 🚀 快速开始
-
-### 1\. 克隆与安装
-
-```bash
-git clone https://github.com/your-org/mcpc.git
-cd mcpc
-pip install -r requirements.txt
-```
-
-### 2\. 运行基准仿真（L1 级，日地 L2 轨道维持）
-
-您可以通过命令行传参，或使用 YAML 配置文件：
-
-```bash
-# 通过参数运行
-python run.py --scene sun_earth_l2 --level 1 --simulation_days 1 --time_step 60
-
-# 或通过配置文件运行
-python run.py --scene sun_earth_l2 --level 1 --config config/halo_example.yaml
-```
-
-### 3\. 数据可视化与效能分析
-
-仿真产物输出至 `data/` 目录。使用内置可视化器一键生成工程报告：
-
-```bash
-python visualize.py data/simulation.h5 --report
-```
-
------
-
-## 📂 架构映射目录树
+为保障代码的严谨性，MCPC 将核心业务逻辑划分为独立的领域模型，所有跨域交互均通过 `ids.py` (Interface Definition Specification, 接口定义规范) 定义的契约完成：
 
 ```text
-mission_sim/
-├── core/
-│   ├── trajectory/           # 【基础域: 时空方位】 星历、标称轨道生成器
-│   ├── types.py              # 【基础域: 契约】 CoordinateFrame, Telecommand
-│   ├── physics/              # 【物理域: 光机电热】 宇宙环境、IForceModel、航天器/载荷实体
-│   └── gnc/                  # 【信息域: 感通存算】 飞行软件、导航滤波、ISL、控制算法
+mcpc/
+├── run.py                          # [入口] 仿真启动主脚本
+├── visualize.py                    # [入口] 数据可视化与图表生成
 │
-├── simulation/               # 【编排域: 导演与总线】 
-│   ├── base.py               # 仿真基类、时钟步进引擎
-│   └── threebody/            # 三体场景组装工厂 (SunEarthL2 等)
+├── mission_sim/                    # ================= 仿真主包 =================
+│   ├── config/                     # YAML 任务配置文件目录
+│   │
+│   ├── core/                       # 🌟 【前台三域】：系统核心业务逻辑
+│   │   ├── spacetime/              # 🌌 [时空域] 绝对的时空基底与星历标架
+│   │   │   ├── ids.py              # 📜 跨域大法典：CoordinateFrame, Telecommand, FormationState
+│   │   │   ├── ephemeris/          # 星历引擎：天体绝对位置真值
+│   │   │   └── generators/         # 标称基准：Halo 等参考轨道生成器
+│   │   │
+│   │   ├── physics/                # 🪐 [物理域] 不可违背的实体与客观规律
+│   │   │   ├── ids.py              # 📜 物理法典：物理常量、单位制、硬件故障枚举
+│   │   │   ├── environment.py      # 环境工厂：引力场、光压场聚合计算
+│   │   │   ├── spacecraft.py       # 系统级实体：质量、受力积分接口
+│   │   │   └── components/         # 组件级模型 (含死区、摩擦、底噪，无控制算法)
+│   │   │       ├── actuators/      # 执行组件 (推力器、飞轮)
+│   │   │       ├── sensors/        # 敏感组件 (星敏、ISL天线)
+│   │   │       └── mechanisms/     # 机构组件 (快摆镜、延迟线)
+│   │   │
+│   │   └── cyber/                  # 🧠 [赛博域] 承载感通存算的主观智能大脑
+│   │       ├── ids.py              # 📜 赛博法典：控制状态机、通信协议帧
+│   │       ├── models/             # 认知模型：CW方程、STM 等用于预测的数学模型
+│   │       ├── networks/           # 通信协议：ISL 测距/测角数据流与路由延迟
+│   │       └── platform_gnc/       # 控制大脑：导航滤波、姿轨控算法、模式切换
+│   │
+│   ├── simulation/                 # 🎬 【后台编排域】：上帝视角的装配车间与时钟
+│   │   ├── base.py                 # 仿真主循环与事件驱动引擎
+│   │   ├── threebody/              # 深空场景组装工厂 (日地 L2 等)
+│   │   └── twobody/                # 近地场景组装工厂 (LEO/GEO 等)
+│   │
+│   ├── analysis/                   # ⚖️ 【后台分析域】：系统工程裁判
+│   │   └── fuel_analysis.py        # 离线效能评估与燃料账单统计
+│   │
+│   └── utils/                      # 🛠️ 【基础设施层】
+│       ├── math_tools.py           # 坐标系旋转、控制律求解等核心数学库
+│       └── logger.py               # HDF5 高频增量日志数据总线
 │
-├── analysis/                 # 【分析域: 系统工程评价】 
-│   ├── fuel_analysis.py      # 协同 Delta-V 账单统计
-│   └── opd_analyzer.py       # 干涉基线差分与冷却时间评估 (L2+)
-│
-├── utils/                    # 基础设施
-│   ├── logger.py             # 高性能 HDF5 记录器
-│   └── math_tools.py         # 数学库 (LQR求解、坐标系旋转矩阵)
-│
-├── config/                   # YAML 任务配置文件
-├── run.py                    # 仿真启动入口
-└── visualize.py              # 绘图路由与报告生成
+└── tests/                          # 🛡️ 契约驱动的单元测试套件
 ```
 
 -----
 
-## 🛠️ 扩展与定制指南
+## ⚙️ 快速开始 (Quick Start)
 
-MCPC 的正交解耦架构使其极易扩展：
+### 1\. 环境准备
 
-  * **新增环境力**：在 `core/physics/models/` 实现 `IForceModel` 接口（`compute_accel`），注册入 `CelestialEnvironment` 即可生效。
-  * **新增相对动力学场景**：在 `core/dynamics/` 补充 `RelativeDynamics` 实现类（如 CW 方程或基于 CRTBP 的 STM），供 GNC 调用。
-  * **新增分析维度**：在 `analysis/` 目录下调用已生成的 HDF5 文件进行脱机运算，绝对不会污染仿真主干。
+```bash
+# 克隆仓库
+git clone https://github.com/your-username/multistagecophasing.git
+cd multistagecophasing
+
+# 创建虚拟环境并激活
+python -m venv venv
+source venv/bin/activate  # Windows 用户使用 venv\Scripts\activate
+
+# 安装依赖
+pip install -r mission_sim/requirements.txt
+```
+
+### 2\. 运行首次仿真 (Run First Simulation)
+
+例如，运行基于 CRTBP 模型的日地 L2 Halo 轨道维持仿真 (L1 级)：
+
+```bash
+python run.py --scene sun_earth_l2 --level 1 --simulation_days 30
+```
+
+### 3\. 数据可视化 (Visualization)
+
+仿真执行完毕后，全生命周期的状态将被刻录为 HDF5 文件。执行以下命令生成图表：
+
+```bash
+python visualize.py --input data/logs/simulation_xxx.h5
+```
 
 -----
 
-## 🤝 参与贡献
+## 🛡️ 测试驱动 (Test-Driven Engineering)
 
-我们欢迎学术界与工业界的开发者参与到 MCPC 框架的建设中！请确保代码遵循 [PEP 8](https://peps.python.org/pep-0008/) 规范，并在提交 Pull Request 前补充相应的物理对齐单元测试。
+MCPC 坚持严苛的验证标准。在提交代码前，请确保全流程测试通过：
 
-## 📄 许可证
-
-本项目采用 [Apache License 2.0](https://www.google.com/search?q=LICENSE) 开源许可证。
+```bash
+pytest tests/
+```
 
 -----
 
