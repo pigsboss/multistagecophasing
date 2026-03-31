@@ -5,8 +5,8 @@
 
 import numpy as np
 from mission_sim.simulation.twobody.base import TwoBodyBaseSimulation
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.trajectory.generators import KeplerianGenerator, J2KeplerianGenerator
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.spacetime.generators import KeplerianGenerator, J2KeplerianGenerator
 from mission_sim.utils.math_tools import elements_to_cartesian
 
 
@@ -117,7 +117,7 @@ class GEOL1Simulation(TwoBodyBaseSimulation):
 
     def _generate_fallback_orbit(self):
         print("   使用备用轨道生成方案（开普勒圆轨道，标准 GEO）...")
-        from mission_sim.core.trajectory.generators import KeplerianGenerator
+        from mission_sim.core.spacetime.generators import KeplerianGenerator
         a = self.GEO_RADIUS
         e = 0.0
         i = 0.0

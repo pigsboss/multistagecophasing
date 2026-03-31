@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.trajectory.generators import (
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.spacetime.generators import (
     KeplerianGenerator,
     J2KeplerianGenerator,
     HaloDifferentialCorrector,

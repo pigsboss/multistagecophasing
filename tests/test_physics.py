@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment, IForceModel
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
 from mission_sim.core.physics.models.gravity_crtbp import Gravity_CRTBP

@@ -1,11 +1,11 @@
 """三体场景仿真基类"""
 import numpy as np
 from mission_sim.simulation.base import BaseSimulation
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment
-from mission_sim.core.gnc.ground_station import GroundStation
-from mission_sim.core.gnc.gnc_subsystem import GNC_Subsystem
-from mission_sim.core.dynamics.threebody.base import CRTBP
+from mission_sim.core.cyber.platform_gnc.ground_station import GroundStation
+from mission_sim.core.cyber.platform_gnc.gnc_subsystem import GNC_Subsystem
+from mission_sim.core.cyber.models.threebody.base import CRTBP
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
 
 
@@ -28,13 +28,25 @@ class ThreeBodyBaseSimulation(BaseSimulation):
         )
         self.environment.register_force(Gravity_CRTBP())
 
-        # 初始化航天器（带偏差）
+        # 获取配置中的注入误差
+        injection = self.config.get("injection_error")
+        # 如果是字符串（来自命令行），尝试解析
+        if isinstance(injection, str):
+            try:
+                import json
+                # 将 "[0,0,0,0,0,0]" 转换为 list 再转为 array
+                injection = np.array(json.loads(injection))
+            except:
+                print("⚠️ 注入误差解析失败，回退到默认值")
+                injection = np.array([2000, 2000, -1000, 0.01, -0.01, 0.005])
+        
+        # 如果配置里没有（或为 None），使用默认值
+        if injection is None:
+            injection = np.array([2000, 2000, -1000, 0.01, -0.01, 0.005])
         nom0_phys = self.ephemeris.get_interpolated_state(0.0)
-        injection = self.config.get(
-            "injection_error",
-            np.array([2000, 2000, -1000, 0.01, -0.01, 0.005])
-        )
         true0_phys = nom0_phys + injection
+        # ... 后续初始化 ...
+        
         self.spacecraft = SpacecraftPointMass(
             sc_id="SC",
             initial_state=true0_phys,
@@ -61,10 +73,10 @@ class ThreeBodyBaseSimulation(BaseSimulation):
         # 外推器可选
         prop_type = self.config.get("propagator_type")
         if prop_type == "simple":
-            from mission_sim.core.gnc.propagator import SimplePropagator
+            from mission_sim.core.cyber.platform_gnc.propagator import SimplePropagator
             self.gnc_system.set_propagator(SimplePropagator())
         elif prop_type == "kepler":
-            from mission_sim.core.gnc.propagator import KeplerPropagator
+            from mission_sim.core.cyber.platform_gnc.propagator import KeplerPropagator
             self.gnc_system.set_propagator(
                 KeplerPropagator(self.config.get("propagator_mu", 1.32712440018e20))
             )

@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.trajectory.ephemeris import Ephemeris
-from mission_sim.core.gnc.gnc_subsystem import GNC_Subsystem
-from mission_sim.core.gnc.propagator import SimplePropagator, KeplerPropagator, CRTBPPropagator
-from mission_sim.core.dynamics.threebody.base import CRTBP
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.spacetime.ephemeris import Ephemeris
+from mission_sim.core.cyber.platform_gnc.gnc_subsystem import GNC_Subsystem
+from mission_sim.core.cyber.platform_gnc.propagator import SimplePropagator, KeplerPropagator, CRTBPPropagator
+from mission_sim.core.cyber.models.threebody.base import CRTBP
 
 
 def test_gnc_load_reference_trajectory():

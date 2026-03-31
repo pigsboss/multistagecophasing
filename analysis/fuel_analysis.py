@@ -14,7 +14,7 @@ import itertools
 import numpy as np
 import matplotlib.pyplot as plt
 import h5py
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, asdict
 from tqdm import tqdm
 import multiprocessing as mp
@@ -28,7 +28,7 @@ matplotlib.use('Agg')
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from mission_sim.simulation.threebody.sun_earth_l2 import SunEarthL2L1Simulation
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 
 @dataclass

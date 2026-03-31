@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Optional, Any, Dict
 
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.utils.logger import HDF5Logger, SimulationMetadata
 from mission_sim.utils.visualizer_L1 import L1Visualizer
 

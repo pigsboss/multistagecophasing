@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.trajectory.ephemeris import Ephemeris
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.spacetime.ephemeris import Ephemeris
 
 def test_ephemeris_linear_interpolation():
     """测试线性数据的三次样条插值（应精确）"""

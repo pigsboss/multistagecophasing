@@ -6,7 +6,7 @@
 
 import numpy as np
 from abc import ABC, abstractmethod
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 
 class IForceModel(ABC):

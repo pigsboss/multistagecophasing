@@ -10,11 +10,11 @@ from abc import abstractmethod
 from typing import Optional
 
 from mission_sim.simulation.base import BaseSimulation
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment
 from mission_sim.core.physics.models.j2_gravity import J2Gravity
-from mission_sim.core.gnc.ground_station import GroundStation
-from mission_sim.core.gnc.gnc_subsystem import GNC_Subsystem
+from mission_sim.core.cyber.platform_gnc.ground_station import GroundStation
+from mission_sim.core.cyber.platform_gnc.gnc_subsystem import GNC_Subsystem
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
 
 
@@ -145,10 +145,10 @@ class TwoBodyBaseSimulation(BaseSimulation):
         # 盲区外推器配置
         prop_type = self.config.get("propagator_type")
         if prop_type == "simple":
-            from mission_sim.core.gnc.propagator import SimplePropagator
+            from mission_sim.core.cyber.platform_gnc.propagator import SimplePropagator
             self.gnc_system.set_propagator(SimplePropagator())
         elif prop_type == "kepler":
-            from mission_sim.core.gnc.propagator import KeplerPropagator
+            from mission_sim.core.cyber.platform_gnc.propagator import KeplerPropagator
             mu = self.config.get("propagator_mu", self.mu_earth)
             self.gnc_system.set_propagator(KeplerPropagator(mu))
 
@@ -196,7 +196,7 @@ class TwoBodyBaseSimulation(BaseSimulation):
         子类可重写以提供更合适的备用方案。
         """
         print("   使用备用轨道生成方案（开普勒圆轨道）...")
-        from mission_sim.core.trajectory.generators import KeplerianGenerator
+        from mission_sim.core.spacetime.generators import KeplerianGenerator
         a = 7000e3  # 半径 7000km
         e = 0.0
         i = 0.0

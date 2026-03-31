@@ -2,8 +2,8 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 from mission_sim.simulation.threebody.base import ThreeBodyBaseSimulation
-from mission_sim.core.trajectory.ephemeris import Ephemeris
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ephemeris import Ephemeris
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 
 class SunEarthL2L1Simulation(ThreeBodyBaseSimulation):
@@ -38,7 +38,7 @@ class SunEarthL2L1Simulation(ThreeBodyBaseSimulation):
                 state0_nd = np.array([x0, 0.0, z0, 0.0, vy0, 0.0])
 
             # 积分一个周期（默认 3.1416 无量纲时间）
-            T_nd = self.config.get("period_nd", 3.1416)
+            T_nd = float(self.config.get("period_nd", 3.1416))
             dt_nd = self.config.get("dt_nd", 0.001)
             t_nd = np.arange(0, T_nd, dt_nd)
 
@@ -126,6 +126,14 @@ class SunEarthL2L1Simulation(ThreeBodyBaseSimulation):
         R = np.diag([1e6, 1e6, 1e6])
 
         from mission_sim.utils.math_tools import get_lqr_gain
-
-        self.k_matrix = get_lqr_gain(A, B, Q, R)
-        # 推力限幅在 GNC 子系统中实现
+        # 1. 计算理论最优增益
+        raw_k = get_lqr_gain(A, B, Q, R)
+        # 2. 从配置中读取缩放因子（默认为 1.0）
+        # 强制转换为 float 以避免 run.py 传入字符串导致的类型错误
+        scale = float(self.config.get("control_gain_scale", 1.0))
+        
+        # 3. 应用缩放因子（设为 0 即为无控）
+        self.k_matrix = raw_k * scale
+        
+        if scale == 0:
+            print("⚠️ 警告：检测到 control_gain_scale=0，系统将以无控（自然发散）模式运行。")

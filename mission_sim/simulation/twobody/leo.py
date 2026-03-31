@@ -8,8 +8,8 @@ import numpy as np
 from typing import Optional
 
 from mission_sim.simulation.twobody.base import TwoBodyBaseSimulation
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.trajectory.generators import KeplerianGenerator, J2KeplerianGenerator
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.spacetime.generators import KeplerianGenerator, J2KeplerianGenerator
 from mission_sim.core.physics.models.atmospheric_drag import AtmosphericDrag
 from mission_sim.utils.math_tools import elements_to_cartesian
 
@@ -153,7 +153,7 @@ class LEOL1Simulation(TwoBodyBaseSimulation):
 
     def _generate_fallback_orbit(self):
         print("   使用备用轨道生成方案（开普勒圆轨道，高度 500km）...")
-        from mission_sim.core.trajectory.generators import KeplerianGenerator
+        from mission_sim.core.spacetime.generators import KeplerianGenerator
         a = 6878137.0
         e = 0.0
         i = 0.0

@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
-from mission_sim.core.types import CoordinateFrame
-from mission_sim.core.gnc.ground_station import GroundStation
+from mission_sim.core.spacetime.ids import CoordinateFrame
+from mission_sim.core.cyber.platform_gnc.ground_station import GroundStation
 
 def test_ground_station_visibility():
     """测试可视弧段逻辑"""

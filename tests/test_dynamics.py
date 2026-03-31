@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from mission_sim.core.dynamics.threebody.base import CRTBP
+from mission_sim.core.cyber.models.threebody.base import CRTBP
 
 def test_crtbp_jacobi_constant_conservation(crtbp_params, halo_initial_state):
     """测试雅可比常数在半个周期内的守恒性"""

@@ -1,6 +1,6 @@
 # mission_sim/core/physics/spacecraft.py
 import numpy as np
-from mission_sim.core.types import CoordinateFrame
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 class SpacecraftPointMass:
     """
