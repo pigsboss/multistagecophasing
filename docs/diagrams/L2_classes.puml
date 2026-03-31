@@ -1,0 +1,154 @@
+@startuml
+!theme plain
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+
+title MCPC L2级核心契约与类图 (IDS & Core Interfaces) V2.0
+
+' ==========================================
+' 🌌 时空域法典 (Spacetime IDS)
+' ==========================================
+package "core.spacetime.ids (时空法典)" #FFF4E6 {
+  enum CoordinateFrame {
+    J2000_ECI
+    SUN_EARTH_ROTATING
+    LVLH
+    VVLH
+  }
+
+  class Telecommand <<dataclass>> {
+    + force_vector: ndarray (3x1)
+    + frame: CoordinateFrame
+    + duration_s: float
+    + actuator_id: str
+    note right: 控制律最终输出，严格受限于标架与持续时间
+  }
+
+  class FormationState <<dataclass>> {
+    + timestamp: float
+    + chief_position: ndarray
+    + chief_velocity: ndarray
+    + chief_frame: CoordinateFrame
+    + deputy_relative_positions: List[ndarray]
+    + deputy_relative_velocities: List[ndarray]
+    --
+    + get_num_deputies(): int
+    + add_deputy_state(pos, vel): void
+    + get_absolute_state(deputy_index: int): Tuple[ndarray, ndarray]
+    note bottom: L2级多体容器。包含便捷方法直接\n获取从星绝对状态供物理域积分使用。
+  }
+}
+
+' ==========================================
+' 🪐 物理域法典与组件 (Physics)
+' ==========================================
+package "core.physics (物理实体)" #E8F4F8 {
+  package "core.physics.ids" {
+    class ISLPhysicalMeasurement <<dataclass>> {
+      + range_m: float
+      + azimuth_rad: float
+      + elevation_rad: float
+      + signal_strength: float 
+      + phys_timestamp: float
+      note bottom: 纯物理测距，含光强衰减，无目标ID
+    }
+  }
+
+  package "core.physics.components" {
+    class ISLAntenna {
+      - noise_sigma_range: float
+      - noise_sigma_angle: float
+      - bias: ndarray
+      + generate_measurement(true_state_a, true_state_b): ISLPhysicalMeasurement
+    }
+
+    class ThrusterModel {
+      - min_impulse_bit: float
+      - deadband: float
+      - force_resolution: float
+      - accumulated_impulse: ndarray
+      + process_command(cmd: Telecommand, dt: float): ndarray
+      note bottom: 包含死区、推力量化阶梯与冲量平滑器
+    }
+  }
+}
+
+' ==========================================
+' 🧠 赛博域法典与组件 (Cyber)
+' ==========================================
+package "core.cyber (赛博认知)" #F0F8EA {
+  package "core.cyber.ids" {
+    class ISLNetworkFrame <<dataclass>> {
+      + payload: ISLPhysicalMeasurement
+      + source_id: str
+      + dest_id: str
+      + tx_time: float
+      + rx_time: float
+      --
+      + get_age(current_time: float): float
+      + is_stale(current_time: float, max_delay: float): bool
+      note right: 包含寻址、时间戳，提供帧龄与老化判定
+    }
+    
+    enum FormationMode {
+      GENERATION
+      KEEPING
+      RECONFIGURATION
+    }
+  }
+
+  package "core.cyber.networks" {
+    class ISLRouter {
+      - routing_queue: List[ISLNetworkFrame]
+      - max_allowed_delay: float
+      + package_measurement(meas: ISLPhysicalMeasurement, src, dest): ISLNetworkFrame
+      + pop_valid_frames(current_time): List[ISLNetworkFrame]
+    }
+  }
+
+  package "core.cyber.platform_gnc" {
+    class FormationController {
+      - state_machine_mode: FormationMode
+      - stm_model: RelativeDynamics
+      + compute_control(frames: List[ISLNetworkFrame]): Telecommand
+      note right: 三段式状态机，消费延迟网络帧输出推力
+    }
+    
+    abstract class RelativeDynamics {
+      + compute_discrete_stm(dt: float): ndarray
+      + predict_state(current_state, stm): ndarray
+    }
+    
+    class CWRelativeDynamics {
+      note bottom: 二体近地场景：\nClohessy-Wiltshire 方程
+    }
+    
+    class CRTBPRelativeDynamics {
+      note bottom: 三体深空场景：\n基于 CRTBP 的线性化 STM
+    }
+    
+    CWRelativeDynamics -up-|> RelativeDynamics
+    CRTBPRelativeDynamics -up-|> RelativeDynamics
+  }
+}
+
+' ==========================================
+' 关系连线 (契约流转)
+' ==========================================
+Telecommand -up-> CoordinateFrame : "定义标架"
+FormationState -up-> CoordinateFrame : "定义标架"
+
+ISLNetworkFrame *-- ISLPhysicalMeasurement : "网络封装物理载荷"
+FormationController *-left- FormationMode : "状态机枚举"
+
+ISLAntenna ..> ISLPhysicalMeasurement : <<creates>>
+ISLRouter ..> ISLNetworkFrame : <<creates>>
+FormationController ..> Telecommand : <<creates>>
+
+ISLRouter --> ISLPhysicalMeasurement : <<consumes>>
+FormationController --> ISLNetworkFrame : <<consumes>>
+ThrusterModel --> Telecommand : <<consumes>>
+
+FormationController *-- RelativeDynamics : "多态调用认知模型"
+
+@enduml

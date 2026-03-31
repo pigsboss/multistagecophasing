@@ -1,0 +1,60 @@
+@startuml
+skinparam conditionStyle inside
+skinparam ActivityDiamondBackgroundColor #FFF2CC
+skinparam ActivityDiamondBorderColor #D6B656
+
+|Simulation (编排域)|
+start
+:Tick N 开始 (t_current);
+
+|Physics (物理域)|
+:1. [环境积分] 并行计算所有卫星的绝对真值;
+:2. [物理测量] 遍历所有 ISL_Antenna;
+note right
+  根据两星真实距离叠加噪声。
+  测量是**广播的客观存在**，不包含目标ID。
+  产出 **ISLPhysicalMeasurement**
+end note
+
+|Cyber (赛博域)|
+:3. [网络路由] ISL_Router 接收物理测量;
+note right
+  贴上发送方/接收方 ID，模拟排队。
+  产出 **ISLNetworkFrame**
+end note
+
+if (帧数据老化超过最大允许延迟?) then (Yes, 模拟丢包)
+  :丢弃过时帧，记录丢包统计;
+else (No, 正常入栈)
+  :压入各从星的 GNC 接收队列;
+endif
+
+:4. [GNC 解算] 遍历所有从星大脑;
+if (接收队列中是否有当前可用数据?) then (Yes)
+  :调用 STM 预测相对状态;
+  :计算控制律 (LQR/MPC);
+  :生成推力指令 **Telecommand**;
+else (No, 数据延迟或丢包)
+  :依赖上一时刻 STM 惯性外推;
+  :输出 0 推力指令 (交由物理层平滑器处理累积);
+endif
+
+|Physics (物理域)|
+:5. [执行器响应] Thruster 接收 Telecommand;
+if (指令幅值 < 死区 Deadband ?) then (Yes, 过滤微小噪声)
+  :忽略该指令，物理输出 0 力;
+else (No, 进入冲量累加)
+  :累加本次期望冲量 (F * dt);
+  if (累积冲量 >= 最小脉宽 MIB ?) then (Yes, 触发喷气)
+    :计算等效平均推力;
+    :清空累加器;
+    :物理输出平均推力;
+  else (No, 冲量暂存)
+    :物理输出 0 力，冲量暂存至下一 Tick;
+  endif
+endif
+
+|Simulation (编排域)|
+:6. [时钟步进] t_next = t_current + dt;
+stop
+@enduml

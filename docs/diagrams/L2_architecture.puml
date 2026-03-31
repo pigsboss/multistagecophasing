@@ -1,0 +1,69 @@
+@startuml
+!theme plain
+skinparam componentStyle uml2
+skinparam packageStyle rectangle
+
+title MCPC L2级多星编队架构组件图 (3+2 域)
+
+package "Simulation Domain (编排域/主循环) [后台]" #F9F9F9 {
+  [TimeTick Engine\n(时钟与调度驱动)] as Tick
+}
+
+package "Physics Domain (物理域) [前台]" #E8F4F8 {
+  [Environment\n(多体并行引力/光压场)] as Env
+  [Spacecraft\n(主/从星宏观载体)] as SC
+  
+  package "Hardware Components (纯物理硬件层)" {
+    [Thruster\n(含死区/MIB/冲量平滑器)] as Thruster
+    note bottom of Thruster : 解决跨尺度时钟冲突\n(定律3: 冲量等效原则)
+    
+    [ISL Antenna\n(含高斯噪声/光强衰减)] as Antenna
+  }
+}
+
+package "Cyber Domain (赛博域) [前台]" #F0F8EA {
+  [ISL Router\n(含路由ID/排队延迟/数据老化标志)] as Router
+  note left of Router : 严守物理与赛博边界\n(定律1: 绝对屏障)
+  
+  package "Platform GNC (星载控制大脑)" {
+    [Formation Controller\n(三段式状态机 + LQR/MPC)] as Controller
+    [Relative Dynamics\n(CW/STM 预测)] as STM
+  }
+}
+
+package "Spacetime Domain (时空域法典) [前台]" #FFF4E6 {
+  [ids.py\n(全局数据契约)] as IDS
+  note right of IDS : 包含:\n- CoordinateFrame (LVLH)\n- FormationState (多体容器)\n- Telecommand (受控推力)
+}
+
+package "Analysis Domain (分析域) [后台]" #F4ECF7 {
+  [Baseline Analyzer\n(稳态 RMSE & 冷却时间)] as AnalyzerOPD
+  [Fuel Evaluator\n(联合 Delta-V 账单)] as AnalyzerFuel
+}
+
+' ==========================================
+' 核心数据流转 (严格遵循定律2：Tick 内时序)
+' ==========================================
+Tick -down-> Env : "1. 驱动真值积分"
+Env -down-> SC : "2. 输出绝对加速度"
+SC -down-> Antenna : "3. 暴露绝对真值坐标"
+
+Antenna -right-> Router : "4. ISLPhysicalMeasurement\n(纯客观, 无目标ID)"
+Router -down-> Controller : "5. ISLNetworkFrame\n(带延迟与寻址ID)"
+
+Controller <.right.> STM : "6. 调用相对轨迹预测"
+Controller -left-> Thruster : "7. Telecommand\n(LVLH 系下的控制指令)"
+Thruster -up-> SC : "8. 输出阶梯化/平滑化物理冲量"
+
+' ==========================================
+' 契约依赖与后台落盘
+' ==========================================
+Antenna ...> IDS : <<use>>
+Router ...> IDS : <<use>>
+Controller ...> IDS : <<use>>
+
+SC -[hidden]right-> AnalyzerOPD
+Controller -right-> AnalyzerOPD : "HDF5 离线日志分析"
+Controller -right-> AnalyzerFuel : "HDF5 离线日志分析"
+
+@enduml
