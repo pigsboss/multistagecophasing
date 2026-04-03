@@ -31,12 +31,16 @@ chief0 = np.array([
 # 3. 定义从星目标构型 (LVLH 坐标, m)
 rel_targets = {
     "DEP1": np.array([0.0, 100.0, 0.0, 0.0, 0.0, 0.0]),
-    "DEP2": np.array([-50.0, 0.0, 50.0, 0.0, 0.0, 0.0]),
+    "DEP2": np.array([0.0, -100.0, 0.0, 0.0, 0.0, 0.0]),
 }
 
 # 4. 计算从星初始绝对状态
+rel_initial = {
+    "DEP1": np.array([0.0, 1000.0, 0.0, 0.0, 0.0, 0.0]),
+    "DEP2": np.array([0.0, -2000.0, 0.0, 0.0, 0.0, 0.0]),
+}
 deputy_initial_configs = []
-for dep_id, rel_state in rel_targets.items():
+for dep_id, rel_state in rel_initial.items():
     # 修正后的调用
     r_abs, v_abs = lvlh_to_absolute(chief0[:3], chief0[3:], rel_state[:3], rel_state[3:])
     deputy_initial_configs.append((dep_id, np.concatenate([r_abs, v_abs])))
@@ -54,7 +58,7 @@ K = get_lqr_gain(A_cont, B, Q, R)
 # 6. 构建仿真配置
 config = {
     "mission_name": "Halo_Formation_CRTBP",
-    "simulation_days": 1,
+    "simulation_days": 0.5,
     "time_step": 10.0,
     "data_dir": "data",
     "verbose": True,
@@ -64,8 +68,35 @@ config = {
     "mu": mu,
     "L": L,
     "omega": omega,
-    "lqr_gain": K,
-    "thruster_max_thrust_n": 5.0,
+
+    "chief_mass_kg": 2000.0,
+    "deputy_mass_kg": 500.0,
+
+    # ========== ISL 天线参数 ==========
+    "isl_range_noise_std": 0.01,          # 10 cm 测距噪声
+    "isl_angle_noise_std": 1e-4,         # 约 20 角秒
+    "isl_max_range_m": 500000.0,         # 500 km 最大测距
+    "isl_ref_range_m": 1000.0,
+
+    # ========== 推力器参数 ==========
+    "thruster_max_thrust_n": 0.5,
+    "thruster_min_thrust_n": 0.001,      # 1 mN 死区
+    "thruster_noise_std_n": 0.01,
+    "thruster_isp_s": 3000.0,
+
+    # ========== 网络路由器参数 ==========
+    "router_base_latency_s": 0.1,
+    "router_jitter_s": 0.02,
+    "router_packet_loss_rate": 0.05,
+    "router_seed": 123,
+
+    # ========== 控制器参数 ==========
+    "lqr_gain": K,                    # 自动计算（CW 模型）
+    "control_gain_scale": 1.0,           # 增益缩放（可选）
+    "generation_threshold_pos": 10.0,
+    "generation_threshold_vel": 0.5,
+    "keeping_threshold_pos": 0.01,
+    "keeping_threshold_vel": 1e-4,
 }
 
 if __name__ == "__main__":

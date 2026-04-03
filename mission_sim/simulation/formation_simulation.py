@@ -120,10 +120,11 @@ class FormationSimulation(BaseSimulation):
         pass
 
     def _initialize_data_logging(self):
-        """初始化日志：先调用基类创建标准数据集，再创建编队数据集"""
+        """初始化日志：先调用基类创建标准数据集，再创建编队数据集，并保存每个从星的期望相对状态"""
         super()._initialize_data_logging()
         
         with h5py.File(self.h5_file, 'a') as f:
+            # 创建编队数据集组
             formation_grp = f.require_group("formation")
             for dep in self.deputies:
                 dep_grp = formation_grp.require_group(f"deputy_{dep.id}")
@@ -136,6 +137,18 @@ class FormationSimulation(BaseSimulation):
                         dep_grp.create_dataset(dset, shape=(0,), maxshape=(None,), dtype=np.int8, chunks=True, compression="gzip")
                     else:
                         dep_grp.create_dataset(dset, shape=(0,3), maxshape=(None,3), dtype=np.float64, chunks=True, compression="gzip")
+            
+            # 保存每个从星的期望相对状态（如果配置中存在）
+            formation_targets = self.config.get("formation_targets", {})
+            if formation_targets:
+                targets_grp = f.require_group("metadata/targets")
+                for dep_id, target_state in formation_targets.items():
+                    # target_state 应为长度为6的数组 [x, y, z, vx, vy, vz]
+                    target_array = np.array(target_state, dtype=np.float64)
+                    dset_name = f"deputy_{dep_id}"
+                    if dset_name in targets_grp:
+                        del targets_grp[dset_name]  # 覆盖已存在的
+                    targets_grp.create_dataset(dset_name, data=target_array)
 
     def _execute_simulation_loop(self):
         """核心仿真主循环"""
@@ -221,7 +234,7 @@ class FormationSimulation(BaseSimulation):
     def _report_progress_custom(self, epoch, step, total_steps):
         progress = (step / total_steps) * 100
         max_dist = max([np.linalg.norm(d.state[:3] - self.chief.state[:3]) for d in self.deputies])
-        print(f"  [Day {epoch/86400:.1f}] 进度: {progress:4.1f}% | 最大相对距离: {max_dist:10.1f}m")
+        print(f"  [Day {epoch/86400:.1f}] 进度: {progress:4.1f}% | 最大相对距离: {max_dist:10.3f}m")
 
     def _print_summary(self):
         """编队任务汇总打印"""

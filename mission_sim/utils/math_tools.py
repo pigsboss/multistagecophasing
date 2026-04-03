@@ -6,6 +6,11 @@ Provides high-precision coordinate frame transformations, matrix operations,
 and quaternion processing across domains.
 Specifically targets L2 multi-satellite formations, providing rigorous 
 bidirectional transformations between the absolute frame and the relative (LVLH) frame.
+
+LVLH Frame Definition (Unified):
+    - X axis (Radial): along the chief position vector (from central body to chief)
+    - Y axis (Along-track): along the chief velocity direction (completes right-handed system)
+    - Z axis (Cross-track): along the chief angular momentum vector (r × v)
 """
 import numpy as np
 import scipy.linalg
@@ -51,57 +56,6 @@ def get_lqr_gain(A: np.ndarray, B: np.ndarray, Q: np.ndarray, R: np.ndarray) -> 
     # K = R^-1 B^T P
     K = np.linalg.inv(R) @ B.T @ P
     return K
-
-
-def absolute_to_lvlh(state_chief: np.ndarray, state_deputy: np.ndarray) -> np.ndarray:
-    """
-    Transform the absolute state of a deputy spacecraft to the LVLH (Local Vertical, Local Horizontal)
-    frame centered on the chief spacecraft.
-
-    LVLH frame definition (Radial-In-Track-Cross-Track):
-        - X axis (Radial): along the chief position vector (from central body to chief)
-        - Z axis (Cross-track): along the chief angular momentum vector (r x v)
-        - Y axis (Along-track): completes the right-handed system (Z x X)
-
-    Args:
-        state_chief: Chief absolute state [x, y, z, vx, vy, vz] (inertial frame)
-        state_deputy: Deputy absolute state [x, y, z, vx, vy, vz] (same inertial frame)
-
-    Returns:
-        Relative state in LVLH frame [x_rel, y_rel, z_rel, vx_rel, vy_rel, vz_rel] (m, m/s)
-    """
-    r_c = state_chief[0:3]
-    v_c = state_chief[3:6]
-    r_d = state_deputy[0:3]
-    v_d = state_deputy[3:6]
-
-    # --- 1. Compute LVLH basis vectors ---
-    norm_r = np.linalg.norm(r_c)
-    i_hat = r_c / norm_r
-
-    h_vec = np.cross(r_c, v_c)
-    norm_h = np.linalg.norm(h_vec)
-    k_hat = h_vec / norm_h
-
-    j_hat = np.cross(k_hat, i_hat)
-
-    # Rotation matrix from inertial to LVLH
-    C_I2L = np.vstack([i_hat, j_hat, k_hat])
-
-    # --- 2. Relative position mapping ---
-    delta_r_I = r_d - r_c
-    rel_pos = C_I2L @ delta_r_I
-
-    # --- 3. Relative velocity mapping (remove Coriolis term due to rotating frame) ---
-    # Chief orbital angular velocity magnitude omega = |h| / |r|^2
-    omega_mag = norm_h / (norm_r ** 2)
-    omega_vec_L = np.array([0.0, 0.0, omega_mag])
-
-    delta_v_I = v_d - v_c
-    # Relative velocity = transformed absolute relative velocity - omega x r_rel
-    rel_vel = C_I2L @ delta_v_I - np.cross(omega_vec_L, rel_pos)
-
-    return np.concatenate([rel_pos, rel_vel])
 
 
 def elements_to_cartesian(
@@ -192,16 +146,6 @@ def inertial_to_rotating(
     Convert a state vector from the inertial frame (J2000_SSB or similar)
     to the rotating frame that rotates about the Z-axis with constant angular velocity omega.
 
-    The transformation is a simple rotation about the Z-axis:
-        x_rot = x_inertial * cos(omega*t) + y_inertial * sin(omega*t)
-        y_rot = -x_inertial * sin(omega*t) + y_inertial * cos(omega*t)
-        z_rot = z_inertial
-
-    Velocities transform accordingly:
-        vx_rot = vx_inertial * cos(omega*t) + vy_inertial * sin(omega*t) + omega * y_rot
-        vy_rot = -vx_inertial * sin(omega*t) + vy_inertial * cos(omega*t) - omega * x_rot
-        vz_rot = vz_inertial
-
     Args:
         state_inertial: State vector in inertial frame [x, y, z, vx, vy, vz] (m, m/s)
         t: Time (s)
@@ -215,12 +159,10 @@ def inertial_to_rotating(
     cos_theta = np.cos(omega * t)
     sin_theta = np.sin(omega * t)
 
-    # Position transformation
     x_rot = x * cos_theta + y * sin_theta
     y_rot = -x * sin_theta + y * cos_theta
     z_rot = z
 
-    # Velocity transformation (includes coriolis term)
     vx_rot = vx * cos_theta + vy * sin_theta + omega * y_rot
     vy_rot = -vx * sin_theta + vy * cos_theta - omega * x_rot
     vz_rot = vz
@@ -234,10 +176,7 @@ def rotating_to_inertial(
     omega: float
 ) -> np.ndarray:
     """
-    Convert a state vector from the rotating frame (which rotates about Z-axis with constant omega)
-    back to the inertial frame.
-
-    The inverse transformation of inertial_to_rotating.
+    Convert a state vector from the rotating frame back to the inertial frame.
 
     Args:
         state_rotating: State vector in rotating frame [x, y, z, vx, vy, vz] (m, m/s)
@@ -252,37 +191,16 @@ def rotating_to_inertial(
     cos_theta = np.cos(omega * t)
     sin_theta = np.sin(omega * t)
 
-    # Position transformation (inverse rotation)
     x = x_rot * cos_theta - y_rot * sin_theta
     y = x_rot * sin_theta + y_rot * cos_theta
     z = z_rot
 
-    # Velocity transformation (inverse of the rotating frame transformation)
-    # Derivation: from rotating to inertial, we need to add back the coriolis term.
-    # The known relation: v_inertial = v_rot + ω × r
-    # Here ω = [0,0,omega], r = [x_rot, y_rot, z_rot] in rotating coordinates.
-    # But careful: the velocity transformation can be derived directly from the forward formulas.
-    # Alternatively, we can use:
-    vx = vx_rot * cos_theta - vy_rot * sin_theta - omega * (x_rot * sin_theta + y_rot * cos_theta)
-    vy = vx_rot * sin_theta + vy_rot * cos_theta + omega * (x_rot * cos_theta - y_rot * sin_theta)
-    vz = vz_rot
-
-    # Simplified:
-    # vx = vx_rot * cos_theta - vy_rot * sin_theta - omega * y
-    # vy = vx_rot * sin_theta + vy_rot * cos_theta + omega * x
-    # where x,y are the inertial positions computed above.
-    # Let's compute using the derived positions for clarity.
-    # Using the computed x,y:
-    # vx = vx_rot * cos_theta - vy_rot * sin_theta - omega * y
-    # vy = vx_rot * sin_theta + vy_rot * cos_theta + omega * x
-    # This matches the formula above.
-
-    # We'll use the simpler expressions:
     vx = vx_rot * cos_theta - vy_rot * sin_theta - omega * y
     vy = vx_rot * sin_theta + vy_rot * cos_theta + omega * x
     vz = vz_rot
 
     return np.array([x, y, z, vx, vy, vz], dtype=np.float64)
+
 
 # =====================================================================
 # L2 Level Core: High-precision Bidirectional Transformations 
@@ -292,13 +210,8 @@ def rotating_to_inertial(
 def compute_lvlh_dcm(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray) -> np.ndarray:
     """
     Compute the Direction Cosine Matrix (DCM) from the Absolute frame 
-    to the Local Vertical Local Horizontal (LVLH) frame.
-    
-    LVLH Frame Definition (Standard Formation Control Convention):
-    - Z-axis (r_hat): Radial direction, pointing away from the central body.
-    - Y-axis (h_hat): Cross-track direction, parallel to the orbital angular momentum.
-    - X-axis (theta_hat): Along-track direction, completing the right-handed system (Y x Z).
-    
+    to the LVLH frame (X: radial, Y: along-track, Z: cross-track).
+
     Args:
         r_chief_abs: Chief's position vector in the absolute frame (3x1).
         v_chief_abs: Chief's velocity vector in the absolute frame (3x1).
@@ -306,25 +219,25 @@ def compute_lvlh_dcm(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray) -> np.nda
     Returns:
         dcm_abs_to_lvlh: 3x3 rotation matrix.
     """
-    # Force float64 to suppress truncation errors in deep space scales
     r = np.array(r_chief_abs, dtype=np.float64)
     v = np.array(v_chief_abs, dtype=np.float64)
     
-    # 1. Z-axis: Radial
-    r_hat = normalize_vector(r)
+    # Radial (X axis)
+    x_hat = normalize_vector(r)
     
-    # 2. Y-axis: Cross-track / Normal (r x v)
+    # Angular momentum vector
     h = np.cross(r, v)
-    h_hat = normalize_vector(h)
+    # Cross-track (Z axis)
+    z_hat = normalize_vector(h)
     
-    # 3. X-axis: Along-track / Transverse (Right-hand rule: Y x Z)
-    theta_hat = np.cross(h_hat, r_hat)
+    # Along-track (Y axis) completes right-handed system: Y = Z × X
+    y_hat = np.cross(z_hat, x_hat)
     
-    # The row vectors of the DCM are the basis vectors of the LVLH frame 
-    # expressed in the absolute frame.
-    dcm_abs_to_lvlh = np.vstack((theta_hat, h_hat, r_hat))
+    # DCM rows are the basis vectors in the absolute frame
+    dcm_abs_to_lvlh = np.vstack((x_hat, y_hat, z_hat))
     
     return dcm_abs_to_lvlh
+
 
 def absolute_to_lvlh(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray, 
                      r_deputy_abs: np.ndarray, v_deputy_abs: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
@@ -332,43 +245,59 @@ def absolute_to_lvlh(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray,
     Transform the absolute state of a deputy spacecraft into the relative state 
     within the Chief's LVLH coordinate frame.
     
-    [Critical] Strictly handles the relative velocity correction caused by the 
-    angular velocity of the rotating LVLH frame (Coriolis effect).
+    LVLH definition: X = radial (from central body to chief), 
+                     Y = along-track (velocity direction),
+                     Z = cross-track (angular momentum direction).
+    
+    Args:
+        r_chief_abs: Chief absolute position (3,)
+        v_chief_abs: Chief absolute velocity (3,)
+        r_deputy_abs: Deputy absolute position (3,)
+        v_deputy_abs: Deputy absolute velocity (3,)
     
     Returns:
-        rho_lvlh: Deputy's relative position vector in LVLH (3x1).
-        rho_dot_lvlh: Deputy's relative velocity vector in LVLH (3x1).
+        rho_lvlh: Relative position in LVLH (3,)
+        rho_dot_lvlh: Relative velocity in LVLH (3,)
     """
     r_c = np.array(r_chief_abs, dtype=np.float64)
     v_c = np.array(v_chief_abs, dtype=np.float64)
     r_d = np.array(r_deputy_abs, dtype=np.float64)
     v_d = np.array(v_deputy_abs, dtype=np.float64)
     
-    # 1. Relative displacement and velocity in the absolute frame
+    # Relative vectors in absolute frame
     delta_r_abs = r_d - r_c
     delta_v_abs = v_d - v_c
     
-    # 2. Transform position
+    # Compute DCM
     dcm = compute_lvlh_dcm(r_c, v_c)
     rho_lvlh = dcm @ delta_r_abs
     
-    # 3. Calculate the angular velocity of the LVLH frame (omega = h / r^2)
+    # Angular velocity of LVLH frame
     h = np.cross(r_c, v_c)
     r_norm_sq = np.dot(r_c, r_c)
-    omega_lvlh_abs = (h / r_norm_sq) if r_norm_sq >= 1e-12 else np.zeros(3)
-        
-    # 4. Transform velocity (Subtracting the transport velocity component)
-    # v_rel_lvlh_in_abs = delta_v_abs - (omega x delta_r_abs)
-    v_rel_lvlh_in_abs = delta_v_abs - np.cross(omega_lvlh_abs, delta_r_abs)
-    rho_dot_lvlh = dcm @ v_rel_lvlh_in_abs
+    omega = h / r_norm_sq if r_norm_sq > 1e-12 else np.zeros(3)
+    
+    # Relative velocity in LVLH (subtract transport term)
+    v_rel_abs = delta_v_abs - np.cross(omega, delta_r_abs)
+    rho_dot_lvlh = dcm @ v_rel_abs
     
     return rho_lvlh, rho_dot_lvlh
+
 
 def lvlh_to_absolute(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray, 
                      rho_lvlh: np.ndarray, rho_dot_lvlh: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
     """
-    (Inverse Transformation) Restore the relative state in the LVLH frame 
-    back to the absolute true state in the physical domain.
+    Inverse transformation: convert LVLH relative state back to absolute deputy state.
+
+    Args:
+        r_chief_abs: Chief absolute position (3,)
+        v_chief_abs: Chief absolute velocity (3,)
+        rho_lvlh: Relative position in LVLH (3,)
+        rho_dot_lvlh: Relative velocity in LVLH (3,)
+    
+    Returns:
+        r_deputy_abs: Deputy absolute position (3,)
+        v_deputy_abs: Deputy absolute velocity (3,)
     """
     r_c = np.array(r_chief_abs, dtype=np.float64)
     v_c = np.array(v_chief_abs, dtype=np.float64)
@@ -376,21 +305,18 @@ def lvlh_to_absolute(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray,
     rho_dot = np.array(rho_dot_lvlh, dtype=np.float64)
     
     dcm = compute_lvlh_dcm(r_c, v_c)
-    dcm_inv = dcm.T  # The inverse of an orthogonal matrix is its transpose
+    dcm_inv = dcm.T  # Orthogonal matrix inverse = transpose
     
-    # 1. Restore absolute position
     delta_r_abs = dcm_inv @ rho
     r_deputy_abs = r_c + delta_r_abs
     
-    # 2. Calculate frame angular velocity
+    # Angular velocity
     h = np.cross(r_c, v_c)
     r_norm_sq = np.dot(r_c, r_c)
-    omega_lvlh_abs = (h / r_norm_sq) if r_norm_sq >= 1e-12 else np.zeros(3)
+    omega = h / r_norm_sq if r_norm_sq > 1e-12 else np.zeros(3)
     
-    # 3. Restore absolute velocity (Adding back the transport velocity)
-    v_rel_lvlh_in_abs = dcm_inv @ rho_dot
-    delta_v_abs = v_rel_lvlh_in_abs + np.cross(omega_lvlh_abs, delta_r_abs)
-    
+    v_rel_abs = dcm_inv @ rho_dot
+    delta_v_abs = v_rel_abs + np.cross(omega, delta_r_abs)
     v_deputy_abs = v_c + delta_v_abs
     
     return r_deputy_abs, v_deputy_abs

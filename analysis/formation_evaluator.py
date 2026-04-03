@@ -22,199 +22,128 @@ import matplotlib.pyplot as plt
 import h5py
 import pandas as pd
 from typing import Dict, List, Tuple, Optional
-from datetime import datetime
 
 
 class FormationEvaluator:
-    """
-    Evaluate formation simulation results from HDF5 file.
-    """
-
     def __init__(self, filepath: str, output_dir: str = "analysis_results"):
-        """
-        Initialize evaluator.
-
-        Args:
-            filepath: Path to HDF5 simulation output
-            output_dir: Directory for output files
-        """
         self.filepath = filepath
         self.output_dir = output_dir
         os.makedirs(output_dir, exist_ok=True)
 
-        # Load data
         with h5py.File(filepath, 'r') as f:
-            # Standard datasets (chief)
-            self.times = f['epochs'][()]
+            self.times = f['epochs'][()] if 'epochs' in f else np.array([])
             self.chief_dv = f['accumulated_dvs'][()] if 'accumulated_dvs' in f else None
-            # Formation datasets
             self.deputy_data = {}
+            self.deputy_targets = {}
             if 'formation' in f:
                 formation_grp = f['formation']
                 for dep_name in formation_grp.keys():
                     if dep_name.startswith('deputy_'):
                         dep_grp = formation_grp[dep_name]
-                        self.deputy_data[dep_name] = {
+                        dep_id = dep_name[7:]  # remove "deputy_"
+                        self.deputy_data[dep_id] = {
                             'time': dep_grp['time'][()],
                             'rel_pos': dep_grp['rel_position'][()],
                             'rel_vel': dep_grp['rel_velocity'][()],
                             'control_force': dep_grp['control_force'][()],
                             'mode': dep_grp['mode'][()],
                         }
-            else:
-                print("Warning: No formation data found in HDF5 file.")
-
-        # Get simulation duration
+            if 'metadata/targets' in f:
+                targets_grp = f['metadata/targets']
+                for key in targets_grp.keys():
+                    if key.startswith('deputy_'):
+                        dep_id = key[7:]
+                        self.deputy_targets[dep_id] = targets_grp[key][()]
         self.sim_duration_days = (self.times[-1] - self.times[0]) / 86400.0 if len(self.times) > 0 else 0
+        self.position_threshold_m = 1.0
+        self.velocity_threshold_mms = 10.0
+        self.stable_window_samples = 3
 
-        # Parameters for evaluation (configurable)
-        self.position_threshold_m = 1.0      # meters (observing requirement)
-        self.velocity_threshold_mms = 10.0   # mm/s
-        self.stable_window_samples = 3       # consecutive samples required
+    def _get_target(self, dep_id: str) -> np.ndarray:
+        """Return target relative state (6,) for given deputy, zeros if not found."""
+        return self.deputy_targets.get(dep_id, np.zeros(6))
 
     def compute_cooling_time(self, rel_pos: np.ndarray, times: np.ndarray,
-                             mode_series: np.ndarray, target_mode: int = 2) -> Tuple[float, float]:
-        """
-        Compute cooling time after reconfiguration mode ends.
-
-        Cooling time is defined as the duration from the last sample with mode == target_mode
-        to the first sample where relative position error stays below threshold for
-        stable_window_samples consecutive samples.
-
-        Args:
-            rel_pos: (N,3) relative position array
-            times: (N,) time array
-            mode_series: (N,) mode codes (0=GENERATION,1=KEEPING,2=RECONFIGURATION)
-            target_mode: Mode that triggers reconfiguration (default 2)
-
-        Returns:
-            (cooling_time_seconds, reconfig_end_time) or (nan, nan) if not found
-        """
-        # Find indices where mode == target_mode
+                             mode_series: np.ndarray, target_pos: np.ndarray,
+                             target_mode: int = 2) -> Tuple[float, float]:
+        error_pos = rel_pos - target_pos
+        pos_error_norm = np.linalg.norm(error_pos, axis=1)
         reconfig_indices = np.where(mode_series == target_mode)[0]
         if len(reconfig_indices) == 0:
             return np.nan, np.nan
-
-        # Last sample of reconfiguration
         last_reconfig_idx = reconfig_indices[-1]
         reconfig_end_time = times[last_reconfig_idx]
-
-        # After reconfiguration, look for stable region
-        pos_norm = np.linalg.norm(rel_pos, axis=1)
-        for i in range(last_reconfig_idx + 1, len(pos_norm) - self.stable_window_samples + 1):
-            window = pos_norm[i:i + self.stable_window_samples]
+        for i in range(last_reconfig_idx + 1, len(pos_error_norm) - self.stable_window_samples + 1):
+            window = pos_error_norm[i:i + self.stable_window_samples]
             if np.all(window < self.position_threshold_m):
                 stable_start_time = times[i]
                 cooling_time = stable_start_time - reconfig_end_time
                 return cooling_time, reconfig_end_time
-
         return np.nan, reconfig_end_time
 
     def compute_duty_cycle(self, rel_pos: np.ndarray, times: np.ndarray,
-                           mode_series: np.ndarray,
+                           mode_series: np.ndarray, target_pos: np.ndarray,
                            exclude_modes: List[int] = [2]) -> float:
-        """
-        Compute observation duty cycle: fraction of time when error is below threshold
-        and not in excluded modes (e.g., reconfiguration).
-
-        Args:
-            rel_pos: (N,3) relative position array
-            times: (N,) time array
-            mode_series: (N,) mode codes
-            exclude_modes: Modes to exclude from duty cycle (reconfiguration)
-
-        Returns:
-            Duty cycle (0 to 1)
-        """
-        pos_norm = np.linalg.norm(rel_pos, axis=1)
-        stable = (pos_norm < self.position_threshold_m) & (~np.isin(mode_series, exclude_modes))
-
+        error_pos = rel_pos - target_pos
+        pos_error_norm = np.linalg.norm(error_pos, axis=1)
+        stable = (pos_error_norm < self.position_threshold_m) & (~np.isin(mode_series, exclude_modes))
         if len(times) < 2:
             return np.nan
-
-        # Compute total stable time using trapezoidal integration
         dt = np.diff(times)
         stable_time = np.sum(dt * (stable[:-1].astype(float) + stable[1:].astype(float)) / 2.0)
         total_time = times[-1] - times[0]
         return stable_time / total_time if total_time > 0 else np.nan
 
     def compute_rmse(self, rel_pos: np.ndarray, rel_vel: np.ndarray,
-                     mode_series: np.ndarray, exclude_modes: List[int] = [2]) -> Tuple[float, float]:
-        """
-        Compute steady-state RMSE for position and velocity, excluding reconfiguration periods.
-
-        Args:
-            rel_pos: (N,3) relative position array
-            rel_vel: (N,3) relative velocity array
-            mode_series: (N,) mode codes
-            exclude_modes: Modes to exclude (reconfiguration)
-
-        Returns:
-            (rmse_pos_m, rmse_vel_mms)
-        """
-        # Select samples not in exclude modes
+                     mode_series: np.ndarray, target_pos: np.ndarray, target_vel: np.ndarray,
+                     exclude_modes: List[int] = [2]) -> Tuple[float, float]:
+        error_pos = rel_pos - target_pos
+        error_vel = rel_vel - target_vel
         mask = ~np.isin(mode_series, exclude_modes)
         if not np.any(mask):
             return np.nan, np.nan
-
-        pos_norm = np.linalg.norm(rel_pos[mask], axis=1)
-        vel_norm = np.linalg.norm(rel_vel[mask], axis=1) * 1000  # mm/s
+        pos_norm = np.linalg.norm(error_pos[mask], axis=1)
+        vel_norm = np.linalg.norm(error_vel[mask], axis=1) * 1000
         rmse_pos = np.sqrt(np.mean(pos_norm**2))
         rmse_vel = np.sqrt(np.mean(vel_norm**2))
         return rmse_pos, rmse_vel
 
     def compute_delta_v(self) -> Dict[str, float]:
-        """
-        Compute Delta-V for chief and deputies.
-
-        Chief ΔV from standard 'accumulated_dvs' dataset.
-        Deputy ΔV approximated by integrating |control_force|/mass dt,
-        where mass is assumed constant (or can be estimated from thruster model).
-
-        Returns:
-            Dictionary with keys: 'chief_dv_mps', 'deputy_dv_mps_{id}'
-        """
         dv_dict = {}
         if self.chief_dv is not None and len(self.chief_dv) > 0:
             dv_dict['chief_dv_mps'] = float(self.chief_dv[-1])
         else:
             dv_dict['chief_dv_mps'] = np.nan
-
-        # For deputies, approximate ΔV from control force
-        for dep_name, data in self.deputy_data.items():
+        for dep_id, data in self.deputy_data.items():
             times = data['time']
             control_force = data['control_force']
             if len(times) < 2:
-                dv_dict[f'{dep_name}_dv_mps'] = np.nan
+                dv_dict[f'{dep_id}_dv_mps'] = np.nan
                 continue
-
-            # Assume constant mass (use initial mass from simulation, default 500 kg)
-            # For better accuracy, we would need mass dataset. Use 500 kg as approximation.
-            mass = 500.0  # typical deputy mass; could be read from config
+            mass = 500.0
             dt = np.diff(times)
             force_mag = np.linalg.norm(control_force[:-1], axis=1)
             dv = np.sum(force_mag / mass * dt)
-            dv_dict[f'{dep_name}_dv_mps'] = dv
-
+            dv_dict[f'{dep_id}_dv_mps'] = dv
         return dv_dict
 
     def generate_csv_report(self) -> str:
-        """Generate CSV report with all metrics."""
         rows = []
-        for dep_name, data in self.deputy_data.items():
-            # Compute metrics for this deputy
+        for dep_id, data in self.deputy_data.items():
+            target = self._get_target(dep_id)
+            target_pos = target[:3]
+            target_vel = target[3:]
             cooling_time, reconf_end = self.compute_cooling_time(
-                data['rel_pos'], data['time'], data['mode'], target_mode=2
+                data['rel_pos'], data['time'], data['mode'], target_pos, target_mode=2
             )
             duty_cycle = self.compute_duty_cycle(
-                data['rel_pos'], data['time'], data['mode'], exclude_modes=[2]
+                data['rel_pos'], data['time'], data['mode'], target_pos, exclude_modes=[2]
             )
             rmse_pos, rmse_vel = self.compute_rmse(
-                data['rel_pos'], data['rel_vel'], data['mode'], exclude_modes=[2]
+                data['rel_pos'], data['rel_vel'], data['mode'], target_pos, target_vel, exclude_modes=[2]
             )
-
             rows.append({
-                'deputy_id': dep_name,
+                'deputy_id': dep_id,
                 'simulation_duration_days': self.sim_duration_days,
                 'cooling_time_s': cooling_time,
                 'reconfiguration_end_time_s': reconf_end,
@@ -222,8 +151,6 @@ class FormationEvaluator:
                 'rmse_position_m': rmse_pos,
                 'rmse_velocity_mms': rmse_vel,
             })
-
-        # Add chief row
         dv_dict = self.compute_delta_v()
         rows.append({
             'deputy_id': 'CHIEF',
@@ -234,7 +161,6 @@ class FormationEvaluator:
             'rmse_position_m': np.nan,
             'rmse_velocity_mms': np.nan,
         })
-
         df = pd.DataFrame(rows)
         csv_path = os.path.join(self.output_dir, 'formation_evaluation.csv')
         df.to_csv(csv_path, index=False)
@@ -242,67 +168,62 @@ class FormationEvaluator:
         return csv_path
 
     def generate_plots(self):
-        """Generate diagnostic plots for each deputy."""
-        for dep_name, data in self.deputy_data.items():
+        for dep_id, data in self.deputy_data.items():
+            target = self._get_target(dep_id)
+            target_pos = target[:3]
+            target_vel = target[3:]
             fig, axes = plt.subplots(3, 1, figsize=(10, 12), sharex=True)
-            fig.suptitle(f"Formation Evaluation: {dep_name}", fontsize=14, fontweight='bold')
-
+            fig.suptitle(f"Formation Evaluation: {dep_id}", fontsize=14, fontweight='bold')
             times_days = data['time'] / 86400.0
-            pos_norm = np.linalg.norm(data['rel_pos'], axis=1)
-            vel_norm = np.linalg.norm(data['rel_vel'], axis=1) * 1000  # mm/s
+            error_pos = data['rel_pos'] - target_pos
+            pos_error_norm = np.linalg.norm(error_pos, axis=1)
+            error_vel = data['rel_vel'] - target_vel
+            vel_error_norm = np.linalg.norm(error_vel, axis=1) * 1000
+            force_mag = np.linalg.norm(data['control_force'], axis=1)
 
-            # Plot position error with threshold
-            axes[0].plot(times_days, pos_norm, 'b-', label='Relative position')
+            axes[0].plot(times_days, pos_error_norm, 'b-', label='Position Error')
             axes[0].axhline(self.position_threshold_m, color='r', linestyle='--', label=f'Threshold ({self.position_threshold_m} m)')
-            axes[0].set_ylabel('Position error (m)')
+            axes[0].set_ylabel('Position Error (m)')
             axes[0].legend()
             axes[0].grid(True, alpha=0.3)
 
-            # Plot velocity error with threshold
-            axes[1].plot(times_days, vel_norm, 'g-', label='Relative velocity')
+            axes[1].plot(times_days, vel_error_norm, 'g-', label='Velocity Error')
             axes[1].axhline(self.velocity_threshold_mms, color='r', linestyle='--', label=f'Threshold ({self.velocity_threshold_mms} mm/s)')
-            axes[1].set_ylabel('Velocity error (mm/s)')
+            axes[1].set_ylabel('Velocity Error (mm/s)')
             axes[1].legend()
             axes[1].grid(True, alpha=0.3)
 
-            # Plot control force magnitude
-            force_mag = np.linalg.norm(data['control_force'], axis=1)
             axes[2].plot(times_days, force_mag, 'm-', label='Control force')
             axes[2].set_xlabel('Time (days)')
             axes[2].set_ylabel('Force (N)')
             axes[2].legend()
             axes[2].grid(True, alpha=0.3)
 
-            # Mark mode transitions (optional)
-            # mode colors: 0=GENERATION,1=KEEPING,2=RECONFIGURATION
             mode = data['mode']
             for i in range(len(mode) - 1):
                 if mode[i] != mode[i + 1]:
                     axes[0].axvline(times_days[i], color='gray', linestyle=':', alpha=0.5)
 
             plt.tight_layout()
-            save_path = os.path.join(self.output_dir, f"{dep_name}_evaluation.png")
+            save_path = os.path.join(self.output_dir, f"{dep_id}_evaluation.png")
             plt.savefig(save_path, dpi=150)
             plt.close()
             print(f"Plot saved: {save_path}")
 
     def print_summary(self):
-        """Print summary to console."""
         print("\n" + "=" * 60)
         print("FORMATION SIMULATION EVALUATION SUMMARY")
         print("=" * 60)
         print(f"Simulation duration: {self.sim_duration_days:.2f} days")
-
         dv_dict = self.compute_delta_v()
         print(f"Chief ΔV: {dv_dict.get('chief_dv_mps', np.nan):.4f} m/s")
-
-        for dep_name, data in self.deputy_data.items():
-            cooling, _ = self.compute_cooling_time(data['rel_pos'], data['time'], data['mode'])
-            duty = self.compute_duty_cycle(data['rel_pos'], data['time'], data['mode'])
-            rmse_pos, rmse_vel = self.compute_rmse(data['rel_pos'], data['rel_vel'], data['mode'])
-            dv = dv_dict.get(f'{dep_name}_dv_mps', np.nan)
-
-            print(f"\n--- {dep_name} ---")
+        for dep_id, data in self.deputy_data.items():
+            target = self._get_target(dep_id)
+            cooling, _ = self.compute_cooling_time(data['rel_pos'], data['time'], data['mode'], target[:3])
+            duty = self.compute_duty_cycle(data['rel_pos'], data['time'], data['mode'], target[:3])
+            rmse_pos, rmse_vel = self.compute_rmse(data['rel_pos'], data['rel_vel'], data['mode'], target[:3], target[3:])
+            dv = dv_dict.get(f'{dep_id}_dv_mps', np.nan)
+            print(f"\n--- {dep_id} ---")
             print(f"  Cooling time after reconfiguration: {cooling:.2f} s" if not np.isnan(cooling) else "  Cooling time: N/A")
             print(f"  Observation duty cycle: {duty*100:.2f}%" if not np.isnan(duty) else "  Duty cycle: N/A")
             print(f"  Steady-state RMSE position: {rmse_pos:.3f} m" if not np.isnan(rmse_pos) else "  RMSE position: N/A")
