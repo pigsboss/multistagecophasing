@@ -79,6 +79,12 @@ class FormationSimulation(BaseSimulation):
                 keeping_threshold_vel=config.get("keeping_threshold_vel", 0.01),
             )
             self.deputy_controllers[dep_id] = controller
+            # 设置控制器的初始估计状态为初始相对偏差（近似 LVLH）
+            # 注意：初始状态是在惯性系中给出的，但相对偏差量很小，可以近似为 LVLH 下的值
+            chief_state = np.array(config["chief_initial_state"])
+            init_rel_pos = np.array(init_state[:3]) - chief_state[:3]
+            init_rel_vel = np.array(init_state[3:6]) - chief_state[3:6]
+            controller.last_estimated_state = np.concatenate([init_rel_pos, init_rel_vel])
 
         # Assign routers to deputies
         router_seed = config.get("router_seed", 42)
