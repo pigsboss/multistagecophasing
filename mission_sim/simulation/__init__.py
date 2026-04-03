@@ -10,6 +10,7 @@ from .threebody.sun_earth_l2 import SunEarthL2L1Simulation
 from .twobody.base import TwoBodyBaseSimulation
 from .twobody.leo import LEOL1Simulation
 from .twobody.geo import GEOL1Simulation
+from .formation_simulation import FormationSimulation
 
 __all__ = [
     "BaseSimulation",
@@ -18,4 +19,5 @@ __all__ = [
     "SunEarthL2L1Simulation",
     "LEOL1Simulation",
     "GEOL1Simulation",
+    "FormationSimulation",
 ]

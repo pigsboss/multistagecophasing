@@ -1,121 +1,93 @@
 # mission_sim/core/physics/models/gravity_crtbp.py
 """
-日地系统圆型限制性三体引力模型 (CRTBP) - SI 单位制
-包含：太阳引力、地球引力、以及旋转坐标系带来的离心力与科氏力。
-作为策略模式的具体实现，可被 CelestialEnvironment 动态加载。
+MCPC Core Physics Models: Dual-Engine Vectorized CRTBP
+------------------------------------------------------
+Implements the Circular Restricted Three-Body Problem (CRTBP) in SI units.
+Optimized with Numba JIT for L1 single-satellite precision and 
+NumPy vectorization for L2 multi-satellite formation performance.
 """
 
 import numpy as np
 from mission_sim.core.physics.environment import IForceModel
 
-# 尝试导入 Numba 用于 JIT 加速，若不可用则回退到普通 Python
+# --- Numba Optimization Guard ---
 try:
     from numba import jit as njit
     _HAS_NUMBA = True
 except ImportError:
-    # 定义一个空装饰器，使代码在无 numba 时仍能运行
-    def njit(func):
-        return func
+    def njit(func): return func
     _HAS_NUMBA = False
 
-
 @njit
-def _crtbp_accel(
-    pos: np.ndarray,
-    vel: np.ndarray,
-    GM_SUN: float,
-    GM_EARTH: float,
-    OMEGA: float,
-    pos_sun: np.ndarray,
-    pos_earth: np.ndarray
-) -> np.ndarray:
-    """
-    CRTBP 加速度计算的纯函数 (可被 Numba JIT 编译)。
-
-    Args:
-        pos: 航天器位置向量 [x, y, z] (m)
-        vel: 航天器速度向量 [vx, vy, vz] (m/s)
-        GM_SUN: 太阳引力常数 (m³/s²)
-        GM_EARTH: 地球引力常数 (m³/s²)
-        OMEGA: 日地系统角速度 (rad/s)
-        pos_sun: 太阳在旋转系中的固定位置 [x_s, y_s, z_s] (m)
-        pos_earth: 地球在旋转系中的固定位置 [x_e, y_e, z_e] (m)
-
-    Returns:
-        加速度向量 [ax, ay, az] (m/s²)
-    """
-    # 计算航天器相对太阳和地球的位置矢量
-    r_sun_vec = pos - pos_sun
-    r_earth_vec = pos - pos_earth
-
-    # 计算距离的三次方 (用于分母)
-    r_sun_mag3 = np.linalg.norm(r_sun_vec) ** 3
-    r_earth_mag3 = np.linalg.norm(r_earth_vec) ** 3
-
-    # 1. 中心天体保守引力场 (牛顿万有引力)
-    accel_grav_sun = -GM_SUN * r_sun_vec / r_sun_mag3
-    accel_grav_earth = -GM_EARTH * r_earth_vec / r_earth_mag3
-
-    # 2. 旋转坐标系引入的表观惯性力
-    # 离心力: a_cf = ω × (ω × r) 的展开项 (由于仅绕 Z 轴旋转)
-    accel_centrifugal = np.array([
-        OMEGA ** 2 * pos[0],
-        OMEGA ** 2 * pos[1],
-        0.0
-    ], dtype=np.float64)
-
-    # 科氏力: a_cor = -2 ω × v
-    accel_coriolis = np.array([
-        2.0 * OMEGA * vel[1],
-        -2.0 * OMEGA * vel[0],
-        0.0
-    ], dtype=np.float64)
-
-    # 汇总四大力学分量
-    return accel_grav_sun + accel_grav_earth + accel_centrifugal + accel_coriolis
-
+def _crtbp_accel_numba(pos, vel, gm1, gm2, omega, x1, x2):
+    """[L1-OPTIMIZED] Numba-accelerated single state calculation."""
+    dx1 = pos[0] - x1
+    dx2 = pos[0] - x2
+    r1_3 = (dx1**2 + pos[1]**2 + pos[2]**2)**1.5
+    r2_3 = (dx2**2 + pos[1]**2 + pos[2]**2)**1.5
+    
+    # Gravitational components
+    ax = -gm1 * dx1 / r1_3 - gm2 * dx2 / r2_3
+    ay = -gm1 * pos[1] / r1_3 - gm2 * pos[1] / r2_3
+    az = -gm1 * pos[2] / r1_3 - gm2 * pos[2] / r2_3
+    
+    # Fictitious forces (Centrifugal & Coriolis)
+    ax += omega**2 * pos[0] + 2.0 * omega * vel[1]
+    ay += omega**2 * pos[1] - 2.0 * omega * vel[0]
+    
+    return np.array([ax, ay, az], dtype=np.float64)
 
 class GravityCRTBP(IForceModel):
     """
-    日地系统圆型限制性三体引力模型 (CRTBP) - SI 单位制
-    包含：太阳引力、地球引力、以及旋转坐标系带来的离心力与科氏力。
-    作为策略模式的具体实现，可被 CelestialEnvironment 动态加载。
+    [MCPC UNIVERSAL] CRTBP Gravity Model.
+    Supports Sun-Earth system by default using SI units.
     """
 
     def __init__(self):
-        # --- 物理常数 (SI 单位制：m, s, kg) ---
+        # Physical Constants (SI Units: m, s, kg)
         self.GM_SUN = 1.32712440018e20
         self.GM_EARTH = 3.986004418e14
         self.AU = 1.495978707e11
-        self.OMEGA = 1.990986e-7  # 地球绕日公转平均角速度 (rad/s)
+        self.OMEGA = 1.990986e-7  # Mean angular velocity of Earth (rad/s)
 
-        # --- 预计算无量纲质量比与天体在旋转系中的绝对位置 ---
-        # 旋转系原点位于日地系统质心，X轴指向地球
+        # Pre-computed System Parameters
         self.mu = self.GM_EARTH / (self.GM_SUN + self.GM_EARTH)
-        self.pos_sun = np.array([-self.mu * self.AU, 0.0, 0.0], dtype=np.float64)
-        self.pos_earth = np.array([(1.0 - self.mu) * self.AU, 0.0, 0.0], dtype=np.float64)
+        self._x1 = -self.mu * self.AU
+        self._x2 = (1.0 - self.mu) * self.AU
+        self._omega_sq = self.OMEGA**2
 
     def compute_accel(self, state: np.ndarray, epoch: float) -> np.ndarray:
-        """
-        计算特定状态下航天器受到的 CRTBP 总加速度。
-
-        :param state: 航天器状态向量 [x, y, z, vx, vy, vz] (基于日地旋转系)
-        :param epoch: 当前历元时间 (当前模型为保守场，不显式依赖 epoch，但预留接口)
-        :return: 加速度向量 [ax, ay, az]
-        """
-        pos = state[0:3]
-        vel = state[3:6]
-
-        # 调用纯函数计算加速度
-        return _crtbp_accel(
-            pos,
-            vel,
-            self.GM_SUN,
-            self.GM_EARTH,
-            self.OMEGA,
-            self.pos_sun,
-            self.pos_earth
+        """[L1 LEGACY] Compute acceleration for a SINGLE spacecraft using Numba."""
+        return _crtbp_accel_numba(
+            state[0:3], state[3:6], 
+            self.GM_SUN, self.GM_EARTH, self.OMEGA, 
+            self._x1, self._x2
         )
 
+    def compute_vectorized_acc(self, state_matrix: np.ndarray, epoch: float) -> np.ndarray:
+        """
+        [L2-SPECIFIC / PARALLELIZATION] 
+        Batch compute accelerations for N spacecraft using NumPy broadcasting.
+        O(1) Python overhead, O(N) C-backend performance.
+        """
+        # 1. Extract position and velocity matrix views
+        x, y, z = state_matrix[:, 0], state_matrix[:, 1], state_matrix[:, 2]
+        vx, vy = state_matrix[:, 3], state_matrix[:, 4]
+
+        # 2. Relative distances to primaries
+        dx1, dx2 = x - self._x1, x - self._x2
+        r1_3 = (dx1**2 + y**2 + z**2 + 1e-15)**1.5
+        r2_3 = (dx2**2 + y**2 + z**2 + 1e-15)**1.5
+
+        # 3. Summing all force components (Gravity + Centrifugal + Coriolis)
+        ax = (-self.GM_SUN * dx1 / r1_3 - self.GM_EARTH * dx2 / r2_3 + 
+              self._omega_sq * x + 2.0 * self.OMEGA * vy)
+        ay = (-self.GM_SUN * y / r1_3 - self.GM_EARTH * y / r2_3 + 
+              self._omega_sq * y - 2.0 * self.OMEGA * vx)
+        az = (-self.GM_SUN * z / r1_3 - self.GM_EARTH * z / r2_3)
+
+        # 4. Assemble result matrix (N, 3)
+        return np.column_stack((ax, ay, az))
+
     def __repr__(self) -> str:
-        return (f"GravityCRTBP(mu={self.mu:.2e}, AU={self.AU:.2e}, OMEGA={self.OMEGA:.2e})")
+        return f"GravityCRTBP(mu={self.mu:.2e}, OMEGA={self.OMEGA:.2e})"

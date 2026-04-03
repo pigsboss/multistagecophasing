@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from numpy.testing import assert_allclose
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment, IForceModel
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
@@ -21,14 +22,20 @@ def test_celestial_environment_register():
     env.register_force(mock)
     assert len(env._force_registry) == 1
 
-
 def test_celestial_environment_coordinate_check():
-    """测试坐标系一致性校验"""
+    """Test coordinate frame consistency check."""
+    # Ensure correct import if not already present in the file
+    from mission_sim.core.spacetime.ids import CoordinateFrame
+    from mission_sim.core.physics.environment import CelestialEnvironment
+    import numpy as np
+    import pytest
+
     env = CelestialEnvironment(CoordinateFrame.SUN_EARTH_ROTATING)
     state = np.zeros(6)
-    with pytest.raises(ValueError, match="坐标系冲突"):
+    
+    # FIX: Match the new English exception message
+    with pytest.raises(ValueError, match="Frame mismatch"):
         env.get_total_acceleration(state, CoordinateFrame.J2000_ECI)
-
 
 def test_spacecraft_apply_thrust():
     """测试航天器施加推力"""
@@ -42,9 +49,8 @@ def test_spacecraft_apply_thrust_wrong_frame():
     """测试错误坐标系推力被拒绝"""
     sc = SpacecraftPointMass("test", np.zeros(6), CoordinateFrame.SUN_EARTH_ROTATING)
     force = np.array([10.0, 0.0, 0.0])
-    with pytest.raises(ValueError, match="推力坐标系不匹配"):
+    with pytest.raises(ValueError, match="Thrust frame mismatch"):
         sc.apply_thrust(force, CoordinateFrame.J2000_ECI)
-
 
 def test_spacecraft_get_derivative():
     """测试状态导数计算"""
@@ -169,21 +175,31 @@ def test_j2_pure_function_consistency():
 
 
 def test_crtbp_pure_function_consistency():
-    """验证 CRTBP 纯函数与类方法计算结果一致"""
+    """Verify consistency between the CRTBP pure Numba function and class method."""
+    from mission_sim.core.physics.models.gravity_crtbp import GravityCRTBP
+    import numpy as np
+    
     model = GravityCRTBP()
 
-    # 日地旋转系中某位置（例如 Halo 轨道附近）
+    # Position in Sun-Earth rotating frame (e.g., near Halo orbit)
     pos = np.array([1.1e11, 0.0, 5e9])
     vel = np.array([0.0, 1e4, 0.0])
     state = np.concatenate([pos, vel])
 
+    # Calculate using the class interface
     acc_class = model.compute_accel(state, 0.0)
 
-    from mission_sim.core.physics.models.gravity_crtbp import _crtbp_accel
-    acc_pure = _crtbp_accel(pos, vel, model.GM_SUN, model.GM_EARTH, model.OMEGA, model.pos_sun, model.pos_earth)
+    # FIX: Import the renamed and optimized Numba pure function
+    from mission_sim.core.physics.models.gravity_crtbp import _crtbp_accel_numba
+    
+    # Calculate directly using the internal pure function
+    acc_pure = _crtbp_accel_numba(
+        pos, vel, 
+        model.GM_SUN, model.GM_EARTH, model.OMEGA, 
+        model._x1, model._x2
+    )
 
-    assert np.allclose(acc_class, acc_pure, rtol=1e-12)
-
+    np.testing.assert_allclose(acc_class, acc_pure, rtol=1e-12)
 
 def test_srp_pure_function_consistency():
     """验证 SRP 纯函数与类方法计算结果一致"""
@@ -207,3 +223,58 @@ def test_srp_pure_function_consistency():
     acc_pure = _srp_accel(pos, sun_pos, area_to_mass, reflectivity, P_solar, AU)
 
     assert np.allclose(acc_class, acc_pure, rtol=1e-12)
+
+
+
+"""
+Test Suite for Vectorized Physics Models
+"""
+def test_gravity_crtbp_vectorization():
+    """
+    Test the vectorized implementation of CRTBP gravity against the 
+    single-state Numba implementation.
+    Verifies input/output shapes and strict mathematical equivalence.
+    """
+    # 1. Initialize the force model
+    crtbp = GravityCRTBP()
+    
+    # 2. Generate a synthetic state matrix of shape (N, 6)
+    # Simulating a formation of 100 spacecraft near the Sun-Earth L2 point
+    N = 100
+    x_L2 = crtbp.AU * 1.01  # Approximate L2 position on X-axis
+    
+    np.random.seed(42)  # Fix seed for deterministic testing
+    state_matrix = np.zeros((N, 6), dtype=np.float64)
+    
+    # Random distribution within +/- 1000 km and +/- 10 m/s relative to L2
+    state_matrix[:, 0] = x_L2 + np.random.uniform(-1e6, 1e6, N)
+    state_matrix[:, 1] = np.random.uniform(-1e6, 1e6, N)
+    state_matrix[:, 2] = np.random.uniform(-1e6, 1e6, N)
+    state_matrix[:, 3] = np.random.uniform(-10.0, 10.0, N)
+    state_matrix[:, 4] = np.random.uniform(-10.0, 10.0, N)
+    state_matrix[:, 5] = np.random.uniform(-10.0, 10.0, N)
+    
+    epoch = 0.0  # Epoch is invariant for conservative CRTBP
+
+    # 3. Compute vectorized accelerations (The L2 parallel path)
+    acc_matrix_vec = crtbp.compute_vectorized_acc(state_matrix, epoch)
+    
+    # [ASSERT 1] Verify the strict dimensional contract: (N, 6) -> (N, 3)
+    assert acc_matrix_vec.shape == (N, 3), \
+        f"Contract violated: Expected shape ({N}, 3), got {acc_matrix_vec.shape}"
+
+    # 4. Compute sequential accelerations (The L1 Numba fallback path)
+    acc_matrix_seq = np.zeros((N, 3), dtype=np.float64)
+    for i in range(N):
+        acc_matrix_seq[i, :] = crtbp.compute_accel(state_matrix[i, :], epoch)
+        
+    # [ASSERT 2] Element-wise mathematical equivalence
+    # We use a very tight tolerance (1e-12). Note that exact equality (==) 
+    # is avoided due to potential AVX/SIMD floating-point rounding differences.
+    assert_allclose(
+        acc_matrix_vec, 
+        acc_matrix_seq, 
+        rtol=1e-12, 
+        atol=1e-12, 
+        err_msg="Vectorized CRTBP accelerations do not match sequential Numba calculations!"
+    )

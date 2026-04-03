@@ -1,29 +1,39 @@
 """
 MCPC Core Law: Physics Domain Interface Definition Specification (IDS)
 ----------------------------------------------------------------------
-This file defines the physical measurement data hierarchy. 
-It strictly separates universal measurement traits from L2-specific assumptions.
+This file defines the physical measurement data hierarchy and entity types. 
+It strictly separates universal traits from L2-specific assumptions.
 """
-
-# =============================================================================
-# [ABSTRACT / MCPC UNIVERSAL]
-# Base class for all physical measurements. 
-# This core structure will persist across all MCPC Levels (L1-L4).
-# =============================================================================
 
 from dataclasses import dataclass
 import numpy as np
 from enum import Enum, auto
 
+# =============================================================================
+# [ABSTRACT / MCPC UNIVERSAL]
+# Fundamental constants and status enums used across all simulation levels.
+# =============================================================================
+
 class PhysicalConstants:
+    """Universal physical constants for high-fidelity space simulations."""
     G = 6.67430e-11          # Gravitational constant (m^3 kg^-1 s^-2)
     C = 299792458.0          # Speed of light (m/s)
     AU = 149597870700.0      # Astronomical Unit (m)
 
 class ComponentHealthStatus(Enum):
+    """General health status for hardware components (Sensors/Actuators)."""
     NOMINAL = auto()
     DEGRADED = auto()
     FAILED = auto()
+
+class SpacecraftType(Enum):
+    """
+    Defines the role of the spacecraft within a formation.
+    Essential for GNC logic to distinguish between the reference and followers.
+    """
+    CHIEF = auto()           # The formation reference or lead satellite
+    DEPUTY = auto()          # A following or member satellite
+    OBSERVER = auto()        # A non-member monitoring node
 
 @dataclass
 class PhysicalMeasurementBase:
@@ -36,10 +46,9 @@ class PhysicalMeasurementBase:
 
 # =============================================================================
 # [L2-SPECIFIC / POINT MASS APPROXIMATION]
-# Microwave-based Inter-Satellite Link (ISL) measurement.
-# This assumes the spacecraft is a point mass and the sensor provides 
-# relative spherical coordinates (Range, Azimuth, Elevation).
+# Implementation of relative measurements for the current formation level.
 # =============================================================================
+
 @dataclass
 class MicrowaveISLMeasurement(PhysicalMeasurementBase):
     """

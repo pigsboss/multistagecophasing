@@ -1,5 +1,20 @@
+# tests/conftest.py
 import pytest
 import numpy as np
+import multiprocessing as mp
+import sys
+
+# ============================================================
+# 解决 multiprocessing fork 警告：设置启动方法为 'spawn'
+# 仅在非 Windows 系统上尝试，Windows 默认 spawn
+# ============================================================
+if sys.platform != 'win32':
+    try:
+        # 使用 force=False 避免重复设置错误
+        mp.set_start_method('spawn', force=False)
+    except RuntimeError:
+        # 已经设置过，忽略
+        pass
 
 @pytest.fixture
 def temp_dir(tmp_path):
