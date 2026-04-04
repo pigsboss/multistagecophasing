@@ -82,12 +82,14 @@ class TestHighOrderGeopotentialInterface:
         test_state = np.array([7000e3, 0.0, 0.0, 0.0, 7.5e3, 0.0])
         test_epoch = 0.0
         
-        # 这些调用应该符合接口设计，但不会实际执行
-        with pytest.raises(NotImplementedError):
-            model.compute_accel(test_state, test_epoch)
+        # compute_accel 已实现（J2简化版）
+        accel = model.compute_accel(test_state, test_epoch)
+        assert isinstance(accel, np.ndarray)
+        assert accel.shape == (3,)
         
-        with pytest.raises(NotImplementedError):
-            model.set_max_degree(30)
+        # set_max_degree 已实现
+        model.set_max_degree(30)
+        assert model.degree == 30
 
 
 if __name__ == '__main__':
