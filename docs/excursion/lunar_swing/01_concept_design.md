@@ -98,15 +98,64 @@ F_drag = -½ ρ(h) C_d A v_rel² (v_rel/|v_rel|)
 ## 1.6 与 MCPC 框架的集成
 
 ### 架构对应关系
-- **时空域**：地月旋转坐标系定义
-- **物理域**：三体引力、大气阻力、非球形摄动
-- **赛博域**：轨道设计算法、控制策略
+- **时空域**：
+    - 扩展 `CoordinateFrame` 枚举，添加 `EARTH_MOON_ROTATING`
+    - **新建** `HighPrecisionEphemeris` 类，封装 JPL DE 星历数据接口
+- **物理域**：
+    - 创建 `UniversalCRTBP` 类替代硬编码实现
+    - **新建** `HighOrderGeopotential` 类，实现高阶地球重力场模型
+    - 增强现有摄动模型（大气、SRP）的精度和接口
+- **赛博域**：
+    - 开发 `LunarSwingTargeter` 轨道设计器
+    - **引入/升级** `math_tools` 中的数值积分器和优化算法
 
-### 代码实现路径
-1. 扩展 `CoordinateFrame` 枚举，添加 `EARTH_MOON_ROTATING`
-2. 创建 `UniversalCRTBP` 类替代硬编码实现
-3. 开发 `LunarSwingTargeter` 轨道设计器
-4. 创建专用仿真场景 `EarthMoonResonanceSimulation`
+### 代码实现路径（优先级排序）
+
+#### 第一阶段：基础设施先行（1-2个月）
+1. **高精度星历模块** (`HighPrecisionEphemeris`)
+   ```python
+   # 伪代码示例
+   class HighPrecisionEphemeris:
+       def __init__(self, kernel_path: str):
+           self.kernel = load_spice_kernel(kernel_path)
+           
+       def get_body_state(self, body: str, epoch: float, frame: str) -> np.ndarray:
+           """获取天体在指定时刻、指定坐标系下的状态"""
+           # 调用 SPICE 或类似库
+           return state
+   ```
+
+2. **高阶重力场模块** (`HighOrderGeopotential`)
+   ```python
+   class HighOrderGeopotential(IForceModel):
+       def __init__(self, coeff_file: str, max_degree: int = 10):
+           self.coeffs = load_icgem_file(coeff_file)
+           self.max_degree = max_degree
+           
+       def compute_accel(self, state: np.ndarray, epoch: float) -> np.ndarray:
+           """计算高阶地球重力场加速度"""
+           # 实现球谐函数展开
+           return accel
+   ```
+
+3. **增强数学工具包**
+   - 在 `math_tools.py` 中添加 `AdaptiveIntegrator` 类
+   - 实现 `runge_kutta_fehlberg78` 函数
+
+#### 第二阶段：动力学模型升级（1个月）
+4. **通用三体模型** (`UniversalCRTBP`)
+   - 重构现有 `CRTBP` 类，支持任意双主天体参数
+   - 添加地月系统预设配置
+
+#### 第三阶段：专用算法开发（2个月）
+5. **轨道设计器** (`LunarSwingTargeter`)
+   - 集成微分修正算法
+   - 实现共振轨道搜索
+
+#### 第四阶段：系统集成验证（1个月）
+6. **专用仿真场景** (`EarthMoonResonanceSimulation`)
+   - 整合所有新模块
+   - 执行长期演化仿真
 
 ## 1.7 预期成果
 
@@ -116,9 +165,13 @@ F_drag = -½ ρ(h) C_d A v_rel² (v_rel/|v_rel|)
 3. 大气穿越-引力补偿的能量平衡模型
 
 ### 软件成果
-1. 通用三体动力学模块
-2. 高精度轨道设计工具链
-3. 长期演化仿真能力
+1. **核心基础设施**：
+    - 高精度星历模块 (`HighPrecisionEphemeris`)
+    - 高阶地球重力场模块 (`HighOrderGeopotential`)
+    - 增强型数学工具包（变步长积分器、优化器等）
+2. **动力学模块**：通用三体动力学模块 (`UniversalCRTBP`)
+3. **设计工具**：高精度轨道设计工具链 (`LunarSwingTargeter`)
+4. **仿真能力**：长期高精度演化仿真场景
 
 ### 工程成果
 1. 轨道设计参考案例库
