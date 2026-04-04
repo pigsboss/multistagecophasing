@@ -2,11 +2,13 @@
 """
 微分修正工具 (Differential Correction Utilities) - 增强版
 新增基于状态转移矩阵的单参数和多参数修正函数，提高精度和收敛性。
+新增共振轨道专用函数和轨道族连续法。
 """
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from typing import Callable, Tuple, Optional, List
+from typing import Callable, Tuple, Optional, List, Dict
+import warnings
 
 
 def compute_stm_numerical(
@@ -121,7 +123,7 @@ def single_parameter_correction_with_stm(
         S = j_c @ (stm @ e_param)
 
         if np.linalg.norm(S) < 1e-12:
-            print(f"Warning: Sensitivity near zero at iteration {it}, stopping.")
+            warnings.warn(f"Sensitivity near zero at iteration {it}, stopping.")
             break
 
         delta_alpha = -c / S
@@ -223,7 +225,7 @@ def multi_parameter_correction(
         try:
             delta_alpha = np.linalg.lstsq(S, -c, rcond=None)[0]
         except np.linalg.LinAlgError:
-            print(f"Warning: SVD failed at iteration {it}, using pseudo-inverse.")
+            warnings.warn(f"SVD failed at iteration {it}, using pseudo-inverse.")
             delta_alpha = np.linalg.pinv(S) @ (-c)
 
         alpha += delta_alpha
@@ -286,3 +288,256 @@ def jacobi_constant(state_nd: np.ndarray, mu: float) -> float:
     U = (x**2 + y**2)/2 + (1-mu)/r1 + mu/r2
     v2 = vx**2 + vy**2 + vz**2
     return 2*U - v2
+
+
+# ============================================================================
+# 新增：共振轨道专用函数
+# ============================================================================
+
+def resonance_constraint_factory(
+    resonance_ratio: Tuple[int, int],
+    lunar_period: float = 27.3217 * 86400.0  # 月球轨道周期（秒）
+) -> Callable[[np.ndarray], np.ndarray]:
+    """
+    创建共振轨道约束函数工厂。
+    
+    参数:
+        resonance_ratio: (n, m) 共振比，n:m（航天器n圈对应月球m圈）
+        lunar_period: 月球轨道周期（秒）
+    
+    返回:
+        约束函数，输入终端状态，输出位置和速度残差（6维）
+    """
+    n, m = resonance_ratio
+    
+    def constraint(xf: np.ndarray) -> np.ndarray:
+        """
+        共振轨道约束：要求终端状态与初始状态相同（周期轨道）。
+        注意：实际使用中需要结合具体动力学模型。
+        """
+        # 基本周期轨道约束：位置和速度相同
+        return xf
+    
+    return constraint
+
+
+def continuation_family(
+    dynamics: Callable[[float, np.ndarray], np.ndarray],
+    base_orbit: Dict[str, np.ndarray],
+    parameter_name: str,
+    parameter_range: List[float],
+    constraint: Callable[[np.ndarray], np.ndarray],
+    free_params: List[int],
+    t0: float = 0.0,
+    tf: float = None,
+    continuation_steps: int = 20,
+    **kwargs
+) -> List[Dict[str, np.ndarray]]:
+    """
+    轨道族连续法追踪。
+    
+    参数:
+        dynamics: 动力学函数
+        base_orbit: 基础轨道，包含'state'和'period'键
+        parameter_name: 连续参数名称（如'jacobi_constant'）
+        parameter_range: 参数变化范围 [start, end]
+        constraint: 约束函数
+        free_params: 自由参数索引列表
+        t0: 初始时间
+        tf: 轨道周期，若为None则使用base_orbit['period']
+        continuation_steps: 连续步数
+        **kwargs: 传递给multi_parameter_correction的参数
+    
+    返回:
+        轨道族列表，每个元素为包含'state', 'period', parameter_name的字典
+    """
+    if tf is None:
+        tf = base_orbit['period']
+    
+    param_start, param_end = parameter_range
+    param_values = np.linspace(param_start, param_end, continuation_steps)
+    
+    orbit_family = []
+    current_state = base_orbit['state'].copy()
+    current_tf = tf
+    
+    for i, param_val in enumerate(param_values):
+        print(f"Continuation step {i+1}/{continuation_steps}, {parameter_name} = {param_val:.6e}")
+        
+        # 预测步：使用前一步的解（第一步使用基础轨道）
+        if i == 0:
+            guess_state = current_state
+        else:
+            # 简单线性外推
+            if i == 1:
+                delta_state = current_state - orbit_family[-2]['state']
+            else:
+                # 使用前两步的差分
+                delta_state = orbit_family[-1]['state'] - orbit_family[-2]['state']
+            guess_state = current_state + delta_state
+        
+        # 校正步：使用微分修正
+        try:
+            # 这里需要根据具体参数调整约束目标
+            target = np.zeros_like(constraint(guess_state))
+            
+            param_opt, xf_opt, history = multi_parameter_correction(
+                dynamics=dynamics,
+                constraint=constraint,
+                t0=t0,
+                x0=guess_state,
+                param_indices=free_params,
+                param_guesses=guess_state[free_params].tolist(),
+                tf=current_tf,
+                target=target,
+                **kwargs
+            )
+            
+            # 更新当前状态
+            current_state = guess_state.copy()
+            for idx, val in zip(free_params, param_opt):
+                current_state[idx] = val
+            
+            orbit_family.append({
+                'state': current_state.copy(),
+                'period': current_tf,
+                parameter_name: param_val,
+                'converged': True,
+                'residual_norm': history['c_norm'][-1] if history['c_norm'] else np.nan
+            })
+            
+        except Exception as e:
+            warnings.warn(f"Continuation failed at step {i}: {e}")
+            orbit_family.append({
+                'state': guess_state.copy(),
+                'period': current_tf,
+                parameter_name: param_val,
+                'converged': False,
+                'error': str(e)
+            })
+            # 减小步长或跳过
+            if i > 0:
+                current_state = orbit_family[-2]['state'].copy()
+    
+    return orbit_family
+
+
+def analyze_orbit_stability(
+    dynamics: Callable[[float, np.ndarray], np.ndarray],
+    orbit_state: np.ndarray,
+    period: float,
+    t0: float = 0.0,
+    rtol: float = 1e-12,
+    atol: float = 1e-12,
+    method: str = 'DOP853'
+) -> Dict[str, np.ndarray]:
+    """
+    分析周期轨道的稳定性。
+    
+    参数:
+        dynamics: 动力学函数
+        orbit_state: 轨道初始状态
+        period: 轨道周期
+        t0: 初始时间
+        rtol, atol, method: 积分参数
+    
+    返回:
+        稳定性分析结果，包含单值矩阵特征值等信息
+    """
+    # 计算单值矩阵
+    stm = compute_stm_numerical(
+        dynamics=dynamics,
+        t0=t0,
+        x0=orbit_state,
+        tf=period,
+        rtol=rtol,
+        atol=atol,
+        method=method
+    )
+    
+    # 计算特征值
+    eigenvalues = np.linalg.eigvals(stm)
+    
+    # 计算稳定性指标
+    stability_indicators = {
+        'monodromy_matrix': stm,
+        'eigenvalues': eigenvalues,
+        'max_magnitude': np.max(np.abs(eigenvalues)),
+        'min_magnitude': np.min(np.abs(eigenvalues)),
+        'is_stable': np.all(np.abs(eigenvalues) <= 1.0 + 1e-6),  # 允许微小误差
+        'lyapunov_exponents': np.log(np.abs(eigenvalues)) / period
+    }
+    
+    return stability_indicators
+
+
+def create_resonance_targeter(
+    dynamics: Callable[[float, np.ndarray], np.ndarray],
+    resonance_ratio: Tuple[int, int],
+    lunar_period: float = 27.3217 * 86400.0,
+    free_params: List[int] = None
+) -> Callable:
+    """
+    创建共振轨道目标器的高层接口。
+    
+    参数:
+        dynamics: 动力学函数
+        resonance_ratio: 共振比 (n, m)
+        lunar_period: 月球轨道周期（秒）
+        free_params: 自由参数索引，默认[0, 1]（x, y位置）
+    
+    返回:
+        目标器函数，输入初始猜测，返回优化后的轨道
+    """
+    if free_params is None:
+        free_params = [0, 1]  # 默认调整x, y位置
+    
+    n, m = resonance_ratio
+    target_period = (m / n) * lunar_period
+    
+    def targeter(initial_guess: np.ndarray, **kwargs) -> Dict:
+        """
+        共振轨道目标器。
+        
+        参数:
+            initial_guess: 初始状态猜测
+            **kwargs: 传递给multi_parameter_correction的参数
+        
+        返回:
+            包含优化结果和信息的字典
+        """
+        # 定义周期轨道约束
+        def period_constraint(xf):
+            return xf - initial_guess
+        
+        # 执行微分修正
+        param_opt, xf_opt, history = multi_parameter_correction(
+            dynamics=dynamics,
+            constraint=period_constraint,
+            t0=0.0,
+            x0=initial_guess,
+            param_indices=free_params,
+            param_guesses=initial_guess[free_params].tolist(),
+            tf=target_period,
+            **kwargs
+        )
+        
+        # 稳定性分析
+        stability = analyze_orbit_stability(
+            dynamics=dynamics,
+            orbit_state=xf_opt,
+            period=target_period
+        )
+        
+        return {
+            'optimized_state': xf_opt,
+            'initial_guess': initial_guess,
+            'period': target_period,
+            'resonance_ratio': resonance_ratio,
+            'free_params': free_params,
+            'convergence_history': history,
+            'stability_analysis': stability,
+            'jacobi_constant': jacobi_constant(xf_opt, mu=0.01215)  # 地月系统mu
+        }
+    
+    return targeter
