@@ -76,7 +76,8 @@ class UniversalCRTBP(IForceModel):
         self._gm2 = self.G * self._secondary_mass
         
         # Legacy constants for backward compatibility
-        self.OMEGA = self._omega
+        # Note: OMEGA is a read‑only property that returns self._omega
+        # Do not set self.OMEGA here, as that would conflict with the property.
         if system_name == 'sun_earth':
             # Sun is primary, Earth is secondary
             self.GM_SUN = self.G * self._primary_mass
