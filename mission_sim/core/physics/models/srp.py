@@ -71,7 +71,7 @@ def _srp_accel(
     return factor * dir_sun
 
 
-class CannonballSRP(IForceModel):
+class CannonballSRP(ForceModel):
     """
     球对称太阳光压模型（Cannonball 模型）
     继承自 IForceModel，提供基于面积质量比和反射系数的光压加速度计算。

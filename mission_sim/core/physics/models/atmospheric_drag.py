@@ -58,7 +58,7 @@ def _atmospheric_drag_accel(
     return acc.astype(np.float64)
 
 
-class AtmosphericDrag(IForceModel):
+class AtmosphericDrag(ForceModel):
     """
     大气阻力模型 (指数密度模型)
     继承自 IForceModel，计算大气阻力加速度（地心惯性系）。

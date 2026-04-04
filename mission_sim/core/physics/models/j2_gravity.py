@@ -63,7 +63,7 @@ def _j2_accel(pos: np.ndarray, mu_earth: float, j2: float, r_earth: float) -> np
     return np.array([ax, ay, az], dtype=np.float64)
 
 
-class J2Gravity(IForceModel):
+class J2Gravity(ForceModel):
     """
     地球 J2 摄动模型
     继承自 IForceModel，计算地球 J2 项引起的加速度（地心惯性系）。

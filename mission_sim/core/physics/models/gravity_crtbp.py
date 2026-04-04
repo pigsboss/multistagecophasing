@@ -37,7 +37,7 @@ def _crtbp_accel_numba(pos, vel, gm1, gm2, omega, x1, x2):
     
     return np.array([ax, ay, az], dtype=np.float64)
 
-class GravityCRTBP(IForceModel):
+class GravityCRTBP(ForceModel):
     """
     [MCPC UNIVERSAL] CRTBP Gravity Model.
     Supports Sun-Earth system by default using SI units.
