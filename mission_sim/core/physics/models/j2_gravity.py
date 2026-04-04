@@ -6,7 +6,7 @@
 """
 
 import numpy as np
-from mission_sim.core.physics.models.base import ForceModel
+from mission_sim.core.physics.environment import IForceModel  # 修改这里
 
 # 尝试导入 Numba 用于 JIT 加速，若不可用则回退到普通 Python
 try:
@@ -63,7 +63,7 @@ def _j2_accel(pos: np.ndarray, mu_earth: float, j2: float, r_earth: float) -> np
     return np.array([ax, ay, az], dtype=np.float64)
 
 
-class J2Gravity(ForceModel):
+class J2Gravity(IForceModel):  # 修改这里
     """
     地球 J2 摄动模型
     继承自 IForceModel，计算地球 J2 项引起的加速度（地心惯性系）。
