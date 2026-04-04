@@ -13,10 +13,18 @@ except ImportError:
     HAS_MODULE = False
     # 创建桩类用于测试接口设计
     class HighPrecisionEphemeris:
+        VALID_BODIES = {'earth', 'moon', 'sun', 'mercury', 'venus', 'mars', 
+                       'jupiter', 'saturn', 'uranus', 'neptune'}
+        VALID_FRAMES = {'J2000', 'ICRF', 'ITRF93'}
+        
         def __init__(self, kernel_path=None):
             self.kernel_path = kernel_path
         
         def get_state(self, target_body, epoch, observer_body='earth', frame='J2000'):
+            if target_body.lower() not in self.VALID_BODIES:
+                raise ValueError(f"Invalid body name: {target_body}")
+            if frame.upper() not in self.VALID_FRAMES:
+                raise ValueError(f"Invalid frame: {frame}")
             return np.zeros(6)
         
         def get_earth_moon_rotating_state(self, epoch):
