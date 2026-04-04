@@ -6,7 +6,7 @@
 """
 
 import numpy as np
-from mission_sim.core.physics.environment import IForceModel
+from mission_sim.core.physics.models.base import ForceModel
 
 # 尝试导入 Numba 用于 JIT 加速，若不可用则回退到普通 Python
 try:

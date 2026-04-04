@@ -8,7 +8,7 @@ NumPy vectorization for L2 multi-satellite formation performance.
 """
 
 import numpy as np
-from mission_sim.core.physics.environment import IForceModel
+from mission_sim.core.physics.models.base import ForceModel
 
 # --- Numba Optimization Guard ---
 try:
