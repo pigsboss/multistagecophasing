@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment, IForceModel
-from mission_sim.core.physics.models.gravity_crtbp import GravityCRTBP
+from mission_sim.core.physics.models.gravity import GravityCRTBP
 from mission_sim.core.physics.models.j2_gravity import J2Gravity
 
 

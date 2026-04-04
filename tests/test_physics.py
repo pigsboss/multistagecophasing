@@ -4,7 +4,7 @@ from numpy.testing import assert_allclose
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment, IForceModel
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
-from mission_sim.core.physics.models.gravity_crtbp import GravityCRTBP
+from mission_sim.core.physics.models.gravity import GravityCRTBP
 from mission_sim.core.physics.models.j2_gravity import J2Gravity
 from mission_sim.core.physics.models.srp import CannonballSRP
 from mission_sim.core.physics.models.atmospheric_drag import AtmosphericDrag
@@ -176,53 +176,67 @@ def test_j2_pure_function_consistency():
 
 
 def test_crtbp_pure_function_consistency():
-    """Verify consistency between the CRTBP pure Numba function and class method."""
-    from mission_sim.core.physics.models.gravity_crtbp import GravityCRTBP
-    import numpy as np
+    """测试新的 CRTBP 实现的基本功能和一致性"""
+    from mission_sim.core.physics.models.gravity import GravityCRTBP
     
+    # 创建模型实例（适配器会自动使用 Numba 加速）
     model = GravityCRTBP()
-
-    # Position in Sun-Earth rotating frame (e.g., near Halo orbit)
+    
+    # 测试位置（日地系统 L2 附近）
+    AU = 1.495978707e11
     pos = np.array([1.1e11, 0.0, 5e9])
     vel = np.array([0.0, 1e4, 0.0])
     state = np.concatenate([pos, vel])
-
-    # Calculate using the class interface
+    
+    # 测试类方法计算加速度
     acc_class = model.compute_accel(state, 0.0)
-
-    # Try to import the internal pure function - it might have different names
-    # Let's check what's available in the module
-    try:
-        from mission_sim.core.physics.models.gravity_crtbp import _crtbp_accel_numba as crtbp_accel_func
-    except ImportError:
-        try:
-            from mission_sim.core.physics.models.gravity_crtbp import _crtbp_accel as crtbp_accel_func
-        except ImportError:
-            # If neither function exists, skip this part of the test
-            pytest.skip("CRTBP pure function not available for comparison")
     
-    # Calculate directly using the internal pure function
-    # We need to check the function signature
-    import inspect
-    params = inspect.signature(crtbp_accel_func).parameters
+    # 验证加速度为3维向量
+    assert acc_class.shape == (3,), f"Expected shape (3,), got {acc_class.shape}"
+    assert not np.any(np.isnan(acc_class)), "Acceleration contains NaN values"
     
-    if len(params) == 7:  # pos, vel, GM_SUN, GM_EARTH, OMEGA, _x1, _x2
-        acc_pure = crtbp_accel_func(
-            pos, vel, 
-            model.GM_SUN, model.GM_EARTH, model.OMEGA, 
-            model._x1, model._x2
-        )
-    elif len(params) == 5:  # pos, GM_SUN, GM_EARTH, OMEGA, _x1, _x2
-        acc_pure = crtbp_accel_func(
-            pos,
-            model.GM_SUN, model.GM_EARTH, model.OMEGA, 
-            model._x1, model._x2
-        )
-    else:
-        # Try with just position parameters
-        acc_pure = crtbp_accel_func(pos)
-
-    np.testing.assert_allclose(acc_class, acc_pure, rtol=1e-12)
+    # 验证加速度大小合理（数量级检查）
+    acc_magnitude = np.linalg.norm(acc_class)
+    # CRTBP加速度的数量级应该在 1e-4 到 1e-2 m/s² 范围内
+    assert 1e-4 < acc_magnitude < 1e-2, f"Acceleration magnitude {acc_magnitude} seems unrealistic"
+    
+    # 验证加速度方向（在L2点附近，加速度应主要指向地球方向）
+    # 在x轴正方向的位置，加速度应为负（指向地球）
+    assert acc_class[0] < 0, f"X acceleration should be negative, got {acc_class[0]}"
+    
+    # 测试向量化方法的一致性
+    state_matrix = state.reshape(1, 6)
+    acc_vectorized = model.compute_vectorized_acc(state_matrix, 0.0)
+    
+    # 验证单状态与向量化结果一致
+    assert_allclose(acc_class, acc_vectorized[0], rtol=1e-12, 
+                   err_msg="Vectorized computation doesn't match single state computation")
+    
+    # 测试多个状态
+    N = 5
+    states = np.tile(state, (N, 1)) + np.random.randn(N, 6) * 1e6
+    acc_matrix = model.compute_vectorized_acc(states, 0.0)
+    
+    # 验证向量化输出的形状
+    assert acc_matrix.shape == (N, 3), f"Expected shape ({N}, 3), got {acc_matrix.shape}"
+    
+    # 验证每个状态的计算与单状态计算一致
+    for i in range(N):
+        acc_single = model.compute_accel(states[i], 0.0)
+        assert_allclose(acc_single, acc_matrix[i], rtol=1e-12,
+                       err_msg=f"State {i}: Vectorized doesn't match single computation")
+    
+    # 验证常量属性仍然存在（向后兼容）
+    assert hasattr(model, 'GM_SUN'), "GM_SUN constant not found"
+    assert hasattr(model, 'GM_EARTH'), "GM_EARTH constant not found"
+    assert hasattr(model, 'AU'), "AU constant not found"
+    assert hasattr(model, 'OMEGA'), "OMEGA constant not found"
+    
+    # 验证常量值正确
+    assert np.isclose(model.GM_SUN, 1.32712440018e20), f"GM_SUN incorrect: {model.GM_SUN}"
+    assert np.isclose(model.GM_EARTH, 3.986004418e14), f"GM_EARTH incorrect: {model.GM_EARTH}"
+    assert np.isclose(model.AU, 1.495978707e11), f"AU incorrect: {model.AU}"
+    assert np.isclose(model.OMEGA, 1.990986e-7), f"OMEGA incorrect: {model.OMEGA}"
 
 def test_srp_pure_function_consistency():
     """验证 SRP 纯函数与类方法计算结果一致"""
