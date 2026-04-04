@@ -8,7 +8,7 @@ NumPy vectorization for L2 multi-satellite formation performance.
 """
 
 import numpy as np
-from mission_sim.core.physics.models.base import ForceModel
+from mission_sim.core.physics.environment import IForceModel
 
 # --- Numba Optimization Guard ---
 try:
@@ -37,7 +37,7 @@ def _crtbp_accel_numba(pos, vel, gm1, gm2, omega, x1, x2):
     
     return np.array([ax, ay, az], dtype=np.float64)
 
-class GravityCRTBP(ForceModel):
+class GravityCRTBP(IForceModel):
     """
     [MCPC UNIVERSAL] CRTBP Gravity Model.
     Supports Sun-Earth system by default using SI units.
