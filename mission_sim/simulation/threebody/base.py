@@ -20,7 +20,7 @@ class ThreeBodyBaseSimulation(BaseSimulation):
 
     def _initialize_physical_domain(self):
         # 创建环境，注册 CRTBP 力模型
-        from mission_sim.core.physics.models.gravity_crtbp import GravityCRTBP
+        from mission_sim.core.physics.models.gravity import GravityCRTBP
         self.environment = CelestialEnvironment(
             computation_frame=CoordinateFrame.SUN_EARTH_ROTATING,
             initial_epoch=0.0,

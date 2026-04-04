@@ -59,6 +59,21 @@ class SunEarthCRTBP(UniversalCRTBP):
         # 计算系统中天体的精确位置 (物理单位)
         self._sun_position_physical = np.array([-self._mu * self._L, 0.0, 0.0])
         self._earth_position_physical = np.array([(1.0 - self._mu) * self._L, 0.0, 0.0])
+        
+        # 添加向后兼容属性
+        self._x1 = -self._mu * self._L  # 太阳位置
+        self._x2 = (1.0 - self._mu) * self._L  # 地球位置
+    
+    # 添加属性访问器
+    @property
+    def mu(self):
+        """质量比 μ = m2/(m1+m2) - 向后兼容"""
+        return self._mu
+    
+    @property
+    def _omega_sq(self):
+        """omega 的平方 - 向后兼容"""
+        return self._omega**2
     
     @property
     def sun_gm(self) -> float:

@@ -46,7 +46,16 @@ try:
             self.mu = self.GM_EARTH / (self.GM_SUN + self.GM_EARTH)
             self._x1 = -self.mu * self.AU
             self._x2 = (1.0 - self.mu) * self.AU
-            # 注意：_omega_sq 也通过 property 访问
+        
+        @property
+        def OMEGA(self) -> float:
+            """通过 universal_crtbp 的 property 访问"""
+            return self._universal_crtbp.OMEGA
+        
+        @property
+        def _omega_sq(self):
+            """兼容旧代码，计算 omega 的平方"""
+            return self.OMEGA**2
         
         def compute_accel(self, state: np.ndarray, epoch: float) -> np.ndarray:
             """[L1 LEGACY] Compute acceleration for a SINGLE spacecraft."""
@@ -61,32 +70,9 @@ try:
             # 使用 UniversalCRTBP 的向量化实现
             return self._universal_crtbp.compute_vectorized_acc(state_matrix, epoch)
         
-    @property
-    def OMEGA(self) -> float:
-        """通过 universal_crtbp 的 property 访问"""
-        return self._universal_crtbp.OMEGA
-    
-    @property
-    def _omega_sq(self):
-        """兼容旧代码，计算 omega 的平方"""
-        return self.OMEGA**2
-    
-    def compute_accel(self, state: np.ndarray, epoch: float) -> np.ndarray:
-        """[L1 LEGACY] Compute acceleration for a SINGLE spacecraft."""
-        # 使用 UniversalCRTBP 的实现
-        return self._universal_crtbp.compute_accel(state, epoch)
-    
-    def compute_vectorized_acc(self, state_matrix: np.ndarray, epoch: float) -> np.ndarray:
-        """
-        [L2-SPECIFIC / PARALLELIZATION] 
-        Batch compute accelerations for N spacecraft.
-        """
-        # 使用 UniversalCRTBP 的向量化实现
-        return self._universal_crtbp.compute_vectorized_acc(state_matrix, epoch)
-    
-    def __repr__(self) -> str:
-        # 保持原 GravityCRTBP 的字符串表示
-        return f"GravityCRTBP(mu={self.mu:.2e}, OMEGA={self.OMEGA:.2e})"
+        def __repr__(self) -> str:
+            # 保持原 GravityCRTBP 的字符串表示
+            return f"GravityCRTBP(mu={self.mu:.2e}, OMEGA={self.OMEGA:.2e})"
     
     # 导出类
     __all__ = ['GravityCRTBP']
