@@ -111,7 +111,7 @@ F_drag = -½ ρ(h) C_d A v_rel² (v_rel/|v_rel|)
 
 ### 代码实现路径（优先级排序）
 
-#### 第一阶段：基础设施先行（1-2个月）
+#### Sprint 1：基础设施先行
 1. **高精度星历模块** (`HighPrecisionEphemeris`)
    ```python
    # 伪代码示例
@@ -142,17 +142,17 @@ F_drag = -½ ρ(h) C_d A v_rel² (v_rel/|v_rel|)
    - 在 `math_tools.py` 中添加 `AdaptiveIntegrator` 类
    - 实现 `runge_kutta_fehlberg78` 函数
 
-#### 第二阶段：动力学模型升级（1个月）
+#### Sprint 2：动力学模型升级
 4. **通用三体模型** (`UniversalCRTBP`)
    - 重构现有 `CRTBP` 类，支持任意双主天体参数
    - 添加地月系统预设配置
 
-#### 第三阶段：专用算法开发（2个月）
+#### Sprint 3：专用算法开发
 5. **轨道设计器** (`LunarSwingTargeter`)
    - 集成微分修正算法
    - 实现共振轨道搜索
 
-#### 第四阶段：系统集成验证（1个月）
+#### Sprint 4：系统集成验证
 6. **专用仿真场景** (`EarthMoonResonanceSimulation`)
    - 整合所有新模块
    - 执行长期演化仿真
