@@ -6,7 +6,7 @@
 """
 
 import numpy as np
-from mission_sim.core.physics.models.base import ForceModel
+from mission_sim.core.physics.environment import IForceModel
 
 
 def _atmospheric_drag_accel(
@@ -58,7 +58,7 @@ def _atmospheric_drag_accel(
     return acc.astype(np.float64)
 
 
-class AtmosphericDrag(ForceModel):
+class AtmosphericDrag(IForceModel):
     """
     大气阻力模型 (指数密度模型)
     继承自 IForceModel，计算大气阻力加速度（地心惯性系）。
