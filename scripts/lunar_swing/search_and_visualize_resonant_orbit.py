@@ -24,11 +24,16 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 import sys
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
-from mission_sim.core.cyber.algorithms.lunar_swing_targeter import LunarSwingTargeter
-from mission_sim.core.physics.models.gravity.universal_crtbp import UniversalCRTBP
+# Add project root to path (handle both direct run and module import)
+try:
+    from mission_sim.core.cyber.algorithms.lunar_swing_targeter import LunarSwingTargeter
+    from mission_sim.core.physics.models.gravity.universal_crtbp import UniversalCRTBP
+except ImportError:
+    # Add project root to path
+    project_root = Path(__file__).resolve().parent.parent.parent
+    sys.path.insert(0, str(project_root))
+    from mission_sim.core.cyber.algorithms.lunar_swing_targeter import LunarSwingTargeter
+    from mission_sim.core.physics.models.gravity.universal_crtbp import UniversalCRTBP
 
 
 def generate_3d_trajectory(targeter, initial_state, period, output_path):
@@ -250,15 +255,24 @@ def main():
     # Initial guess (adjust based on resonance)
     mu = targeter.mu
     if (n, m) == (1, 1):
-        # L1 family orbit
-        L1_x = 0.8369
-        initial_guess = np.array([L1_x + 0.05, 0.0, 0.0, 0.0, 0.35, 0.0])
+        # L1 family orbit - better initial guess based on linearized theory
+        L1_x = 0.836915
+        # vy ≈ sqrt(3*mu) for small amplitude L1 orbits
+        vy_guess = np.sqrt(3 * mu) * 0.8
+        initial_guess = np.array([L1_x + 0.02, 0.0, 0.0, 0.0, vy_guess, 0.0])
+        print(f"Using L1-family initial guess: x={initial_guess[0]:.4f}, vy={vy_guess:.4f}")
     elif (n, m) == (2, 1):
-        # 2:1 resonance - more elliptical
-        initial_guess = np.array([0.9, 0.0, 0.0, 0.0, 1.2, 0.0])
+        # 2:1 resonance - high eccentricity orbit
+        # Apogee near Moon (x ~ 1), perigee near Earth (x ~ -mu)
+        initial_guess = np.array([0.95, 0.0, 0.0, 0.0, 1.15, 0.0])
+        print(f"Using 2:1 resonance initial guess: x={initial_guess[0]:.4f}, vy={initial_guess[4]:.4f}")
     else:
-        # Generic guess
-        initial_guess = np.array([0.85, 0.0, 0.0, 0.0, 0.8, 0.0])
+        # Generic guess - start from circular-ish orbit
+        a_resonant = ((m/n) ** (2/3))  # Semi-major axis for resonance
+        x_guess = a_resonant - mu
+        vy_guess = np.sqrt((1-mu)/abs(x_guess + mu)) * 0.9
+        initial_guess = np.array([x_guess, 0.0, 0.0, 0.0, vy_guess, 0.0])
+        print(f"Using generic initial guess for {n}:{m}: x={x_guess:.4f}, vy={vy_guess:.4f}")
     
     # Run search
     print(f"Searching for {n}:{m} resonant orbit...")
