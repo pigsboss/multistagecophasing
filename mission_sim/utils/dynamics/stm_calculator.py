@@ -18,20 +18,52 @@ class STMCalculator:
                           method: str = 'rk4',
                           jacobian: Optional[Callable] = None) -> np.ndarray:
         """
-        通过数值积分计算状态转移矩阵。
+        Compute state transition matrix via numerical integration.
 
         Args:
-            dynamics: 状态导数函数 f(t, x) -> dx/dt (6 维)
-            initial_state: 初始状态 (6 维)
-            t0, tf: 积分起止时间
-            method: 积分器方法 ('rk4', 'dop853')
-            jacobian: 雅可比函数 J(t, x) -> 6x6 矩阵，若 None 则使用数值差分
+            dynamics: State derivative function f(t, x) -> dx/dt (6D)
+            initial_state: Initial state (6D)
+            t0, tf: Integration interval
+            method: Integrator method ('rk4', 'dop853', 'rkf78')
+            jacobian: Jacobian function J(t, x) -> 6x6, if None uses numerical diff
 
         Returns:
-            6x6 状态转移矩阵 Φ(tf, t0)
+            6x6 state transition matrix Phi(tf, t0)
         """
         _, stm = STMCalculator.propagate_with_stm(
             dynamics, initial_state, t0, tf, method, jacobian
+        )
+        return stm
+
+    @staticmethod
+    def compute_analytic(dynamics_jacobian: Callable,
+                         initial_state: np.ndarray,
+                         t0: float,
+                         tf: float,
+                         method: str = 'rk4') -> np.ndarray:
+        """
+        Compute state transition matrix via analytic variational equation integration.
+        
+        This method requires an analytic Jacobian function and integrates the
+        variational equations directly.
+
+        Args:
+            dynamics_jacobian: Jacobian function J(t, x) -> 6x6 matrix
+            initial_state: Initial state (6D)
+            t0, tf: Integration interval
+            method: Integrator method ('rk4', 'rkf78')
+
+        Returns:
+            6x6 state transition matrix Phi(tf, t0)
+        """
+        # Use propagate_with_stm with the provided jacobian
+        _, stm = STMCalculator.propagate_with_stm(
+            dynamics=lambda t, x: np.zeros(6),  # Dummy dynamics, not used when jacobian provided
+            initial_state=initial_state,
+            t0=t0,
+            tf=tf,
+            method=method,
+            jacobian=dynamics_jacobian
         )
         return stm
 
@@ -141,7 +173,7 @@ class STMCalculator:
         dt = (tf - t0) / num_steps
         
         if method == 'rk4':
-            # 经典四阶 Runge-Kutta
+            # Classic 4th-order Runge-Kutta
             x = augmented_state.copy()
             t = t0
             
@@ -155,8 +187,9 @@ class STMCalculator:
                 
             final_augmented = x
             
-        elif method == 'rkf78':
-            # 7-8阶 Runge-Kutta-Fehlberg（自适应步长简化版）
+        elif method in ('rkf78', 'dop853'):
+            # 7-8th order Runge-Kutta-Fehlberg (adaptive step size simplified version)
+            # dop853 is mapped to rkf78 for compatibility
             final_augmented = STMCalculator._rkf78_integrate(
                 aug_dynamics, augmented_state, t0, tf, rtol=1e-10, atol=1e-12
             )
