@@ -99,10 +99,14 @@ class LunarSwingTargeter:
         x0 = initial_guess.copy()
         history = []
         
-        # Design variable indices: vy=4, vz=5
-        design_indices = [4, 5]
-        # Residual dimension: position residual x, y, z (indices 0, 1, 2)
-        residual_indices = [0, 1, 2]
+        # Design variable indices: vy=4, vz=5 (but vz only if non-zero z or vz in initial guess)
+        # For planar orbits (z=vz=0), only optimize vy
+        is_planar = (initial_guess[2] == 0.0 and initial_guess[5] == 0.0)
+        design_indices = [4] if is_planar else [4, 5]
+        # Residual dimension: match design variables dimension
+        # For planar: only check x, y (z should naturally stay 0)
+        # For 3D: check x, y, z
+        residual_indices = [0, 1] if len(design_indices) == 1 else [0, 1, 2]
 
         for i in range(max_iter):
             # Use STM calculator to propagate state and compute STM simultaneously
