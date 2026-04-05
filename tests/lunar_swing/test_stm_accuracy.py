@@ -29,7 +29,7 @@ class TestSTMAccuracy:
         
         # 零时间传播
         _, stm = calc.propagate_with_stm(
-            dynamics=lambda t, x: earth_moon_crtbp._simple_crtbp_derivative(x),
+            dynamics=lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x),
             initial_state=sample_state,
             t0=0.0,
             tf=0.0,
@@ -43,7 +43,7 @@ class TestSTMAccuracy:
     def test_semigroup_property(self, earth_moon_crtbp, sample_state):
         """测试：STM 的半群性质 Φ(t2,t0) = Φ(t2,t1)Φ(t1,t0)"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._simple_crtbp_derivative(x)
+        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
         
         # 地月系统无量纲时间单位约 4.3 天，测试一个短周期
         T = 2.0  # 约 8.6 天
@@ -71,7 +71,7 @@ class TestSTMAccuracy:
     def test_symplectic_property(self, earth_moon_crtbp, sample_state):
         """测试：保守系统 STM 应近似满足辛性质 (STM^T J STM = J)"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._simple_crtbp_derivative(x)
+        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
         
         # 辛矩阵 J
         J = np.block([
@@ -96,7 +96,7 @@ class TestSTMAccuracy:
     def test_state_sensitivity_consistency(self, earth_moon_crtbp, sample_state):
         """测试：STM 预测的偏差应与实际传播偏差一致"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._simple_crtbp_derivative(x)
+        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
         
         # 基础传播
         x0 = sample_state.copy()
