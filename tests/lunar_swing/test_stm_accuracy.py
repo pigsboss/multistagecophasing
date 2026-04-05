@@ -27,9 +27,16 @@ class TestSTMAccuracy:
         """测试：t=0 时 STM 应为单位矩阵"""
         calc = STMCalculator()
         
+        # 定义完整的动力学函数（返回6维状态导数）
+        def full_dynamics(t, x):
+            # x = [pos(3), vel(3)]
+            # dx/dt = [vel(3), accel(3)]
+            accel = earth_moon_crtbp._crtbp_acceleration_nd(x)
+            return np.concatenate([x[3:6], accel])
+        
         # 零时间传播
         _, stm = calc.propagate_with_stm(
-            dynamics=lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x),
+            dynamics=full_dynamics,
             initial_state=sample_state,
             t0=0.0,
             tf=0.0,
@@ -43,22 +50,26 @@ class TestSTMAccuracy:
     def test_semigroup_property(self, earth_moon_crtbp, sample_state):
         """测试：STM 的半群性质 Φ(t2,t0) = Φ(t2,t1)Φ(t1,t0)"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
+        
+        # 定义完整的动力学函数（返回6维状态导数）
+        def full_dynamics(t, x):
+            accel = earth_moon_crtbp._crtbp_acceleration_nd(x)
+            return np.concatenate([x[3:6], accel])
         
         # 地月系统无量纲时间单位约 4.3 天，测试一个短周期
         T = 2.0  # 约 8.6 天
         
         # 分两段计算
         x_mid, stm1 = calc.propagate_with_stm(
-            dynamics, sample_state, 0.0, T/2, method='rk4', num_steps=100
+            full_dynamics, sample_state, 0.0, T/2, method='rk4', num_steps=100
         )
         _, stm2 = calc.propagate_with_stm(
-            dynamics, x_mid, T/2, T, method='rk4', num_steps=100
+            full_dynamics, x_mid, T/2, T, method='rk4', num_steps=100
         )
         
         # 直接计算全程
         _, stm_full = calc.propagate_with_stm(
-            dynamics, sample_state, 0.0, T, method='rk4', num_steps=200
+            full_dynamics, sample_state, 0.0, T, method='rk4', num_steps=200
         )
         
         # 验证半群性质
@@ -71,7 +82,11 @@ class TestSTMAccuracy:
     def test_symplectic_property(self, earth_moon_crtbp, sample_state):
         """测试：保守系统 STM 应近似满足辛性质 (STM^T J STM = J)"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
+        
+        # 定义完整的动力学函数（返回6维状态导数）
+        def full_dynamics(t, x):
+            accel = earth_moon_crtbp._crtbp_acceleration_nd(x)
+            return np.concatenate([x[3:6], accel])
         
         # 辛矩阵 J
         J = np.block([
@@ -80,7 +95,7 @@ class TestSTMAccuracy:
         ])
         
         _, stm = calc.propagate_with_stm(
-            dynamics, sample_state, 0.0, 1.0, method='rk4', num_steps=100
+            full_dynamics, sample_state, 0.0, 1.0, method='rk4', num_steps=100
         )
         
         # 计算 STM^T J STM
@@ -96,18 +111,22 @@ class TestSTMAccuracy:
     def test_state_sensitivity_consistency(self, earth_moon_crtbp, sample_state):
         """测试：STM 预测的偏差应与实际传播偏差一致"""
         calc = STMCalculator()
-        dynamics = lambda t, x: earth_moon_crtbp._crtbp_acceleration_nd(x)
+        
+        # 定义完整的动力学函数（返回6维状态导数）
+        def full_dynamics(t, x):
+            accel = earth_moon_crtbp._crtbp_acceleration_nd(x)
+            return np.concatenate([x[3:6], accel])
         
         # 基础传播
         x0 = sample_state.copy()
         xf, stm = calc.propagate_with_stm(
-            dynamics, x0, 0.0, 1.0, method='rk4', num_steps=100
+            full_dynamics, x0, 0.0, 1.0, method='rk4', num_steps=100
         )
         
         # 施加微小扰动
         delta_x0 = np.array([1e-6, 0, 0, 0, 0, 0])
         xf_perturbed, _ = calc.propagate_with_stm(
-            dynamics, x0 + delta_x0, 0.0, 1.0, method='rk4', num_steps=100
+            full_dynamics, x0 + delta_x0, 0.0, 1.0, method='rk4', num_steps=100
         )
         
         # 实际偏差
