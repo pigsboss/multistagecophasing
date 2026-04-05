@@ -185,10 +185,22 @@ class STMCalculator:
             
             for _ in range(num_steps):
                 k1 = aug_dynamics(t, x)
-                k2 = aug_dynamics(t + 0.5*dt, x + 0.5*dt*k1)
-                k3 = aug_dynamics(t + 0.5*dt, x + 0.5*dt*k2)
-                k4 = aug_dynamics(t + dt, x + dt*k3)
+                # Clip intermediate states to prevent overflow
+                x2 = x + 0.5*dt*k1
+                x2 = np.clip(x2, -1e10, 1e10)
+                k2 = aug_dynamics(t + 0.5*dt, x2)
+                
+                x3 = x + 0.5*dt*k2
+                x3 = np.clip(x3, -1e10, 1e10)
+                k3 = aug_dynamics(t + 0.5*dt, x3)
+                
+                x4 = x + dt*k3
+                x4 = np.clip(x4, -1e10, 1e10)
+                k4 = aug_dynamics(t + dt, x4)
+                
                 x = x + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+                # Clip final state
+                x = np.clip(x, -1e10, 1e10)
                 t += dt
                 
             final_augmented = x

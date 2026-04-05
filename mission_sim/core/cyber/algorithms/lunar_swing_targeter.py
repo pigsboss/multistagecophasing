@@ -234,28 +234,41 @@ class LunarSwingTargeter:
         """Simplified CRTBP dynamics derivative (dimensionless rotating frame)"""
         x, y, z, vx, vy, vz = state
         mu = self.mu
+        
+        # Clamp state components to prevent overflow in intermediate calculations
+        max_pos = 1e4
+        max_vel = 1e4
+        x = np.clip(x, -max_pos, max_pos)
+        y = np.clip(y, -max_pos, max_pos)
+        z = np.clip(z, -max_pos, max_pos)
+        vx = np.clip(vx, -max_vel, max_vel)
+        vy = np.clip(vy, -max_vel, max_vel)
+        vz = np.clip(vz, -max_vel, max_vel)
 
-        r1_sq = (x + mu)**2 + y**2 + z**2
-        r2_sq = (x + mu - 1)**2 + y**2 + z**2
+        # Compute distances with overflow protection
+        dx1 = x + mu
+        dx2 = x + mu - 1
         
-        # Prevent division by zero and overflow
+        # Use safe squaring to prevent overflow
+        r1_sq = min(dx1**2 + y**2 + z**2, 1e10)
+        r2_sq = min(dx2**2 + y**2 + z**2, 1e10)
+        
+        # Prevent division by zero
         eps = 1e-10
-        
-        # Clamp squared distances to prevent overflow
-        r1_sq = np.clip(r1_sq, eps, 1e10)
-        r2_sq = np.clip(r2_sq, eps, 1e10)
+        r1_sq = max(r1_sq, eps)
+        r2_sq = max(r2_sq, eps)
         
         r1 = np.sqrt(r1_sq)
         r2 = np.sqrt(r2_sq)
         
-        # Clamp distances to prevent overflow in cube
-        r1 = np.clip(r1, eps, 1e5)
-        r2 = np.clip(r2, eps, 1e5)
+        # Clamp distances
+        r1 = min(r1, 1e5)
+        r2 = min(r2, 1e5)
         
         r1_cubed = r1**3
         r2_cubed = r2**3
 
-        ax = 2*vy + x - (1-mu)*(x+mu)/r1_cubed - mu*(x+mu-1)/r2_cubed
+        ax = 2*vy + x - (1-mu)*dx1/r1_cubed - mu*dx2/r2_cubed
         ay = -2*vx + y - (1-mu)*y/r1_cubed - mu*y/r2_cubed
         az = -(1-mu)*z/r1_cubed - mu*z/r2_cubed
 
