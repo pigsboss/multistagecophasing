@@ -305,7 +305,7 @@ def main():
         dynamics_model=crtbp,
         mu=crtbp.mu,
         integrator_type='rk4',
-        num_steps=1000  # Increase for better accuracy
+        num_steps=5000  # Increase drastically for high-eccentricity orbits
     )
     
     # Output directory
