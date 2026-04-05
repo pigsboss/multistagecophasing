@@ -198,8 +198,9 @@ class LunarSwingTargeter:
             x0[design_indices] += delta_v_design
 
             if i % 5 == 0 or res_norm > 1e-2:
+                corr_str = ', '.join([f"{dv:.3e}" for dv in delta_v_design])
                 print(f"  Iter {i+1}: pos residual = {res_norm:.3e}, "
-                      f"correction = [{delta_v_design[0]:.3e}, {delta_v_design[1]:.3e}]")
+                      f"correction = [{corr_str}]")
 
         print(f"✗ Failed to converge after {max_iter} iterations, final residual: {history[-1]['residual_norm']:.2e}")
         return {
