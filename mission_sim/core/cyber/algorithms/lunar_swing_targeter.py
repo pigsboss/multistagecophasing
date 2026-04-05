@@ -206,11 +206,13 @@ class LunarSwingTargeter:
         }
 
     def _get_dynamics_func(self) -> Callable:
-        """获取适用于 STM 计算器的动力学函数 f(t, x)"""
+        """获取适用于 STM 计算器的动力学函数 f(t, x) -> [vx, vy, vz, ax, ay, az]"""
         if hasattr(self.dynamics, '_crtbp_acceleration_nd'):
             # 使用 UniversalCRTBP 的维度加速度方法
+            # 需要包装成完整的6维状态导数 [vel, accel]
             def dynamics_wrapper(t, x):
-                return self.dynamics._crtbp_acceleration_nd(x)
+                accel = self.dynamics._crtbp_acceleration_nd(x)
+                return np.concatenate([x[3:6], accel])
             return dynamics_wrapper
         elif callable(self.dynamics):
             # 如果已经是函数形式 f(t, x)，直接使用
