@@ -100,12 +100,12 @@ class LunarSwingTargeter:
         history = []
         
         # Design variable indices: vx=3, vy=4, vz=5
-        # For planar orbits (z=vz=0), only vary vy to keep symmetry (vx=0 fixed)
+        # For planar orbits (z=vz=0), we can vary both vx and vy to close x and y.
         # For 3D orbits, vary vy and vz (keep vx fixed).
         is_planar = (initial_guess[2] == 0.0 and initial_guess[5] == 0.0)
         if is_planar:
-            design_indices = [4]      # only vy, keep vx=0, z=0, vz=0 fixed
-            residual_indices = [0, 1, 2]  # all 3 position components for robustness
+            design_indices = [3, 4]   # vx, vy
+            residual_indices = [0, 1] # x, y
         else:
             design_indices = [4, 5]   # vy, vz
             residual_indices = [0, 1, 2]  # x, y, z
