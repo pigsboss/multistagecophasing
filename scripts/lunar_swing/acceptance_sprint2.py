@@ -48,7 +48,6 @@ def check_jacobi_conservation(targeter, initial_state, period):
             k3 = dynamics(t_span[i] + 0.5*dt, x + 0.5*dt*k2)
             k4 = dynamics(t_span[i] + dt, x + dt*k3)
             x = x + (dt/6.0) * (k1 + 2*k2 + 2*k3 + k4)
-            x = np.clip(x, -1e4, 1e4)
     
     C0 = jacobi_history[0]
     max_rel_change = max([abs((C - C0) / C0) for C in jacobi_history])
@@ -68,7 +67,7 @@ def main():
         dynamics_model=crtbp,
         mu=crtbp.mu,
         integrator_type='rk4',
-        num_steps=200
+        num_steps=1000  # Increase for better accuracy
     )
     print("   ✅ CRTBP and Targeter initialized")
     print(f"   System: {crtbp.system_name}")

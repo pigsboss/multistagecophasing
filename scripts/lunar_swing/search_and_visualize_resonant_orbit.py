@@ -53,7 +53,6 @@ def generate_3d_trajectory(targeter, initial_state, period, output_path):
         k3 = dynamics(t_span[i-1] + 0.5*dt, x + 0.5*dt*k2)
         k4 = dynamics(t_span[i-1] + dt, x + dt*k3)
         x = x + (dt/6.0) * (k1 + 2*k2 + 2*k3 + k4)
-        x = np.clip(x, -1e4, 1e4)
         states.append(x.copy())
     
     states = np.array(states)
@@ -105,7 +104,6 @@ def generate_poincare_section(targeter, initial_state, period, output_path):
         k3 = dynamics(t_span[i-1] + 0.5*dt, x + 0.5*dt*k2)
         k4 = dynamics(t_span[i-1] + dt, x + dt*k3)
         x = x + (dt/6.0) * (k1 + 2*k2 + 2*k3 + k4)
-        x = np.clip(x, -1e4, 1e4)
         states.append(x.copy())
     
     states = np.array(states)
@@ -172,7 +170,6 @@ def generate_energy_conservation(targeter, initial_state, period, output_path):
             k3 = dynamics(t_span[i] + 0.5*dt, x + 0.5*dt*k2)
             k4 = dynamics(t_span[i] + dt, x + dt*k3)
             x = x + (dt/6.0) * (k1 + 2*k2 + 2*k3 + k4)
-            x = np.clip(x, -1e4, 1e4)
     
     t_hours = t_span * 4.342 * 24
     
@@ -231,9 +228,10 @@ def generate_potential_zvs_plot(targeter, converged_state, output_path):
     cbar.ax.tick_params(labelsize=10)
     
     # Zero velocity surface (Ω = C/2)
-    zvs_contour = ax.contour(X, Y, Omega, levels=[C/2], colors='red', 
-                              linewidths=2, linestyles='-')
-    zvs_contour.collections[0].set_label(f'ZVS (C={C:.4f})')
+    ax.contour(X, Y, Omega, levels=[C/2], colors='red', 
+               linewidths=2, linestyles='-')
+    # Add dummy line for legend (matplotlib compatibility)
+    ax.plot([], [], color='red', linewidth=2, label=f'ZVS (C={C:.4f})')
     
     # Earth, Moon
     ax.plot([-mu], [0], 'b^', markersize=12, label='Earth')
@@ -307,7 +305,7 @@ def main():
         dynamics_model=crtbp,
         mu=crtbp.mu,
         integrator_type='rk4',
-        num_steps=200
+        num_steps=1000  # Increase for better accuracy
     )
     
     # Output directory
