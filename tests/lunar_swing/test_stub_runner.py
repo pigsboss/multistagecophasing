@@ -27,15 +27,15 @@ def test_stub_runner():
 
 def run_stub_tests_cli():
     """
-    命令行接口：运行所有桩测试
+    Command line interface: run all stub tests
     
-    保留原有的命令行功能，便于手动执行
+    Preserves original CLI functionality for manual execution
     """
     print("=" * 70)
-    print("运行 LUNAR-SWING 桩测试（第一阶段：接口设计验证）")
+    print("Running LUNAR-SWING Stub Tests (Stage 1: Interface Design Validation)")
     print("=" * 70)
     
-    # 测试文件列表（与之前相同）
+    # Test file list (same as before)
     test_files = [
         'test_ephemeris_stub.py',
         'test_crtbp_stub.py', 
@@ -44,27 +44,27 @@ def run_stub_tests_cli():
         'test_stm_calculator_stub.py'
     ]
     
-    # 构建完整路径
+    # Build full paths
     test_paths = [os.path.join(os.path.dirname(__file__), f) for f in test_files]
     
-    # 运行测试
+    # Run tests
     args = [
         '-v',
-        '--tb=short',  # 简短回溯
+        '--tb=short',  # Short traceback
         '--disable-warnings',
-        '--capture=no'  # 显示打印输出
+        '--capture=no'  # Show print output
     ]
     
-    # 添加测试文件
+    # Add test files
     args.extend(test_paths)
     
-    print(f"\n运行 {len(test_files)} 个桩测试文件...")
+    print(f"\nRunning {len(test_files)} stub test files...")
     result = pytest.main(args)
     
     if result == 0:
-        print("\n✅ 所有桩测试通过！接口设计合理。")
+        print("\n✅ All stub tests passed! Interface design is valid.")
     else:
-        print("\n❌ 部分桩测试失败。请检查接口设计。")
+        print("\n❌ Some stub tests failed. Please check interface design.")
     
     return result
 
