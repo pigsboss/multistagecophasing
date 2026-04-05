@@ -46,6 +46,7 @@ class EphemerisMode(Enum):
     CRTBP = "crtbp"               # CRTBP模型
     NUMERICAL = "numerical"       # 数值积分
     EXTERNAL = "external"         # 外部数据（如DE440）
+    SPICE = "spice"               # NASA SPICE工具
 
 
 @dataclass
