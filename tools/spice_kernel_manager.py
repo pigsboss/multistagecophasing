@@ -1,18 +1,18 @@
 """
-SPICE核文件管理器
+SPICE Kernel Manager
 
-自动化下载、更新和管理SPICE核文件（用于高精度星历计算）。
-支持DE440行星历表、姿态文件、计时文件等。
+Automated download, update, and management of SPICE kernel files (for high-precision ephemeris calculations).
+Supports DE440 planetary ephemerides, attitude files, timing files, etc.
 
-特性：
-1. 自动下载缺失的核文件
-2. 版本管理和更新检查
-3. 本地缓存，避免重复下载
-4. 多线程下载支持
-5. 验证文件完整性（MD5校验）
+Features:
+1. Automatic download of missing kernel files
+2. Version management and update checking
+3. Local caching to avoid repeated downloads
+4. Multi-threaded download support
+5. File integrity verification (MD5 checksum)
 
-作者: MCPC开发团队
-版本: 1.0.0
+Author: MCPC Development Team
+Version: 1.0.0
 """
 
 import os
@@ -36,8 +36,8 @@ try:
     HAS_DEPENDENCIES = True
 except ImportError:
     HAS_DEPENDENCIES = False
-    print("警告: 缺少requests或tqdm库，无法使用自动下载功能")
-    print("请安装: pip install requests tqdm")
+    print("Warning: Missing requests or tqdm library, automatic download unavailable")
+    print("Please install: pip install requests tqdm")
 
 # SPICE核文件服务器URL
 SPICE_SERVERS = {
@@ -164,37 +164,37 @@ class SPICEKernelManager:
     
     def __init__(self, config: Optional[KernelConfig] = None):
         """
-        初始化SPICE核管理器
+        Initialize SPICE kernel manager
         
         Args:
-            config: 核配置，如为None则使用默认配置
+            config: Kernel configuration, uses default if None
         """
         self.config = config or KernelConfig()
         self.kernel_dir = self.config.kernel_dir
         
-        # 确保目录存在
+        # Ensure directory exists
         self.kernel_dir.mkdir(parents=True, exist_ok=True)
         
-        # 加载核数据库
+        # Load kernel database
         self._kernels: Dict[str, KernelInfo] = {}
         self._load_kernel_database()
         
-        # 状态文件路径
+        # State file path
         self.state_file = self.kernel_dir / "kernel_state.json"
         self._load_state()
         
-        # 锁，用于线程安全
+        # Lock for thread safety
         self._lock = threading.RLock()
         
         self.verbose = self.config.verbose
         
         if not HAS_DEPENDENCIES:
             if self.config.auto_download:
-                warnings.warn("缺少requests或tqdm库，自动下载功能不可用")
+                warnings.warn("Missing requests or tqdm library, automatic download unavailable")
         
         if self.verbose:
-            print(f"[SPICEKernelManager] 初始化完成，核目录: {self.kernel_dir}")
-            print(f"[SPICEKernelManager] 可用核文件: {len(self._kernels)} 个")
+            print(f"[SPICEKernelManager] Initialization complete. Kernel directory: {self.kernel_dir}")
+            print(f"[SPICEKernelManager] Available kernels: {len(self._kernels)}")
     
     def _load_kernel_database(self):
         """加载核文件数据库"""
@@ -220,7 +220,7 @@ class SPICEKernelManager:
             )
     
     def _load_state(self):
-        """加载状态信息"""
+        """Load state information"""
         if self.state_file.exists():
             try:
                 with open(self.state_file, 'r', encoding='utf-8') as f:
@@ -233,7 +233,7 @@ class SPICEKernelManager:
                             try:
                                 kernel.last_update = datetime.fromisoformat(state['last_update'])
                             except ValueError:
-                                # 尝试其他格式
+                                # Try alternative format
                                 try:
                                     kernel.last_update = datetime.strptime(
                                         state['last_update'], '%Y-%m-%d %H:%M:%S')
@@ -245,10 +245,10 @@ class SPICEKernelManager:
                             kernel.md5 = state['md5']
             except Exception as e:
                 if self.verbose:
-                    print(f"[SPICEKernelManager] 加载状态失败: {e}")
+                    print(f"[SPICEKernelManager] Failed to load state: {e}")
     
     def _save_state(self):
-        """保存状态信息"""
+        """Save state information"""
         state_data = {}
         for kernel_id, kernel in self._kernels.items():
             state_data[kernel_id] = {
@@ -265,7 +265,7 @@ class SPICEKernelManager:
                 json.dump(state_data, f, indent=2, ensure_ascii=False)
         except Exception as e:
             if self.verbose:
-                print(f"[SPICEKernelManager] 保存状态失败: {e}")
+                print(f"[SPICEKernelManager] Failed to save state: {e}")
     
     def list_kernels(self) -> List[Dict]:
         """列出所有可用的核文件"""
@@ -306,16 +306,16 @@ class SPICEKernelManager:
                    category: str = "generic", description: str = "", 
                    required: bool = False, compressed: bool = False):
         """
-        添加自定义核文件
+        Add custom kernel file
         
         Args:
-            kernel_id: 核标识符
-            name: 文件名
-            url: 下载URL
-            category: 类别
-            description: 描述
-            required: 是否必需
-            compressed: 是否为压缩文件
+            kernel_id: Kernel identifier
+            name: Filename
+            url: Download URL
+            category: Category
+            description: Description
+            required: Whether required
+            compressed: Whether compressed file
         """
         with self._lock:
             local_path = self.kernel_dir / name
@@ -331,15 +331,15 @@ class SPICEKernelManager:
             )
             
             if self.verbose:
-                print(f"[SPICEKernelManager] 添加核文件: {kernel_id} -> {name}")
+                print(f"[SPICEKernelManager] Added kernel: {kernel_id} -> {name}")
     
     def remove_kernel(self, kernel_id: str, delete_file: bool = False):
         """
-        移除核文件
+        Remove kernel file
         
         Args:
-            kernel_id: 核标识符
-            delete_file: 是否删除本地文件
+            kernel_id: Kernel identifier
+            delete_file: Whether to delete local file
         """
         with self._lock:
             if kernel_id in self._kernels:
@@ -349,34 +349,34 @@ class SPICEKernelManager:
                     try:
                         kernel.local_path.unlink()
                         if self.verbose:
-                            print(f"[SPICEKernelManager] 删除文件: {kernel.local_path}")
+                            print(f"[SPICEKernelManager] Deleted file: {kernel.local_path}")
                     except Exception as e:
-                        print(f"[SPICEKernelManager] 删除文件失败: {e}")
+                        print(f"[SPICEKernelManager] Failed to delete file: {e}")
                 
                 del self._kernels[kernel_id]
                 
                 if self.verbose:
-                    print(f"[SPICEKernelManager] 移除核文件: {kernel_id}")
+                    print(f"[SPICEKernelManager] Removed kernel: {kernel_id}")
     
     def _download_file(self, url: str, dest_path: Path, kernel_name: str) -> bool:
-        """下载单个文件"""
+        """Download single file"""
         try:
-            # 创建临时文件
+            # Create temporary file
             temp_file = dest_path.with_suffix('.downloading')
             
-            # 使用requests下载
+            # Download with requests
             headers = {'User-Agent': 'MCPC-SPICE-Kernel-Manager/1.0'}
             response = requests.get(url, stream=True, timeout=self.config.timeout, headers=headers)
             response.raise_for_status()
             
-            # 获取文件大小
+            # Get file size
             total_size = int(response.headers.get('content-length', 0))
             
-            # 显示进度条
+            # Show progress bar
             with open(temp_file, 'wb') as f:
                 if self.verbose:
                     with tqdm(
-                        desc=f"下载 {kernel_name}",
+                        desc=f"Downloading {kernel_name}",
                         total=total_size,
                         unit='B',
                         unit_scale=True,
@@ -391,22 +391,22 @@ class SPICEKernelManager:
                         if chunk:
                             f.write(chunk)
             
-            # 验证文件大小
+            # Verify file size
             if total_size > 0:
                 actual_size = temp_file.stat().st_size
                 if actual_size != total_size:
-                    print(f"[SPICEKernelManager] 警告: 文件大小不匹配 "
+                    print(f"[SPICEKernelManager] Warning: File size mismatch "
                           f"({actual_size} != {total_size})")
                     return False
             
-            # 移动临时文件到目标位置
+            # Move temporary file to destination
             shutil.move(temp_file, dest_path)
             
             return True
             
         except requests.exceptions.RequestException as e:
-            print(f"[SPICEKernelManager] 下载失败 {url}: {e}")
-            # 清理临时文件
+            print(f"[SPICEKernelManager] Download failed {url}: {e}")
+            # Clean up temporary file
             if 'temp_file' in locals() and temp_file.exists():
                 temp_file.unlink()
             return False
@@ -424,89 +424,89 @@ class SPICEKernelManager:
     
     def download_kernel(self, kernel_id: str, force: bool = False) -> bool:
         """
-        下载单个核文件
+        Download single kernel file
         
         Args:
-            kernel_id: 核标识符
-            force: 强制重新下载（即使已存在）
+            kernel_id: Kernel identifier
+            force: Force re-download (even if exists)
             
         Returns:
-            bool: 下载是否成功
+            bool: Whether download succeeded
         """
         with self._lock:
             if kernel_id not in self._kernels:
-                print(f"[SPICEKernelManager] 错误: 核文件 '{kernel_id}' 不存在")
+                print(f"[SPICEKernelManager] Error: Kernel '{kernel_id}' not found")
                 return False
             
             if not HAS_DEPENDENCIES:
-                print("[SPICEKernelManager] 错误: 缺少requests库，无法下载")
+                print("[SPICEKernelManager] Error: Missing requests library, cannot download")
                 return False
             
             kernel = self._kernels[kernel_id]
             
-            # 检查文件是否已存在
+            # Check if file already exists
             if kernel.local_path.exists() and not force:
                 if self.verbose:
-                    print(f"[SPICEKernelManager] 文件已存在: {kernel.local_path}")
+                    print(f"[SPICEKernelManager] File already exists: {kernel.local_path}")
                 
-                # 更新文件大小信息
+                # Update file size information
                 if kernel.size == 0:
                     kernel.size = kernel.local_path.stat().st_size
                 
                 return True
             
-            # 下载文件
+            # Download file
             if self.verbose:
-                print(f"[SPICEKernelManager] 开始下载: {kernel.name} ({kernel_id})")
+                print(f"[SPICEKernelManager] Starting download: {kernel.name} ({kernel_id})")
                 print(f"  URL: {kernel.url}")
             
             success = False
             for attempt in range(self.config.max_retries):
                 if attempt > 0:
-                    print(f"[SPICEKernelManager] 重试 {attempt}/{self.config.max_retries}...")
-                    time.sleep(2 ** attempt)  # 指数退避
+                    print(f"[SPICEKernelManager] Retry {attempt}/{self.config.max_retries}...")
+                    time.sleep(2 ** attempt)  # Exponential backoff
                 
                 if kernel.compressed:
-                    # 下载压缩文件
+                    # Download compressed file
                     compressed_path = kernel.local_path.with_suffix('.gz')
                     if self._download_file(kernel.url, compressed_path, kernel.name):
-                        # 解压文件
+                        # Decompress file
                         if self._decompress_file(compressed_path, kernel.local_path):
-                            compressed_path.unlink()  # 删除压缩文件
+                            compressed_path.unlink()  # Delete compressed file
                             success = True
                             break
                 else:
-                    # 直接下载
+                    # Direct download
                     if self._download_file(kernel.url, kernel.local_path, kernel.name):
                         success = True
                         break
             
             if success:
-                # 更新状态
+                # Update state
                 kernel.last_update = datetime.now()
                 kernel.size = kernel.local_path.stat().st_size
                 self._save_state()
                 
                 if self.verbose:
                     size_mb = kernel.size / (1024*1024)
-                    print(f"[SPICEKernelManager] 下载完成: {kernel.local_path} "
+                    print(f"[SPICEKernelManager] Download complete: {kernel.local_path} "
                           f"({size_mb:.2f} MB)")
                 
                 return True
             else:
-                print(f"[SPICEKernelManager] 下载失败，已重试 {self.config.max_retries} 次")
+                print(f"[SPICEKernelManager] Download failed after {self.config.max_retries} retries")
                 return False
     
     def download_kernels(self, kernel_ids: List[str], force: bool = False) -> Dict[str, bool]:
         """
-        批量下载核文件
+        Batch download kernel files
         
         Args:
-            kernel_ids: 核文件ID列表
-            force: 强制重新下载
+            kernel_ids: List of kernel IDs
+            force: Force re-download
             
         Returns:
-            Dict[str, bool]: 下载结果 {核ID: 是否成功}
+            Dict[str, bool]: Download results {kernel_id: success}
         """
         if not HAS_DEPENDENCIES:
             return {kernel_id: False for kernel_id in kernel_ids}
@@ -514,9 +514,9 @@ class SPICEKernelManager:
         results = {}
         
         if self.verbose:
-            print(f"[SPICEKernelManager] 开始批量下载 {len(kernel_ids)} 个文件")
+            print(f"[SPICEKernelManager] Starting batch download of {len(kernel_ids)} files")
         
-        # 使用线程池并行下载
+        # Use thread pool for parallel downloads
         with ThreadPoolExecutor(max_workers=self.config.parallel_downloads) as executor:
             future_to_kernel = {
                 executor.submit(self.download_kernel, kernel_id, force): kernel_id
@@ -528,14 +528,14 @@ class SPICEKernelManager:
                 try:
                     results[kernel_id] = future.result()
                 except Exception as e:
-                    print(f"[SPICEKernelManager] 下载 {kernel_id} 时出错: {e}")
+                    print(f"[SPICEKernelManager] Error downloading {kernel_id}: {e}")
                     results[kernel_id] = False
         
-        # 统计结果
+        # Count results
         success_count = sum(1 for r in results.values() if r)
         
         if self.verbose:
-            print(f"[SPICEKernelManager] 批量下载完成: {success_count}/{len(kernel_ids)} 成功")
+            print(f"[SPICEKernelManager] Batch download complete: {success_count}/{len(kernel_ids)} succeeded")
         
         return results
     
@@ -590,29 +590,29 @@ class SPICEKernelManager:
     
     def verify_kernel(self, kernel_id: str) -> Tuple[bool, Optional[str]]:
         """
-        验证核文件完整性
+        Verify kernel file integrity
         
         Args:
-            kernel_id: 核标识符
+            kernel_id: Kernel identifier
             
         Returns:
-            Tuple[bool, Optional[str]]: (是否有效, 错误信息)
+            Tuple[bool, Optional[str]]: (valid, error_message)
         """
         if kernel_id not in self._kernels:
-            return False, f"核文件 '{kernel_id}' 不存在"
+            return False, f"Kernel '{kernel_id}' not found"
         
         kernel = self._kernels[kernel_id]
         
-        # 检查文件是否存在
+        # Check if file exists
         if not kernel.local_path.exists():
-            return False, f"文件不存在: {kernel.local_path}"
+            return False, f"File not found: {kernel.local_path}"
         
-        # 检查文件大小
+        # Check file size
         file_size = kernel.local_path.stat().st_size
-        if kernel.size > 0 and abs(file_size - kernel.size) > 1024:  # 允许1KB误差
-            return False, f"文件大小不匹配: {file_size} != {kernel.size} (相差 {abs(file_size - kernel.size)} 字节)"
+        if kernel.size > 0 and abs(file_size - kernel.size) > 1024:  # Allow 1KB difference
+            return False, f"File size mismatch: {file_size} != {kernel.size} (difference: {abs(file_size - kernel.size)} bytes)"
         
-        # 检查MD5校验和（如果有）
+        # Check MD5 checksum (if available)
         if kernel.md5:
             md5_hash = hashlib.md5()
             with open(kernel.local_path, 'rb') as f:
@@ -621,19 +621,19 @@ class SPICEKernelManager:
             
             actual_md5 = md5_hash.hexdigest()
             if actual_md5 != kernel.md5:
-                return False, f"MD5校验失败: {actual_md5} != {kernel.md5}"
+                return False, f"MD5 checksum failed: {actual_md5} != {kernel.md5}"
         
         return True, None
     
     def setup_for_mission(self, mission_type: str = "earth_moon") -> List[str]:
         """
-        为特定任务设置核文件
+        Set up kernel files for specific mission
         
         Args:
-            mission_type: 任务类型 ('earth_moon', 'deep_space', 'mars', 'custom')
+            mission_type: Mission type ('earth_moon', 'deep_space', 'mars', 'custom')
             
         Returns:
-            List[str]: 成功下载的核文件列表
+            List[str]: List of successfully downloaded kernel files
         """
         mission_kernels = {
             'earth_moon': ['de440', 'pck00010', 'naif0012', 'earth_200101', 'moon_pa'],
@@ -644,15 +644,15 @@ class SPICEKernelManager:
         }
         
         if mission_type not in mission_kernels:
-            print(f"[SPICEKernelManager] 警告: 未知任务类型 '{mission_type}'，使用默认")
+            print(f"[SPICEKernelManager] Warning: Unknown mission type '{mission_type}', using default")
             mission_type = 'custom'
         
         kernel_ids = mission_kernels[mission_type]
         
         if self.verbose:
-            print(f"[SPICEKernelManager] 为 {mission_type} 任务设置核文件")
+            print(f"[SPICEKernelManager] Setting up kernel files for {mission_type} mission")
         
-        # 下载所需的核文件
+        # Download required kernel files
         results = self.download_kernels(kernel_ids)
         
         successful = [kernel_id for kernel_id, success in results.items() if success]
@@ -661,13 +661,13 @@ class SPICEKernelManager:
     
     def get_kernel_paths(self, mission_type: str = "earth_moon") -> List[str]:
         """
-        获取特定任务所需的核文件路径
+        Get kernel file paths for specific mission
         
         Args:
-            mission_type: 任务类型
+            mission_type: Mission type
             
         Returns:
-            List[str]: 核文件路径列表
+            List[str]: List of kernel file paths
         """
         mission_kernels = {
             'earth_moon': ['de440', 'pck00010', 'naif0012', 'earth_200101', 'moon_pa'],
@@ -690,27 +690,27 @@ class SPICEKernelManager:
                     paths.append(str(kernel.local_path))
                 else:
                     if self.verbose:
-                        print(f"[SPICEKernelManager] 警告: 核文件不存在 {kernel_id}")
+                        print(f"[SPICEKernelManager] Warning: Kernel file not found: {kernel_id}")
         
         return paths
     
     def clean_cache(self, days_old: int = 30, dry_run: bool = False) -> List[str]:
         """
-        清理旧的缓存文件
+        Clean old cache files
         
         Args:
-            days_old: 删除超过指定天数的文件
-            dry_run: 仅显示要删除的文件，不实际删除
+            days_old: Delete files older than specified days
+            dry_run: Only show files to delete, don't actually delete
             
         Returns:
-            List[str]: 删除的文件列表
+            List[str]: List of deleted files
         """
         cutoff_time = datetime.now() - timedelta(days=days_old)
         deleted_files = []
         
         for file_path in self.kernel_dir.glob("*"):
             if file_path.is_file() and file_path.name != "kernel_state.json":
-                # 获取文件修改时间
+                # Get file modification time
                 try:
                     mtime = datetime.fromtimestamp(file_path.stat().st_mtime)
                     
@@ -721,16 +721,16 @@ class SPICEKernelManager:
                             try:
                                 file_path.unlink()
                                 if self.verbose:
-                                    print(f"[SPICEKernelManager] 删除旧文件: {file_path}")
+                                    print(f"[SPICEKernelManager] Deleted old file: {file_path}")
                             except Exception as e:
-                                print(f"[SPICEKernelManager] 删除文件失败 {file_path}: {e}")
+                                print(f"[SPICEKernelManager] Failed to delete file {file_path}: {e}")
                 except OSError:
                     pass
         
         return deleted_files
     
     def get_stats(self) -> Dict[str, Any]:
-        """获取统计信息"""
+        """Get statistics"""
         with self._lock:
             total_kernels = len(self._kernels)
             downloaded = sum(1 for k in self._kernels.values() if k.local_path.exists())
@@ -752,14 +752,14 @@ class SPICEKernelManager:
 
 # 命令行接口
 def main():
-    """命令行入口点"""
+    """Command line entry point"""
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="SPICE核文件管理器",
+        description="SPICE Kernel Manager",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-示例:
+Examples:
   %(prog)s --list
   %(prog)s --download
   %(prog)s --mission earth_moon
@@ -768,23 +768,23 @@ def main():
         """
     )
     
-    parser.add_argument("--list", action="store_true", help="列出所有核文件")
+    parser.add_argument("--list", action="store_true", help="List all kernel files")
     parser.add_argument("--download", nargs="*", metavar="KERNEL_ID", 
-                       help="下载指定核文件（不指定则下载所有必需文件）")
+                       help="Download specified kernel files (download all required if not specified)")
     parser.add_argument("--mission", choices=["earth_moon", "deep_space", "mars", "custom", "lightweight"], 
-                       help="为特定任务设置核文件")
-    parser.add_argument("--check-updates", action="store_true", help="检查更新")
-    parser.add_argument("--force", action="store_true", help="强制重新下载")
+                       help="Set up kernel files for specific mission")
+    parser.add_argument("--check-updates", action="store_true", help="Check for updates")
+    parser.add_argument("--force", action="store_true", help="Force re-download")
     parser.add_argument("--clean", type=int, nargs="?", metavar="DAYS", const=30, 
-                       help="清理超过指定天数的旧文件（默认30天）")
+                       help="Clean files older than specified days (default: 30)")
     parser.add_argument("--dir", default="~/.mission_sim/spice_kernels", 
-                       help="核文件目录（默认: ~/.mission_sim/spice_kernels）")
-    parser.add_argument("--verbose", action="store_true", help="详细输出")
-    parser.add_argument("--stats", action="store_true", help="显示统计信息")
+                       help="Kernel directory (default: ~/.mission_sim/spice_kernels)")
+    parser.add_argument("--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--stats", action="store_true", help="Show statistics")
     
     args = parser.parse_args()
     
-    # 创建管理器
+    # Create manager
     config = KernelConfig(
         kernel_dir=Path(args.dir).expanduser(),
         verbose=args.verbose
@@ -792,86 +792,86 @@ def main():
     
     manager = SPICEKernelManager(config)
     
-    # 执行命令
+    # Execute commands
     if args.list:
         kernels = manager.list_kernels()
-        print(f"\nSPICE核文件列表 ({len(kernels)} 个):")
+        print(f"\nSPICE Kernel File List ({len(kernels)}):")
         print("=" * 100)
-        print(f"{'ID':20} {'名称':25} {'类别':12} {'大小':>8} {'状态':6} {'最后更新':20} {'描述'}")
+        print(f"{'ID':20} {'Name':25} {'Category':12} {'Size':>8} {'Status':6} {'Last Update':20} {'Description'}")
         print("-" * 100)
         for k in kernels:
             status = "✓" if k['exists'] else "✗"
-            size_display = k['size_mb'] if k['size_mb'] != "未知" else "  N/A  "
+            size_display = k['size_mb'] if k['size_mb'] != "unknown" else "  N/A  "
             print(f"{k['id']:20} {k['name']:25} {k['category']:12} {size_display:>8} MB "
                   f"{status:6} {k['last_update']:20} {k['description']}")
         print("=" * 100)
     
     elif args.download is not None:
         if len(args.download) == 0:
-            # 下载所有必需文件
+            # Download all required files
             results = manager.download_all(required_only=True, force=args.force)
-            print(f"\n下载结果:")
+            print(f"\nDownload Results:")
             for kernel_id, success in results.items():
-                status = "✓ 成功" if success else "✗ 失败"
+                status = "✓ Success" if success else "✗ Failed"
                 print(f"  {kernel_id}: {status}")
         else:
-            # 下载指定文件
+            # Download specified files
             results = manager.download_kernels(args.download, force=args.force)
-            print(f"\n下载结果:")
+            print(f"\nDownload Results:")
             for kernel_id, success in results.items():
-                status = "✓ 成功" if success else "✗ 失败"
+                status = "✓ Success" if success else "✗ Failed"
                 print(f"  {kernel_id}: {status}")
     
     elif args.mission:
-        print(f"为 {args.mission} 任务设置核文件...")
+        print(f"Setting up kernel files for {args.mission} mission...")
         successful = manager.setup_for_mission(args.mission)
-        print(f"成功下载 {len(successful)} 个核文件: {', '.join(successful)}")
+        print(f"Successfully downloaded {len(successful)} kernel files: {', '.join(successful)}")
     
     elif args.check_updates:
         updates = manager.check_updates()
         need_update = [k for k, v in updates.items() if v]
         
         if need_update:
-            print(f"需要更新的核文件 ({len(need_update)} 个):")
+            print(f"Kernels needing update ({len(need_update)}):")
             for kernel_id in need_update:
                 kernel = manager.get_kernel(kernel_id)
-                last_update = kernel.last_update.strftime('%Y-%m-%d') if kernel.last_update else "从未"
-                print(f"  - {kernel_id}: {kernel.name} (最后更新: {last_update})")
+                last_update = kernel.last_update.strftime('%Y-%m-%d') if kernel.last_update else "Never"
+                print(f"  - {kernel_id}: {kernel.name} (Last updated: {last_update})")
             
-            response = input("\n是否立即更新？ (y/N): ").strip().lower()
+            response = input("\nUpdate now? (y/N): ").strip().lower()
             if response == 'y':
                 for kernel_id in need_update:
                     success = manager.download_kernel(kernel_id, force=True)
-                    status = "成功" if success else "失败"
+                    status = "Success" if success else "Failed"
                     print(f"  {kernel_id}: {status}")
         else:
-            print("所有核文件都是最新的")
+            print("All kernel files are up to date")
     
     elif args.clean is not None:
-        print(f"清理超过 {args.clean} 天的旧文件...")
+        print(f"Cleaning files older than {args.clean} days...")
         if args.verbose:
-            print("将删除以下文件:")
+            print("Files to be deleted:")
             manager.clean_cache(days_old=args.clean, dry_run=True)
         
-        response = input("确认删除？ (y/N): ").strip().lower()
+        response = input("Confirm deletion? (y/N): ").strip().lower()
         if response == 'y':
             deleted = manager.clean_cache(days_old=args.clean, dry_run=False)
             if deleted:
-                print(f"\n删除了 {len(deleted)} 个文件:")
+                print(f"\nDeleted {len(deleted)} files:")
                 for f in deleted:
                     print(f"  - {Path(f).name}")
             else:
-                print("没有需要清理的文件")
+                print("No files to clean")
         else:
-            print("取消清理")
+            print("Clean cancelled")
     
     elif args.stats:
         stats = manager.get_stats()
-        print(f"\nSPICE核文件统计:")
-        print(f"  核目录: {stats['kernel_dir']}")
-        print(f"  总核文件: {stats['total_kernels']}")
-        print(f"  已下载: {stats['downloaded']}")
-        print(f"  总大小: {stats['total_size_mb']} MB")
+        print(f"\nSPICE Kernel Statistics:")
+        print(f"  Kernel Directory: {stats['kernel_dir']}")
+        print(f"  Total Kernels: {stats['total_kernels']}")
+        print(f"  Downloaded: {stats['downloaded']}")
+        print(f"  Total Size: {stats['total_size_mb']} MB")
     
     else:
         parser.print_help()
