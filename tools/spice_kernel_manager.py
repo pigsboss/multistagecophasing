@@ -185,6 +185,9 @@ class SPICEKernelManager:
         self.config = config or KernelConfig()
         self.kernel_dir = self.config.kernel_dir
         
+        # Set verbose attribute early, before it's used
+        self.verbose = self.config.verbose
+        
         # 检查环境变量中的代理设置
         if not self.config.proxy:
             # 检查常见的环境变量
@@ -208,8 +211,6 @@ class SPICEKernelManager:
         
         # Lock for thread safety
         self._lock = threading.RLock()
-        
-        self.verbose = self.config.verbose
         
         if not HAS_DEPENDENCIES:
             if self.config.auto_download:
