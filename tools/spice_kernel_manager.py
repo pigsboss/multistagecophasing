@@ -484,7 +484,7 @@ class SPICEKernelManager:
                     shutil.copyfileobj(f_in, f_out)
             return True
         except Exception as e:
-            print(f"[SPICEKernelManager] 解压失败 {compressed_path}: {e}")
+            print(f"[SPICEKernelManager] Decompression failed {compressed_path}: {e}")
             return False
     
     def download_kernel(self, kernel_id: str, force: bool = False) -> bool:
