@@ -243,7 +243,12 @@ class FileTypeDetector:
             '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico', '.svg',
             '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav',
             '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
-            '.bin', '.dat', '.db', '.sqlite', '.sqlite3'
+            '.bin', '.dat', '.db', '.sqlite', '.sqlite3',
+            # SPICE 二进制内核（关键修复）
+            '.bsp',     # Binary SPK（星历数据）
+            '.bc',      # Binary CK（姿态内核）
+            # 压缩文件（关键修复）
+            '.Z',       # Unix compress 格式
         ]
     }
     
@@ -2224,8 +2229,8 @@ class SmartTextProcessor:
     - 用统计摘要替代具体数据
     """
     
-    # 文件扩展名到处理策略的映射
-    STRUCTURED_EXTENSIONS = {'.tf', '.tls', '.tpc', '.ker', '.bsp', '.bc', '.csv', '.dat', '.xml'}
+    # 文件扩展名到处理策略的映射（移除 .bsp 和 .bc）
+    STRUCTURED_EXTENSIONS = {'.tf', '.tls', '.tpc', '.ker', '.csv', '.dat', '.xml'}
     
     @staticmethod
     def is_structured_data_file(filepath: Path) -> bool:
@@ -3206,11 +3211,22 @@ class DirectoryDigest:
             self._process_directory(subdir, mode)
     
     def _process_file(self, file_digest: FileDigest, mode: str):
-        """基于内容特征的动态文件处理"""
+        """基于扩展名优先的动态文件处理"""
         filepath = file_digest.metadata.path
         
         try:
-            # 1. 大小检查（硬性限制）
+            # ===== 关键修复：扩展名优先检测 =====
+            ext_type = FileTypeDetector.detect_by_extension(filepath)
+            
+            # 如果是明确的二进制扩展名，直接处理为二进制，不尝试读取内容
+            if ext_type == FileType.BINARY:
+                file_digest.metadata.file_type = FileType.BINARY
+                self.stats['binary'] += 1
+                # 仅计算哈希，不读取内容（流式处理）
+                self._calculate_hashes(file_digest)
+                return
+            
+            # 大小检查（仅对非二进制文件）
             if file_digest.metadata.size > self.max_file_size:
                 file_digest.metadata.file_type = FileType.BINARY
                 file_digest.human_readable_summary = HumanReadableSummary(
@@ -3221,15 +3237,30 @@ class DirectoryDigest:
                 self.stats['binary'] += 1
                 return
             
-            # 2. 读取并分类内容
+            # 现在尝试读取为文本（已知不是明确的二进制扩展名）
             try:
                 with open(filepath, 'r', encoding='utf-8') as f:
                     content = f.read()
                 raw_bytes = None
             except UnicodeDecodeError:
+                # 解码失败，降级为二进制处理（即使扩展名未明确标记）
                 with open(filepath, 'rb') as f:
                     raw_bytes = f.read()
-                    content = raw_bytes.decode('latin-1', errors='ignore')
+                file_digest.metadata.file_type = FileType.BINARY
+                self.stats['binary'] += 1
+                self._calculate_hashes_from_bytes(file_digest, raw_bytes)
+                return
+            
+            # 对于明确标记为文本的扩展名，如果内容看起来像二进制，降级处理
+            if ext_type == FileType.HUMAN_READABLE or ext_type == FileType.CONFIG_SCRIPT:
+                # 简单启发式：如果高比例字符不可打印，视为二进制
+                if len(content) > 0:
+                    printable_ratio = sum(1 for c in content if c.isprintable() or c in '\n\r\t') / len(content)
+                    if printable_ratio < 0.7:  # 少于70%可打印字符
+                        file_digest.metadata.file_type = FileType.BINARY
+                        self.stats['binary'] += 1
+                        self._calculate_hashes(file_digest)
+                        return
             
             # 3. 内容分类
             classification = ContentAnalyzer.classify_file(content, filepath)
