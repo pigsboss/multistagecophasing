@@ -1158,12 +1158,12 @@ class SourceCodeAnalyzer:
                                 var_name = target.id
                                 # 尝试获取值（简化的常量检测）
                                 try:
-                                    # 如果是简单的常量
-                                    if isinstance(node.value, (ast.Constant, ast.Num, ast.Str)):
+                                    # 如果是简单的常量（Python 3.8+ 使用 ast.Constant）
+                                    if isinstance(node.value, ast.Constant):
                                         constants.append(var_name)
                                     else:
                                         global_vars.append(var_name)
-                                except:
+                                except Exception:
                                     global_vars.append(var_name)
         
         except SyntaxError as e:
