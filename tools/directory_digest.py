@@ -3208,8 +3208,8 @@ class DirectoryDigest:
             else:
                 analysis.language = f"config_script/{analysis.language}"
             
-            # 提取配置结构（键名、函数等）
-            config_structure = self._extract_config_structure(content, filepath.suffix.lower())
+            # 修复：通过 source_analyzer 实例调用 _extract_config_structure
+            config_structure = self.source_analyzer._extract_config_structure(content, filepath.suffix.lower())
             if config_structure:
                 # 合并到函数列表中（或作为单独字段）
                 analysis.functions = config_structure + analysis.functions
