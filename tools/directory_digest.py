@@ -3463,7 +3463,8 @@ class DirectoryDigest:
                 "generated_at": datetime.now().isoformat(),
                 "root_directory": str(self.root),
                 "output_mode": "sort",
-                "statistics": self.stats
+                "statistics": self.stats,
+                "context_usage": self.context_manager.get_summary()  # 添加这一行
             },
             "classification": {},
             "by_size": {
@@ -4482,7 +4483,7 @@ Directory Digest Tool - 目录知识摘要生成器
         # 统计信息输出到 stderr
         if args.verbose or args.mode == "sort":
             stats = output['metadata']['statistics']
-            ctx_usage = output['metadata']['context_usage']
+            ctx_usage = output['metadata'].get('context_usage')  # 修改这行
             
             print(f"\n[Summary] Files: {stats['total_files']}, "
                   f"Source: {stats.get('source_code', 0)}, "
@@ -4497,8 +4498,11 @@ Directory Digest Tool - 目录知识摘要生成器
             if stats.get('skipped_by_context', 0) > 0:
                 print(f"         Skipped (context): {stats['skipped_by_context']}", file=sys.stderr)
             
-            print(f"[Context] Used: {ctx_usage['used_tokens']:,}/{ctx_usage['max_tokens']:,} tokens "
-                  f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+            if ctx_usage:  # 添加这个条件判断
+                print(f"[Context] Used: {ctx_usage['used_tokens']:,}/{ctx_usage['max_tokens']:,} tokens "
+                      f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+            else:
+                print(f"[Context] Not applicable for sort mode", file=sys.stderr)
             
             if args.mode == "sort" and "recommendations" in output:
                 for rec in output["recommendations"]:
