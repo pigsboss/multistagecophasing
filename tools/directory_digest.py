@@ -302,7 +302,7 @@ class FileTypeDetector:
         # 人类可读文本（纯文档）
         FileType.HUMAN_READABLE: [
             '.txt', '.md', '.markdown', '.rst', '.tex', '.latex',
-            '.log', '.out', '.err', '.csv'
+            '.log', '.out', '.err', '.csv', '.cmt'  # 新增 .cmt
         ],
         # 配置文件/脚本（面向人类的源代码）
         FileType.CONFIG_SCRIPT: [
@@ -519,7 +519,7 @@ class RuleEngine:
                     ProcessingStrategy.CODE_SKELETON, priority=70),
             
             # 纯文本文档
-            FileRule("text_documents", ["*.txt", "*.md", "*.rst"],
+            FileRule("text_documents", ["*.txt", "*.md", "*.rst", "*.cmt"],  # 新增 *.cmt
                     ProcessingStrategy.SUMMARY_ONLY, priority=60, max_size=512*1024),
             
             # 数据文件（需要智能截断）
@@ -1126,6 +1126,9 @@ class HumanReadableSummarizer:
         if suffix in ['.md', '.markdown', '.rst']:
             # Markdown/RST文档
             key_sections = HumanReadableSummarizer._extract_markdown_sections(lines)
+        elif suffix == '.cmt':
+            # .cmt 文件可能是结构化注释文件
+            key_sections = HumanReadableSummarizer._extract_cmt_sections(content, lines)
         elif suffix in ['.json', '.yaml', '.yml']:
             # 结构化数据文件
             key_sections = HumanReadableSummarizer._extract_structured_sections(content, suffix)
@@ -1140,6 +1143,56 @@ class HumanReadableSummarizer:
             key_sections = HumanReadableSummarizer._extract_general_sections(lines)
         
         return key_sections
+    
+    @staticmethod
+    def _extract_cmt_sections(content: str, lines: List[str]) -> List[Tuple[str, str]]:
+        """提取 .cmt 文件的章节"""
+        sections = []
+        
+        # .cmt 文件常见的章节模式
+        cmt_patterns = [
+            # 带星号的注释块
+            (r'^\s*\*+\s*$', 'separator'),
+            # 可能的关键词：Section, Chapter, Part
+            (r'^\s*([Ss]ection|[Cc]hapter|[Pp]art)\s+([A-Za-z0-9\.\-]+)', 'section_header'),
+            # 时间戳或日期标记
+            (r'^\s*(\d{4}-\d{2}-\d{2}|\d{2}:\d{2}:\d{2})', 'timestamp'),
+        ]
+        
+        current_section = None
+        current_content = []
+        
+        for i, line in enumerate(lines):
+            line_stripped = line.strip()
+            
+            # 检测章节开始
+            section_found = False
+            for pattern, section_type in cmt_patterns:
+                if re.match(pattern, line_stripped):
+                    # 保存前一章节
+                    if current_section and current_content:
+                        sections.append((current_section, '\n'.join(current_content[:3])))
+                    
+                    # 开始新章节
+                    if section_type == 'separator':
+                        current_section = f"Separator (line {i+1})"
+                    else:
+                        current_section = f"{line_stripped[:50]}... (line {i+1})"
+                    
+                    current_content = []
+                    section_found = True
+                    break
+            
+            if not section_found and current_section:
+                # 添加到当前章节内容
+                if line_stripped and len(current_content) < 10:  # 限制内容行数
+                    current_content.append(line)
+        
+        # 保存最后一个章节
+        if current_section and current_content:
+            sections.append((current_section, '\n'.join(current_content[:3])))
+        
+        return sections
     
     @staticmethod
     def _extract_markdown_sections(lines: List[str]) -> List[Tuple[str, str]]:
@@ -2586,7 +2639,7 @@ class SmartTextProcessor:
     """
     
     # 文件扩展名到处理策略的映射（移除 .bsp 和 .bc）
-    STRUCTURED_EXTENSIONS = {'.tf', '.tls', '.tpc', '.ker', '.csv', '.dat', '.xml'}
+    STRUCTURED_EXTENSIONS = {'.tf', '.tls', '.tpc', '.ker', '.csv', '.dat', '.xml', '.cmt'}
     
     @staticmethod
     def is_structured_data_file(filepath: Path) -> bool:
@@ -2616,6 +2669,10 @@ class SmartTextProcessor:
         # 处理 CSV 文件
         if suffix == '.csv':
             return SmartTextProcessor._extract_csv_content(lines, filepath)
+        
+        # 处理 .cmt 文件
+        if suffix == '.cmt':
+            return SmartTextProcessor._extract_cmt_content(lines, filepath)
         
         # 处理其他结构化数据文件
         if suffix in ['.xml', '.dat', '.json']:
@@ -2730,6 +2787,41 @@ class SmartTextProcessor:
         header_lines.append(f"Note: Full data truncated to save context window")
         
         return '\n'.join(header_lines)
+    
+    @staticmethod
+    def _extract_cmt_content(lines: List[str], filepath: Path) -> str:
+        """提取 .cmt 文件的人类可读部分"""
+        header_lines = []
+        
+        # .cmt 文件通常是注释文件，保留所有注释行和有意义的内容
+        for line in lines[:100]:  # 最多检查100行
+            stripped = line.strip()
+            
+            # 保留非空行（包括注释和各种标记）
+            if stripped:
+                header_lines.append(line)
+            
+            # 如果检测到可能的数据区域（连续多行无意义的字符串），停止
+            # 简单的启发式规则：连续3行超过80字符且无标点符号
+            if len(header_lines) > 10:
+                recent_lines = header_lines[-3:]
+                if all(len(l.strip()) > 80 and 
+                       not any(c in l for c in '.,;:!?') 
+                       for l in recent_lines if l.strip()):
+                    # 可能是数据区域，停止收集
+                    header_lines = header_lines[:-3]
+                    header_lines.append("[DATA SECTION TRUNCATED]")
+                    break
+        
+        # 如果文件很大，添加统计信息
+        if len(lines) > len(header_lines):
+            header_lines.append(f"\n[FILE SUMMARY]")
+            header_lines.append(f"Total lines: {len(lines)}")
+            header_lines.append(f"Preserved: {len(header_lines)} lines")
+            header_lines.append(f"Truncated: {len(lines) - len(header_lines)} lines")
+            header_lines.append(f"File type: Comment file (.cmt)")
+        
+        return '\n'.join(header_lines[:100])  # 限制总行数
     
     @staticmethod
     def _extract_generic_structured(lines: List[str], suffix: str) -> str:
@@ -3065,7 +3157,8 @@ class FormatConverter:
             'human_readable': '📄',
             'source_code': '📝',
             'binary': '📦',
-            'unknown': '❓'
+            'unknown': '❓',
+            'comment_file': '💬',  # 新增注释文件图标
         }
         return icons.get(file_type, '📄')
     
