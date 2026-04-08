@@ -138,10 +138,11 @@ STRATEGY_CONFIGS: Dict[ProcessingStrategy, StrategyConfig] = {
 
 class FileType(Enum):
     """文件类型枚举"""
-    HUMAN_READABLE = "human_readable"    # 人类可读文本
+    CRITICAL_DOCS = "critical_docs"      # 关键文档
+    REFERENCE_DOCS = "reference_docs"    # 参考文档
     SOURCE_CODE = "source_code"          # 源代码
-    CONFIG_SCRIPT = "config_script"      # 配置文件/脚本（既是源代码又是人类可读）
-    BINARY = "binary"                    # 二进制文件
+    TEXT_DATA = "text_data"              # 文本数据
+    BINARY_FILES = "binary_files"        # 二进制文件
     UNKNOWN = "unknown"                  # 未知类型
 
 
@@ -299,45 +300,37 @@ class FileTypeDetector:
     
     # 扩展名到类型的映射（优先级1）
     EXTENSION_MAPPING = {
-        # 人类可读文本（纯文档）
-        FileType.HUMAN_READABLE: [
-            '.txt', '.md', '.markdown', '.rst', '.tex', '.latex',
-            '.log', '.out', '.err', '.csv', '.cmt'  # 新增 .cmt
+        # 参考文档
+        FileType.REFERENCE_DOCS: [
+            '.md', '.markdown', '.rst', '.tex', '.latex',
+            '.html', '.htm'
         ],
-        # 配置文件/脚本（面向人类的源代码）
-        FileType.CONFIG_SCRIPT: [
-            '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
-            '.yaml', '.yml', '.json', '.xml', '.toml', 
-            '.ini', '.cfg', '.conf', '.properties', '.env', '.rc',
-            '.html', '.htm', '.css', '.scss', '.less',
-            # SPICE内核文件（文本格式，但包含结构化数据）
-            '.tf',      # Text Frame（参考坐标系定义）
-            '.tls',     # Text Leapseconds（闰秒表）
-            '.tpc',     # Text Planetary Constants（行星常数）
-            '.ker',     # 通用内核文件（文本格式）
-            # 注意：.bsp 和 .bc 通常是二进制格式，保留在 BINARY 中
-        ],
-        # 源代码（程序代码）
+        # 源代码（包括脚本）
         FileType.SOURCE_CODE: [
             '.py', '.java', '.cpp', '.c', '.h', '.hpp', '.cc',
             '.js', '.ts', '.jsx', '.tsx', '.vue',
             '.go', '.rs', '.rb', '.php', '.swift', '.kt', '.scala',
             '.m', '.mm', '.cs', '.fs', '.vb',
-            '.pl', '.pm', '.r', '.lua', '.dart', '.sql'
+            '.pl', '.pm', '.r', '.lua', '.dart', '.sql',
+            '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
+            '.css', '.scss', '.less'
+        ],
+        # 文本数据（配置文件、数据文件、日志等）
+        FileType.TEXT_DATA: [
+            '.txt', '.log', '.out', '.err', '.csv', '.tsv',
+            '.yaml', '.yml', '.json', '.xml', '.toml', 
+            '.ini', '.cfg', '.conf', '.properties', '.env', '.rc',
+            '.tf', '.tls', '.tpc', '.ker', '.cmt'
         ],
         # 二进制文件
-        FileType.BINARY: [
+        FileType.BINARY_FILES: [
             '.exe', '.dll', '.so', '.dylib', '.a', '.lib',
             '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar',
-            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico', '.svg',
+            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.ico',
             '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wav',
             '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
             '.bin', '.dat', '.db', '.sqlite', '.sqlite3',
-            # SPICE 二进制内核（关键修复）
-            '.bsp',     # Binary SPK（星历数据）
-            '.bc',      # Binary CK（姿态内核）
-            # 压缩文件（关键修复）
-            '.Z',       # Unix compress 格式
+            '.bsp', '.bc', '.Z', '.h5', '.hdf5', '.fits'
         ]
     }
     
@@ -361,7 +354,7 @@ class FileTypeDetector:
                 
                 # 检测空字节（二进制文件特征）
                 if b'\x00' in sample:
-                    return FileType.BINARY
+                    return FileType.BINARY_FILES
                 
                 # 检测可打印字符比例
                 printable_count = 0
@@ -372,7 +365,7 @@ class FileTypeDetector:
                 printable_ratio = printable_count / len(sample) if sample else 0
                 
                 if printable_ratio < 0.7:
-                    return FileType.BINARY
+                    return FileType.BINARY_FILES
                 
                 # 检测源代码特征
                 try:
@@ -382,10 +375,11 @@ class FileTypeDetector:
                 except:
                     pass
                 
-                return FileType.HUMAN_READABLE
+                # 默认作为文本数据
+                return FileType.TEXT_DATA
                 
         except Exception:
-            return FileType.BINARY
+            return FileType.BINARY_FILES
     
     @staticmethod
     def _looks_like_source_code(content: str) -> bool:
@@ -485,52 +479,51 @@ class RuleEngine:
     def load_default_rules(self):
         """加载内置默认规则"""
         default_rules = [
-            # 明确二进制（高优先级）
+            # 关键文档（最高优先级）
+            FileRule("critical_readme", ["README*", "readme*"], 
+                    ProcessingStrategy.FULL_CONTENT, priority=100, max_size=256*1024),
+            FileRule("critical_license", ["LICENSE*", "COPYING*", "NOTICE*"], 
+                    ProcessingStrategy.FULL_CONTENT, priority=100, max_size=128*1024),
+            FileRule("critical_changelog", ["CHANGELOG*", "CHANGES*"], 
+                    ProcessingStrategy.SUMMARY_ONLY, priority=95, max_size=256*1024),
+            FileRule("critical_contrib", ["CONTRIBUTING*", "INSTALL*", "AUTHORS*", "NEWS*", "TODO*", "ROADMAP*"], 
+                    ProcessingStrategy.SUMMARY_ONLY, priority=95, max_size=256*1024),
+            
+            # 二进制文件（高优先级，避免误判）
             FileRule("binary_archives", ["*.gz", "*.bz2", "*.xz", "*.7z", "*.rar", "*.zip", "*.tar"], 
-                    ProcessingStrategy.METADATA_ONLY, priority=100, force_binary=True),
+                    ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
             FileRule("media_files", ["*.avi", "*.mp4", "*.mov", "*.wav", "*.mp3", "*.jpg", "*.png"],
-                    ProcessingStrategy.METADATA_ONLY, priority=100, force_binary=True),
-            FileRule("scientific_binary", ["*.fits", "*.h5", "*.hdf5"],
-                    ProcessingStrategy.METADATA_ONLY, priority=100, force_binary=True),
+                    ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
+            FileRule("scientific_binary", ["*.fits", "*.h5", "*.hdf5", "*.bsp", "*.bc"],
+                    ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
             FileRule("documents_binary", ["*.pdf", "*.doc", "*.docx", "*.ppt", "*.pptx"],
-                    ProcessingStrategy.METADATA_ONLY, priority=100, force_binary=True,
-                    comment="PDF等文档虽人类可读，但二进制格式不适合嵌入"),
+                    ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
             
-            # 重要文档（高优先级）
-            FileRule("readme_files", ["README*", "readme*", "README.*"],
-                    ProcessingStrategy.FULL_CONTENT, priority=95, max_size=256*1024),
-            FileRule("license_files", ["LICENSE*", "COPYING*", "NOTICE*"],
-                    ProcessingStrategy.FULL_CONTENT, priority=90, max_size=128*1024),
-            
-            # 主要源代码文件
-            FileRule("main_source_files", ["main.*", "app.*", "index.*", "__main__.*"],
-                    ProcessingStrategy.CODE_SKELETON, priority=85),
+            # 参考文档
+            FileRule("reference_docs", ["*.md", "*.markdown", "*.rst", "*.tex", "*.html", "*.htm"],
+                    ProcessingStrategy.SUMMARY_ONLY, priority=80, max_size=512*1024),
             
             # 源代码
+            FileRule("main_source_files", ["main.*", "app.*", "index.*", "__main__.*"],
+                    ProcessingStrategy.CODE_SKELETON, priority=75),
             FileRule("source_code", ["*.py", "*.c", "*.cpp", "*.h", "*.java", "*.js", "*.ts", "*.go", "*.rs"],
-                    ProcessingStrategy.CODE_SKELETON, priority=80),
-            FileRule("fortran_code", ["*.f77", "*.f90", "*.f95"],
-                    ProcessingStrategy.CODE_SKELETON, priority=80),
-            
-            # 配置文件
-            FileRule("config_files", ["*.yaml", "*.yml", "*.json", "*.toml", "*.conf", "*.ini", "*.cfg"],
-                    ProcessingStrategy.STRUCTURE_EXTRACT, priority=70),
-            FileRule("config_scripts", ["*.sh", "*.bash", "*.zsh", "*.ps1", "*.bat", "*.cmd"],
+                    ProcessingStrategy.CODE_SKELETON, priority=70),
+            FileRule("shell_scripts", ["*.sh", "*.bash", "*.zsh", "*.ps1", "*.bat", "*.cmd"],
+                    ProcessingStrategy.CODE_SKELETON, priority=70),
+            FileRule("web_code", ["*.css", "*.scss", "*.less", "*.vue", "*.jsx", "*.tsx"],
                     ProcessingStrategy.CODE_SKELETON, priority=70),
             
-            # 纯文本文档
-            FileRule("text_documents", ["*.txt", "*.md", "*.rst", "*.cmt"],  # 新增 *.cmt
-                    ProcessingStrategy.SUMMARY_ONLY, priority=60, max_size=512*1024),
-            
-            # 数据文件（需要智能截断）
-            FileRule("structured_data", ["*.csv", "*.tsv", "*.xml", "*.jsonl"],
+            # 文本数据
+            FileRule("config_files", ["*.yaml", "*.yml", "*.json", "*.toml", "*.conf", "*.ini", "*.cfg"],
+                    ProcessingStrategy.STRUCTURE_EXTRACT, priority=60),
+            FileRule("data_files", ["*.csv", "*.tsv", "*.xml", "*.jsonl"],
                     ProcessingStrategy.HEADER_WITH_STATS, priority=50),
-            
-            # SPICE内核文件（特殊处理）
-            FileRule("spice_kernels", ["*.tf", "*.tls", "*.tpc", "*.ker"],
-                    ProcessingStrategy.STRUCTURE_EXTRACT, priority=45),
-            FileRule("spice_binary_kernels", ["*.bsp", "*.bc"],
-                    ProcessingStrategy.METADATA_ONLY, priority=45, force_binary=True),
+            FileRule("log_files", ["*.log", "*.out", "*.err"],
+                    ProcessingStrategy.HEADER_WITH_STATS, priority=40),
+            FileRule("spice_text_kernels", ["*.tf", "*.tls", "*.tpc", "*.ker"],
+                    ProcessingStrategy.STRUCTURE_EXTRACT, priority=40),
+            FileRule("text_files", ["*.txt", "*.cmt"],
+                    ProcessingStrategy.SUMMARY_ONLY, priority=30, max_size=1024*1024),
         ]
         
         self.rules.extend(default_rules)
@@ -3154,11 +3147,12 @@ class FormatConverter:
     def _get_file_type_icon(file_type: str) -> str:
         """获取文件类型图标"""
         icons = {
-            'human_readable': '📄',
-            'source_code': '📝',
-            'binary': '📦',
+            'critical_docs': '🔑',
+            'reference_docs': '📚',
+            'source_code': '💻',
+            'text_data': '📄',
+            'binary_files': '📦',
             'unknown': '❓',
-            'comment_file': '💬',  # 新增注释文件图标
         }
         return icons.get(file_type, '📄')
     
@@ -3287,10 +3281,11 @@ class FormatConverter:
         
         # 类型映射
         type_names = {
-            'config_script': ('Config/Scripts', 'c'),
-            'source_code': ('Source Code', 's'),
-            'human_readable': ('Human Readable', 't'),
-            'binary': ('Binary', 'b'),
+            'critical_docs': ('Critical Docs', 'C'),
+            'reference_docs': ('Reference Docs', 'R'),
+            'source_code': ('Source Code', 'S'),
+            'text_data': ('Text Data', 'T'),
+            'binary_files': ('Binary Files', 'B'),
             'unknown': ('Unknown', '?')
         }
         
@@ -3336,6 +3331,11 @@ class FormatConverter:
         lines.append("Summary:")
         lines.append(f"  Total: {stats.get('total_files', 0)} files, "
                     f"{FormatConverter._format_size(stats.get('total_size', 0))}")
+        lines.append(f"  Critical Docs: {stats.get('critical_docs', 0)}")
+        lines.append(f"  Reference Docs: {stats.get('reference_docs', 0)}")
+        lines.append(f"  Source Code: {stats.get('source_code', 0)}")
+        lines.append(f"  Text Data: {stats.get('text_data', 0)}")
+        lines.append(f"  Binary Files: {stats.get('binary_files', 0)}")
         lines.append(f"  Skipped (>limit): {stats.get('skipped_large_files', 0)}")
         
         return '\n'.join(lines)
@@ -3404,12 +3404,13 @@ class DirectoryDigest:
         self.structure: Optional[DirectoryStructure] = None
         self.stats = {
             'total_files': 0,
-            'human_readable': 0,
+            'critical_docs': 0,
+            'reference_docs': 0,
             'source_code': 0,
-            'config_script': 0,
-            'binary': 0,
+            'text_data': 0,
+            'binary_files': 0,
             'skipped_large_files': 0,
-            'skipped_by_context': 0,  # 新增：因上下文限制跳过的文件
+            'skipped_by_context': 0,
             'total_size': 0,
             'processing_time': 0
         }
@@ -3420,10 +3421,11 @@ class DirectoryDigest:
         
         # 按类型分组，同时保留完整元数据
         by_type = {
-            FileType.HUMAN_READABLE.value: [],
+            FileType.CRITICAL_DOCS.value: [],
+            FileType.REFERENCE_DOCS.value: [],
             FileType.SOURCE_CODE.value: [],
-            FileType.CONFIG_SCRIPT.value: [],
-            FileType.BINARY.value: [],
+            FileType.TEXT_DATA.value: [],
+            FileType.BINARY_FILES.value: [],
             FileType.UNKNOWN.value: []
         }
         
@@ -3678,7 +3680,7 @@ class DirectoryDigest:
             
             # 3. 检查文件大小限制
             if file_digest.metadata.size > self.max_file_size:
-                file_digest.metadata.file_type = FileType.BINARY
+                file_digest.metadata.file_type = FileType.BINARY_FILES
                 file_digest.human_readable_summary = HumanReadableSummary(
                     summary=f"[SKIPPED] File size ({file_digest.metadata.size / (1024*1024):.2f} MB) exceeds limit",
                     line_count=0
@@ -3746,8 +3748,8 @@ class DirectoryDigest:
 
     def _process_as_binary(self, file_digest: FileDigest):
         """处理为二进制文件"""
-        file_digest.metadata.file_type = FileType.BINARY
-        self.stats['binary'] += 1
+        file_digest.metadata.file_type = FileType.BINARY_FILES
+        self.stats['binary_files'] += 1
         self._calculate_hashes(file_digest)
 
     def _process_as_text(self, file_digest: FileDigest, mode: str, strategy: ProcessingStrategy):
@@ -3775,8 +3777,17 @@ class DirectoryDigest:
             if mode == "full":
                 file_digest.full_content = summary.summary or f"[Summary] {summary.line_count} lines, {summary.word_count} words"
         
-        file_digest.metadata.file_type = FileType.HUMAN_READABLE
-        self.stats['human_readable'] += 1
+        # 判断是否为关键文档
+        filename = filepath.name.lower()
+        critical_patterns = ['readme', 'license', 'copying', 'notice', 'changelog', 'changes', 
+                            'contributing', 'install', 'authors', 'news', 'todo', 'roadmap']
+        
+        if any(pattern in filename for pattern in critical_patterns):
+            file_digest.metadata.file_type = FileType.CRITICAL_DOCS
+            self.stats['critical_docs'] += 1
+        else:
+            file_digest.metadata.file_type = FileType.REFERENCE_DOCS
+            self.stats['reference_docs'] += 1
         self._calculate_hashes(file_digest)
 
     def _process_as_code(self, file_digest: FileDigest, mode: str, strategy: ProcessingStrategy):
@@ -3848,8 +3859,8 @@ class DirectoryDigest:
         if mode == "full":
             file_digest.full_content = content
         
-        file_digest.metadata.file_type = FileType.CONFIG_SCRIPT
-        self.stats['config_script'] += 1
+        file_digest.metadata.file_type = FileType.TEXT_DATA
+        self.stats['text_data'] += 1
         self._calculate_hashes(file_digest)
 
     def _process_as_data(self, file_digest: FileDigest, mode: str, strategy: ProcessingStrategy):
@@ -3884,8 +3895,8 @@ class DirectoryDigest:
             if mode == "full":
                 file_digest.full_content = content
         
-        file_digest.metadata.file_type = FileType.HUMAN_READABLE
-        self.stats['human_readable'] += 1
+        file_digest.metadata.file_type = FileType.TEXT_DATA
+        self.stats['text_data'] += 1
         self._calculate_hashes(file_digest)
     
     def _calculate_hashes(self, file_digest: FileDigest):
@@ -4486,10 +4497,11 @@ Directory Digest Tool - 目录知识摘要生成器
             ctx_usage = output['metadata'].get('context_usage')  # 修改这行
             
             print(f"\n[Summary] Files: {stats['total_files']}, "
+                  f"Critical: {stats.get('critical_docs', 0)}, "
+                  f"Reference: {stats.get('reference_docs', 0)}, "
                   f"Source: {stats.get('source_code', 0)}, "
-                  f"Config: {stats.get('config_script', 0)}, "
-                  f"Text: {stats.get('human_readable', 0)}, "
-                  f"Binary: {stats.get('binary', 0)}", 
+                  f"Text Data: {stats.get('text_data', 0)}, "
+                  f"Binary: {stats.get('binary_files', 0)}", 
                   file=sys.stderr)
             
             if stats.get('skipped_large_files', 0) > 0:
@@ -4523,10 +4535,11 @@ Directory Digest Tool - 目录知识摘要生成器
         print(f"Directory Digest Summary", file=sys.stderr)
         print(f"{'='*50}", file=sys.stderr)
         print(f"Total files scanned:     {stats['total_files']}", file=sys.stderr)
+        print(f"  ├── Critical docs:     {stats.get('critical_docs', 0)}", file=sys.stderr)
+        print(f"  ├── Reference docs:    {stats.get('reference_docs', 0)}", file=sys.stderr)
         print(f"  ├── Source code:       {stats.get('source_code', 0)}", file=sys.stderr)
-        print(f"  ├── Config/Scripts:    {stats.get('config_script', 0)}", file=sys.stderr)
-        print(f"  ├── Human readable:    {stats.get('human_readable', 0)}", file=sys.stderr)
-        print(f"  ├── Binary:            {stats.get('binary', 0)}", file=sys.stderr)
+        print(f"  ├── Text data:         {stats.get('text_data', 0)}", file=sys.stderr)
+        print(f"  ├── Binary files:      {stats.get('binary_files', 0)}", file=sys.stderr)
         if stats.get('skipped_large_files', 0) > 0:
             print(f"  ├── Skipped (size):    {stats['skipped_large_files']}", file=sys.stderr)
         if stats.get('skipped_by_context', 0) > 0:
