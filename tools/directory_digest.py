@@ -4517,7 +4517,7 @@ Directory Digest Tool - 目录知识摘要生成器
         
         # 显示处理结果（到 stderr，避免与文件内容混淆）
         stats = output['metadata']['statistics']
-        ctx_usage = output['metadata']['context_usage']
+        ctx_usage = output['metadata'].get('context_usage')  # 修改这行
         
         print(f"\n{'='*50}", file=sys.stderr)
         print(f"Directory Digest Summary", file=sys.stderr)
@@ -4532,9 +4532,13 @@ Directory Digest Tool - 目录知识摘要生成器
         if stats.get('skipped_by_context', 0) > 0:
             print(f"  └── Skipped (context): {stats['skipped_by_context']}", file=sys.stderr)
         
-        print(f"Context window:          {ctx_usage['max_tokens']:,} tokens", file=sys.stderr)
-        print(f"Context used:            {ctx_usage['used_tokens']:,} tokens "
-              f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+        if ctx_usage:  # 添加这个条件判断
+            print(f"Context window:          {ctx_usage['max_tokens']:,} tokens", file=sys.stderr)
+            print(f"Context used:            {ctx_usage['used_tokens']:,} tokens "
+                  f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+        else:
+            print(f"Context window:          Not applicable for sort mode", file=sys.stderr)
+        
         print(f"Processing time:         {stats['processing_time']:.2f} s", file=sys.stderr)
         print(f"Output saved to:         {saved_path}", file=sys.stderr)
         print(f"{'='*50}", file=sys.stderr)
