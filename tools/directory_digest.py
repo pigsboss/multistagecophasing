@@ -539,36 +539,70 @@ class RuleEngine:
             self.load_default_rules()
             return
         
-        # 解析文件分类规则
-        rule_defs = data.get('file_classifications', [])
-        if not rule_defs:
-            print("警告: 规则文件中未找到 'file_classifications' 部分", file=sys.stderr)
-            self.load_default_rules()
-            return
-        
-        for rule_def in rule_defs:
-            try:
-                # 将策略字符串转换为枚举
-                strategy_name = rule_def.get('strategy', 'metadata_only')
-                strategy = ProcessingStrategy(strategy_name)
-                
-                # 解析模式
-                patterns = rule_def.get('patterns', [])
+        # 新格式：直接以分类名为键
+        if 'file_classifications' not in data:
+            # 假设数据是分类名到模式列表的映射
+            for category, patterns in data.items():
                 if not patterns:
                     continue
-                
-                rule = FileRule(
-                    name=rule_def.get('name', 'unnamed'),
-                    patterns=patterns,
-                    strategy=strategy,
-                    priority=rule_def.get('priority', 50),
-                    force_binary=rule_def.get('force_binary', False),
-                    max_size=rule_def.get('max_size_kb', 0) * 1024 if rule_def.get('max_size_kb') else None,
-                    comment=rule_def.get('comment')
-                )
-                self.rules.append(rule)
-            except Exception as e:
-                print(f"警告: 解析规则时出错: {rule_def.get('name', 'unnamed')} - {e}", file=sys.stderr)
+                try:
+                    # 将分类名映射到ProcessingStrategy
+                    strategy_map = {
+                        'critical_docs': ProcessingStrategy.FULL_CONTENT,
+                        'reference_docs': ProcessingStrategy.SUMMARY_ONLY,
+                        'source_code': ProcessingStrategy.CODE_SKELETON,
+                        'text_data': ProcessingStrategy.STRUCTURE_EXTRACT,
+                        'binary_files': ProcessingStrategy.METADATA_ONLY
+                    }
+                    strategy = strategy_map.get(category, ProcessingStrategy.METADATA_ONLY)
+                    
+                    rule = FileRule(
+                        name=category,
+                        patterns=patterns,
+                        strategy=strategy,
+                        priority=100 if category == 'critical_docs' else 
+                                90 if category == 'binary_files' else 50,
+                        force_binary=(category == 'binary_files'),
+                        max_size=None,
+                        comment=f"From rules file: {category}"
+                    )
+                    self.rules.append(rule)
+                except Exception as e:
+                    print(f"警告: 解析规则分类 {category} 时出错: {e}", file=sys.stderr)
+        else:
+            # 旧格式：包含'file_classifications'列表
+            rule_defs = data.get('file_classifications', [])
+            if not rule_defs:
+                print("警告: 规则文件中未找到 'file_classifications' 部分", file=sys.stderr)
+                self.load_default_rules()
+                return
+            
+            for rule_def in rule_defs:
+                try:
+                    # 将策略字符串转换为枚举
+                    strategy_name = rule_def.get('strategy', 'metadata_only')
+                    strategy = ProcessingStrategy(strategy_name)
+                    
+                    # 解析模式
+                    patterns = rule_def.get('patterns', [])
+                    if not patterns:
+                        continue
+                    
+                    rule = FileRule(
+                        name=rule_def.get('name', 'unnamed'),
+                        patterns=patterns,
+                        strategy=strategy,
+                        priority=rule_def.get('priority', 50),
+                        force_binary=rule_def.get('force_binary', False),
+                        max_size=rule_def.get('max_size_kb', 0) * 1024 if rule_def.get('max_size_kb') else None,
+                        comment=rule_def.get('comment')
+                    )
+                    self.rules.append(rule)
+                except Exception as e:
+                    print(f"警告: 解析规则时出错: {rule_def.get('name', 'unnamed')} - {e}", file=sys.stderr)
+        
+        # 按优先级降序排序
+        self.rules.sort(key=lambda r: r.priority, reverse=True)
     
     def classify_file(self, filepath: Path) -> Tuple[ProcessingStrategy, bool]:
         """
