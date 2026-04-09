@@ -2,8 +2,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Directory Digest Refactor - 重构版主入口
-利用 tools/_directory_digest 模块实现完整功能
+Directory Digest Refactor - Refactored main entry point
+Uses tools/_directory_digest module to implement full functionality
 """
 
 import os
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-# 导入基础模块
+# Import base modules
 from tools._directory_digest import (
     ProcessingStrategy,
     FileType,
@@ -94,7 +94,7 @@ class DirectoryDigest(DirectoryDigestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
-        # 初始化统计信息
+        # Initialize statistics
         self.stats = {
             'total_files': 0,
             'critical_docs': 0,
@@ -108,7 +108,11 @@ class DirectoryDigest(DirectoryDigestBase):
             'processing_time': 0
         }
         
-        # 初始化高级组件（如果可用）
+        # Parallel processing config
+        self.use_parallel = self.config.get('use_parallel', False)
+        self.max_workers = self.config.get('max_workers', os.cpu_count() or 4)
+        
+        # Initialize advanced components (if available)
         if SEMANTICS_AVAILABLE:
             self.human_summarizer = HumanReadableSummarizer()
             self.source_analyzer = SourceCodeAnalyzer()
@@ -142,13 +146,50 @@ class DirectoryDigest(DirectoryDigestBase):
             return self._generate_output(mode)
     
     def _process_directory(self, structure: DirectoryStructure, mode: str):
-        """处理目录中的所有文件"""
-        for file_digest in structure.files:
-            self._process_file(file_digest, mode)
+        """Process all files in directory"""
+        if self.use_parallel and len(structure.files) > 10:
+            self._process_directory_parallel(structure, mode)
+        else:
+            for file_digest in structure.files:
+                self._process_file(file_digest, mode)
         
-        # 递归处理子目录
+        # Recursively process subdirectories
         for subdir in structure.subdirectories.values():
             self._process_directory(subdir, mode)
+    
+    def _process_directory_parallel(self, structure: DirectoryStructure, mode: str):
+        """Process directory using parallel processing"""
+        import concurrent.futures
+        
+        # Collect all files
+        all_files = []
+        def collect_files(node: DirectoryStructure):
+            all_files.extend(node.files)
+            for subdir in node.subdirectories.values():
+                collect_files(subdir)
+        
+        collect_files(structure)
+        
+        # Process using thread pool
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+            future_to_file = {
+                executor.submit(self._process_file_safe, file_digest, mode): file_digest
+                for file_digest in all_files
+            }
+            
+            for future in concurrent.futures.as_completed(future_to_file):
+                file_digest = future_to_file[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Warning: Error processing file {file_digest.metadata.path}: {e}", file=sys.stderr)
+    
+    def _process_file_safe(self, file_digest: FileDigest, mode: str):
+        """Safe file processing wrapper for parallel execution"""
+        try:
+            self._process_file(file_digest, mode)
+        except Exception as e:
+            print(f"Warning: Error processing file {file_digest.metadata.path}: {e}", file=sys.stderr)
     
     def _process_file(self, file_digest: FileDigest, mode: str):
         """处理单个文件"""
@@ -363,7 +404,7 @@ class DirectoryDigest(DirectoryDigestBase):
         return all_files
 
     def save_output(self, output: Dict, format: str = "json", output_path: Optional[Path] = None, mode: str = None) -> Path:
-        """保存输出到文件"""
+        """Save output to file"""
         if not output_path:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             ext = format.lower()
@@ -480,10 +521,10 @@ class DirectoryDigest(DirectoryDigestBase):
         return False
     
     def _generate_sort_output(self) -> Dict:
-        """生成分类排序输出"""
+        """Generate sorted classification output"""
         all_files = self._collect_all_files_flat()
         
-        # 按类型分组
+        # Group by type
         by_type = {
             FileType.CRITICAL_DOCS.value: [],
             FileType.REFERENCE_DOCS.value: [],
@@ -493,6 +534,11 @@ class DirectoryDigest(DirectoryDigestBase):
             FileType.UNKNOWN.value: []
         }
         
+        # Group by size
+        large_files = []      # > 1MB
+        medium_files = []     # 100KB - 1MB
+        small_files = []      # < 100KB
+        
         for f in all_files:
             file_type = f.metadata.file_type.value
             file_info = {
@@ -500,15 +546,26 @@ class DirectoryDigest(DirectoryDigestBase):
                 'size': f.metadata.size,
                 'size_formatted': self._format_size(f.metadata.size),
                 'modified': f.metadata.modified_time.isoformat(),
-                'type': file_type
+                'type': file_type,
+                'is_binary': file_type == FileType.BINARY_FILES.value
             }
             
             if file_type in by_type:
                 by_type[file_type].append(file_info)
             else:
                 by_type[FileType.UNKNOWN.value].append(file_info)
+            
+            # Group by size
+            size = f.metadata.size
+            if size > 1024 * 1024:
+                large_files.append(file_info)
+            elif size > 100 * 1024:
+                medium_files.append(file_info)
+            else:
+                small_files.append(file_info)
         
-        return {
+        # Build report
+        sort_report = {
             "metadata": {
                 "generated_at": datetime.now().isoformat(),
                 "root_directory": str(self.root),
@@ -516,11 +573,68 @@ class DirectoryDigest(DirectoryDigestBase):
                 "statistics": self.stats,
                 "context_usage": self.context_manager.get_summary()
             },
+            "classification": {},
+            "by_size": {
+                "large_files": large_files,
+                "medium_files": medium_files,
+                "small_files": small_files
+            },
             "file_listings": {
                 k: sorted(v, key=lambda x: x['path']) 
                 for k, v in by_type.items() if v
             }
         }
+        
+        # Generate detailed information for each type
+        for type_name, files in by_type.items():
+            if not files:
+                continue
+                
+            # Group by extension
+            by_ext = {}
+            for f in files:
+                path = f['path']
+                ext = Path(path).suffix.lower() or "(no extension)"
+                if ext not in by_ext:
+                    by_ext[ext] = []
+                by_ext[ext].append(path)
+            
+            # Calculate total size
+            total_size = sum(f['size'] for f in files)
+            
+            sort_report["classification"][type_name] = {
+                "count": len(files),
+                "total_size_bytes": total_size,
+                "total_size_formatted": self._format_size(total_size),
+                "extensions": {
+                    ext: {
+                        "count": len(paths),
+                        "files": sorted(paths)[:10],  # Show only first 10
+                        "truncated": len(paths) > 10,
+                        "total_count": len(paths)
+                    }
+                    for ext, paths in sorted(by_ext.items(), key=lambda x: len(x[1]), reverse=True)
+                }
+            }
+        
+        # Add recommendations
+        recommendations = []
+        if large_files:
+            recommendations.append(
+                f"Found {len(large_files)} large files (>1MB). "
+                f"In 'full' mode, use --max-content-size to limit full content output."
+            )
+        
+        if by_type.get(FileType.UNKNOWN.value, []):
+            count = len(by_type[FileType.UNKNOWN.value])
+            if count > 5:
+                recommendations.append(
+                    f"Found {count} unknown type files. Consider reviewing or adding to ignore patterns."
+                )
+        
+        sort_report["recommendations"] = recommendations
+        
+        return sort_report
     
     def _generate_output(self, mode: str) -> Dict:
         """生成完整输出"""
@@ -621,91 +735,209 @@ def parse_context_size(size_str: str) -> int:
 
 
 def main():
-    """命令行入口点"""
+    """Command line entry point"""
+    # Custom help formatter to preserve formatting
+    class CustomHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        def _format_action(self, action):
+            return super()._format_action(action)
+    
     parser = argparse.ArgumentParser(
         prog="directory_digest_refactor",
-        description="Directory Digest Tool (Refactored) - 目录知识摘要生成器",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="""
+Directory Digest Tool - Directory Knowledge Digest Generator
+
+Recursively "digests" the filesystem into LLM-understandable context summaries.
+Rule-based intelligent classification: Human-readable text | Source code | Config files | Binary files
+
+Three operation modes:
+  framework (default)  Generate file structure and metadata summaries
+  full                 Include complete file contents (subject to context window limits)
+  sort                 List files by type/size with statistics and recommendations
+        """.strip(),
+        formatter_class=CustomHelpFormatter,
+        epilog="""
+Examples:
+  # Basic usage - output to stdout (JSON format)
+  %(prog)s /path/to/project
+  
+  # Use rules file
+  %(prog)s . --rules .digest_rules.yaml --save report.json
+  
+  # Custom context size
+  %(prog)s . --context-size 64k --mode full
+  
+  # Sort mode for classification overview
+  %(prog)s . --mode sort | less
+  
+  # Full mode with piping
+  %(prog)s . --mode full | grep -A 5 "class Controller"
+  
+  # Analyze large project with parallel processing
+  %(prog)s /data --parallel --workers 8 --save report.json
+  
+  # Strict mode: skip files larger than 100MB
+  %(prog)s . --max-size 100
+  
+  # Custom ignore rules, output YAML to stdout
+  %(prog)s . --ignore "*.log,*.tmp,cache,*.min.js" --output yaml
+  
+  # Generate HTML report
+  %(prog)s /code --mode full --output html --save report.html
+        """
     )
     
-    parser.add_argument(
+    # Core options group
+    core_group = parser.add_argument_group("Core Options", "Specify input directory and operation mode")
+    core_group.add_argument(
         "directory",
         metavar="PATH",
-        help="要分析的目录路径"
+        help="Directory path to analyze"
     )
-    parser.add_argument(
+    core_group.add_argument(
         "-m", "--mode",
         choices=["full", "framework", "sort"],
         default="framework",
-        help="工作模式 (默认: %(default)s)"
+        metavar="MODE",
+        help="Operation mode (default: %(default)s)"
     )
-    parser.add_argument(
-        "-o", "--output",
-        choices=["json", "yaml", "md", "txt"],
-        default="json",
-        help="输出格式 (默认: %(default)s)"
+    
+    # Rules and context control
+    rule_group = parser.add_argument_group(
+        "Rules and Context Control",
+        "Control file classification and LLM context optimization"
     )
-    parser.add_argument(
-        "-s", "--save",
-        metavar="FILE",
-        help="保存输出到文件 (默认: stdout)"
-    )
-    parser.add_argument(
+    rule_group.add_argument(
         "-r", "--rules",
         metavar="FILE",
-        help="规则文件路径"
+        help="""
+        Path to rules file (YAML format).
+        Defines file classification and processing strategies.
+        If not provided, uses built-in heuristic rules.
+        """
     )
-    parser.add_argument(
+    rule_group.add_argument(
         "--context-size",
         type=str,
         default="128k",
-        help="目标LLM上下文大小 (默认: %(default)s)"
+        metavar="SIZE",
+        help="""
+        Target LLM context size (tokens).
+        Supports formats: "64k", "128k", "256k" or specific numbers.
+        Used for optimizing token allocation.
+        (default: %(default)s)
+        """
     )
-    parser.add_argument(
+    
+    # Output control group
+    output_group = parser.add_argument_group(
+        "Output Control",
+        "Control output format, destination, and content detail"
+    )
+    output_group.add_argument(
+        "-o", "--output",
+        choices=["json", "yaml", "md", "html", "toml", "txt"],
+        default="json",
+        metavar="FORMAT",
+        help="Output format (default: %(default)s)"
+    )
+    output_group.add_argument(
+        "-s", "--save",
+        metavar="FILE",
+        help="""
+        Specify output file path. Special cases:
+          - Omit this option: output to stdout (suitable for piping)
+          - Use "-": Force output to stdout (even if this option is provided)
+          - Other paths: Write to specified file (directories created automatically)
+        (default: output to stdout)
+        """
+    )
+    output_group.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Show detailed processing information (including per-file status)"
+    )
+    
+    # Size limits group
+    size_group = parser.add_argument_group(
+        "Size Limits",
+        "Control thresholds for file processing"
+    )
+    size_group.add_argument(
         "--max-size",
         type=int,
         default=10240,
         metavar="MB",
-        help="文件大小阈值(MB) (默认: %(default)s)"
+        help="""
+        File size threshold (MB). Files exceeding this size will be **completely skipped**:
+        No checksum calculation, no content analysis, only path and size metadata retained.
+        Useful for excluding oversized logs, VM images, datasets, media files.
+        (default: %(default)s MB = 10 GB)
+        """
     )
-    parser.add_argument(
+    
+    # Processing options group
+    proc_group = parser.add_argument_group("Processing Options", "Control parallel processing and file filtering")
+    proc_group.add_argument(
         "--ignore",
-        default=".git,__pycache__,*.pyc,*.pyo,node_modules,.venv,venv",
-        help="忽略规则，逗号分隔"
+        default=".git,__pycache__,*.pyc,*.pyo,node_modules,.venv,venv,*.min.js,*.map",
+        metavar="PATTERNS",
+        help="""
+        Ignore patterns, comma-separated glob patterns.
+        Default ignores version control, cache, dependency directories and minified files: %(default)s
+        """
     )
-    parser.add_argument(
-        "-v", "--verbose",
+    proc_group.add_argument(
+        "-p", "--parallel",
         action="store_true",
-        help="显示详细处理信息"
+        help="Enable parallel processing (recommended for large projects with >1000 files)"
+    )
+    proc_group.add_argument(
+        "-w", "--workers",
+        type=int,
+        default=0,
+        metavar="N",
+        help="""
+        Number of parallel worker threads.
+        0 means auto-detect CPU core count (default: %(default)s -> actually uses %(const)s threads)
+        """ % {'default': 0, 'const': os.cpu_count() or 4}
     )
     
     args = parser.parse_args()
     
-    # 解析上下文大小
+    # Parse context size
     context_size = parse_context_size(args.context_size)
     
-    # 配置转换
+    # Configuration conversion
     config = {
-        'max_file_size': args.max_size * 1024 * 1024,
+        'max_file_size': args.max_size * 1024 * 1024,  # MB to Bytes
         'ignore_patterns': [p.strip() for p in args.ignore.split(',') if p.strip()],
+        'use_parallel': args.parallel,
+        'max_workers': args.workers if args.workers > 0 else os.cpu_count() or 4,
         'rules_file': Path(args.rules) if args.rules else None,
         'context_size': context_size,
     }
     
-    # 创建摘要器
+    # Create digest generator
     digest = DirectoryDigest(args.directory, config)
     
     if args.verbose:
         print(f"Analyzing directory: {args.directory}", file=sys.stderr)
         print(f"Mode: {args.mode}, Format: {args.output}", file=sys.stderr)
+        print(f"Skip files larger than: {args.max_size} MB ({args.max_size/1024:.1f} GB)", file=sys.stderr)
+        print(f"Context window: {context_size:,} tokens", file=sys.stderr)
+        if args.rules:
+            print(f"Rules file: {args.rules}", file=sys.stderr)
+        if args.parallel:
+            print(f"Parallel processing enabled with {config['max_workers']} workers", file=sys.stderr)
     
-    # 生成摘要
+    # Generate digest
     output = digest.create_digest(args.mode)
     
-    # 处理输出
+    # Handle output: default stdout, --save specifies file path, --save - forces stdout
     output_to_stdout = (args.save is None or args.save == '-')
     
     if output_to_stdout:
+        # Output to stdout (supports piping)
         try:
             content = FormatConverter.convert(output, args.output, mode=args.mode)
             sys.stdout.write(content)
@@ -713,15 +945,80 @@ def main():
                 sys.stdout.write('\n')
             sys.stdout.flush()
         except BrokenPipeError:
+            # Ignore pipe break errors (e.g., output truncated by head/tail)
             pass
+        
+        # Statistics to stderr
+        if args.verbose or args.mode == "sort":
+            stats = output['metadata']['statistics']
+            ctx_usage = output['metadata'].get('context_usage')
+            
+            print(f"\n[Summary] Files: {stats['total_files']}, "
+                  f"Critical: {stats.get('critical_docs', 0)}, "
+                  f"Reference: {stats.get('reference_docs', 0)}, "
+                  f"Source: {stats.get('source_code', 0)}, "
+                  f"Text Data: {stats.get('text_data', 0)}, "
+                  f"Binary: {stats.get('binary_files', 0)}", 
+                  file=sys.stderr)
+            
+            if stats.get('skipped_large_files', 0) > 0:
+                print(f"         Skipped (size): {stats['skipped_large_files']}", file=sys.stderr)
+            
+            if stats.get('skipped_by_context', 0) > 0:
+                print(f"         Skipped (context): {stats['skipped_by_context']}", file=sys.stderr)
+            
+            if ctx_usage:
+                print(f"[Context] Used: {ctx_usage['used_tokens']:,}/{ctx_usage['max_tokens']:,} tokens "
+                      f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+            else:
+                print(f"[Context] Not applicable for sort mode", file=sys.stderr)
+            
+            if args.mode == "sort" and "recommendations" in output:
+                for rec in output["recommendations"]:
+                    print(f"[Tip] {rec}", file=sys.stderr)
+        
+        return None  # Return None for stdout mode
+        
     else:
+        # Write to specified file
         output_path = Path(args.save)
         saved_path = digest.save_output(output, args.output, output_path, args.mode)
         
-        if args.verbose:
-            stats = output['metadata']['statistics']
-            print(f"\nSummary: Files={stats['total_files']}, "
-                  f"Time={stats['processing_time']:.2f}s", file=sys.stderr)
+        # Display processing results (to stderr, avoid mixing with file content)
+        stats = output['metadata']['statistics']
+        ctx_usage = output['metadata'].get('context_usage')
+        
+        print(f"\n{'='*50}", file=sys.stderr)
+        print(f"Directory Digest Summary", file=sys.stderr)
+        print(f"{'='*50}", file=sys.stderr)
+        print(f"Total files scanned:     {stats['total_files']}", file=sys.stderr)
+        print(f"  ├── Critical docs:     {stats.get('critical_docs', 0)}", file=sys.stderr)
+        print(f"  ├── Reference docs:    {stats.get('reference_docs', 0)}", file=sys.stderr)
+        print(f"  ├── Source code:       {stats.get('source_code', 0)}", file=sys.stderr)
+        print(f"  ├── Text data:         {stats.get('text_data', 0)}", file=sys.stderr)
+        print(f"  ├── Binary files:      {stats.get('binary_files', 0)}", file=sys.stderr)
+        if stats.get('skipped_large_files', 0) > 0:
+            print(f"  ├── Skipped (size):    {stats['skipped_large_files']}", file=sys.stderr)
+        if stats.get('skipped_by_context', 0) > 0:
+            print(f"  └── Skipped (context): {stats['skipped_by_context']}", file=sys.stderr)
+        
+        if ctx_usage:
+            print(f"Context window:          {ctx_usage['max_tokens']:,} tokens", file=sys.stderr)
+            print(f"Context used:            {ctx_usage['used_tokens']:,} tokens "
+                  f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
+        else:
+            print(f"Context window:          Not applicable for sort mode", file=sys.stderr)
+        
+        print(f"Processing time:         {stats['processing_time']:.2f} s", file=sys.stderr)
+        print(f"Output saved to:         {saved_path}", file=sys.stderr)
+        print(f"{'='*50}", file=sys.stderr)
+        
+        if args.mode == "sort" and "recommendations" in output:
+            print(f"\nRecommendations:", file=sys.stderr)
+            for rec in output["recommendations"]:
+                print(f"  • {rec}", file=sys.stderr)
+        
+        return saved_path
 
 
 if __name__ == "__main__":
