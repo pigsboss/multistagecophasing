@@ -350,6 +350,7 @@ class RuleEngine:
     def load_default_rules(self):
         """加载内置默认规则"""
         default_rules = [
+            # 关键文档 - 对应 FileType.CRITICAL_DOCS
             FileRule("critical_readme", ["README*", "readme*"], 
                     ProcessingStrategy.FULL_CONTENT, priority=100, max_size=256*1024),
             FileRule("critical_license", ["LICENSE*", "COPYING*", "NOTICE*"], 
@@ -358,16 +359,26 @@ class RuleEngine:
                     ProcessingStrategy.SUMMARY_ONLY, priority=95, max_size=256*1024),
             FileRule("critical_contrib", ["CONTRIBUTING*", "INSTALL*", "AUTHORS*", "NEWS*", "TODO*", "ROADMAP*"], 
                     ProcessingStrategy.SUMMARY_ONLY, priority=95, max_size=256*1024),
+            
+            # 二进制文件 - 对应 FileType.BINARY_FILES
             FileRule("binary_archives", ["*.gz", "*.bz2", "*.xz", "*.7z", "*.rar", "*.zip", "*.tar"], 
                     ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
             FileRule("media_files", ["*.avi", "*.mp4", "*.mov", "*.wav", "*.mp3", "*.jpg", "*.png"],
                     ProcessingStrategy.METADATA_ONLY, priority=90, force_binary=True),
+            
+            # 参考文档 - 对应 FileType.REFERENCE_DOCS
             FileRule("reference_docs", ["*.md", "*.markdown", "*.rst", "*.tex", "*.html", "*.htm"],
                     ProcessingStrategy.SUMMARY_ONLY, priority=80, max_size=512*1024),
+            
+            # 源代码 - 对应 FileType.SOURCE_CODE
             FileRule("source_code", ["*.py", "*.c", "*.cpp", "*.h", "*.java", "*.js", "*.ts", "*.go", "*.rs"],
                     ProcessingStrategy.CODE_SKELETON, priority=70),
+            
+            # 文本数据 - 对应 FileType.TEXT_DATA
             FileRule("config_files", ["*.yaml", "*.yml", "*.json", "*.toml", "*.conf", "*.ini", "*.cfg"],
                     ProcessingStrategy.STRUCTURE_EXTRACT, priority=60),
+            FileRule("data_files", ["*.csv", "*.tsv", "*.log", "*.dat", "*.txt"],
+                    ProcessingStrategy.HEADER_WITH_STATS, priority=55),
         ]
         self.rules.extend(default_rules)
     
@@ -635,14 +646,14 @@ class FormatConverter:
         lines.append(f"Generated: {digest_data.get('metadata', {}).get('generated_at', 'unknown')}")
         lines.append("")
         
-        # 类型映射 (与原始代码一致)
+        # 类型映射 (与实际的6种分类一致)
         type_names = {
             'critical_docs': ('Critical Docs', 'C'),
             'reference_docs': ('Reference Docs', 'R'),
             'source_code': ('Source Code', 'S'),
             'text_data': ('Text Data', 'T'),
             'binary_files': ('Binary Files', 'B'),
-            'unknown': ('Unknown', '?')
+            'unknown': ('Unknown', '?')  # 添加 unknown 类型
         }
         
         listings = digest_data.get('file_listings', {})
@@ -685,7 +696,7 @@ class FormatConverter:
             
             lines.append("")
         
-        # 统计摘要 (与原始代码一致)
+        # 统计摘要 - 添加 unknown 统计
         stats = digest_data.get('metadata', {}).get('statistics', {})
         lines.append("Summary:")
         lines.append(f"  Total: {stats.get('total_files', 0)} files, "
@@ -695,6 +706,7 @@ class FormatConverter:
         lines.append(f"  Source Code: {stats.get('source_code', 0)}")
         lines.append(f"  Text Data: {stats.get('text_data', 0)}")
         lines.append(f"  Binary Files: {stats.get('binary_files', 0)}")
+        lines.append(f"  Unknown: {stats.get('unknown', 0)}")  # 添加 unknown
         lines.append(f"  Skipped (>limit): {stats.get('skipped_large_files', 0)}")
         
         return '\n'.join(lines)
@@ -755,6 +767,7 @@ class DirectoryDigestBase:
             'source_code': 0,
             'text_data': 0,
             'binary_files': 0,
+            'unknown': 0,  # 添加 unknown 统计
             'skipped_large_files': 0,
             'skipped_by_context': 0,
             'total_size': 0,

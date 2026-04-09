@@ -1001,7 +1001,8 @@ Operation Modes:
                   f"Reference: {stats.get('reference_docs', 0)}, "
                   f"Source: {stats.get('source_code', 0)}, "
                   f"Text Data: {stats.get('text_data', 0)}, "
-                  f"Binary: {stats.get('binary_files', 0)}", 
+                  f"Binary: {stats.get('binary_files', 0)}, "
+                  f"Unknown: {stats.get('unknown', 0)}",  # 添加 Unknown
                   file=sys.stderr)
                 
             if stats.get('skipped_large_files', 0) > 0:

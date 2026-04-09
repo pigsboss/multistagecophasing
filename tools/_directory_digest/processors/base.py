@@ -1055,7 +1055,7 @@ class FileProcessorRegistry:
                                 'contributing', 'install', 'authors', 'news', 'todo', 'roadmap']
             is_critical = any(pattern in filename for pattern in critical_patterns)
         
-        # 统计键映射
+        # 统计键映射 - 与 FileType 枚举完全一致
         type_mapping = {
             'SourceCodeProcessor': 'source_code',
             'TextFileProcessor': 'critical_docs' if is_critical else 'reference_docs',
@@ -1066,7 +1066,7 @@ class FileProcessorRegistry:
         stat_key = type_mapping.get(processor_type, 'binary_files')
         self._update_stats(stat_key)
         
-        # 同时更新文件类型元数据
+        # 同时更新文件类型元数据 - 与 FileType 枚举完全一致
         file_type_mapping = {
             'SourceCodeProcessor': FileType.SOURCE_CODE,
             'TextFileProcessor': FileType.CRITICAL_DOCS if is_critical else FileType.REFERENCE_DOCS,
@@ -1076,6 +1076,11 @@ class FileProcessorRegistry:
         file_digest.metadata.file_type = file_type_mapping.get(
             processor_type, FileType.BINARY_FILES
         )
+        
+        # 如果没有匹配的处理器，设置为 UNKNOWN
+        if processor_type not in type_mapping:
+            file_digest.metadata.file_type = FileType.UNKNOWN
+            self._update_stats('unknown')
     
     def process_directory(self, structure: Any, mode: str = "framework", 
                          parallel: bool = False, max_workers: int = 4):
