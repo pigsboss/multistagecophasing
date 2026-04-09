@@ -161,6 +161,29 @@ class DirectoryDigest(DirectoryDigestBase):
             
             return self._generate_output(mode)
     
+    def _generate_output(self, mode: str) -> Dict:
+        """生成完整输出"""
+        if not self.structure:
+            return {}
+        
+        output = {
+            "metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "root_directory": str(self.root),
+                "output_mode": mode,
+                "statistics": self.stats,
+                "context_usage": self.context_manager.get_summary(),
+            },
+            "structure": self.structure.to_dict(mode)
+        }
+        
+        if self.context_manager.file_records:
+            output["context_allocation"] = {
+                "file_records": self.context_manager.file_records
+            }
+        
+        return output
+    
     
 
 
