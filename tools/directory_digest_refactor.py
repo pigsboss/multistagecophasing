@@ -382,6 +382,13 @@ class DirectoryDigest(DirectoryDigestBase):
         if not self.structure:
             return {}
         
+        # 确保结构有 to_dict 方法
+        try:
+            structure_dict = self.structure.to_dict(mode)
+        except AttributeError:
+            # 如果 to_dict 不存在，手动转换
+            structure_dict = self._structure_to_dict(self.structure, mode)
+        
         output = {
             "metadata": {
                 "generated_at": datetime.now().isoformat(),
@@ -390,7 +397,7 @@ class DirectoryDigest(DirectoryDigestBase):
                 "statistics": self.stats,
                 "context_usage": self.context_manager.get_summary(),
             },
-            "structure": self.structure.to_dict(mode)
+            "structure": structure_dict
         }
         
         if self.context_manager.file_records:
@@ -399,6 +406,43 @@ class DirectoryDigest(DirectoryDigestBase):
             }
         
         return output
+    
+    def _structure_to_dict(self, structure: DirectoryStructure, mode: str) -> Dict:
+        """手动转换目录结构为字典"""
+        return {
+            "path": str(structure.path),
+            "files": [self._file_digest_to_dict(f, mode) for f in structure.files],
+            "subdirectories": {
+                name: self._structure_to_dict(subdir, mode)
+                for name, subdir in structure.subdirectories.items()
+            }
+        }
+    
+    def _file_digest_to_dict(self, file_digest: FileDigest, mode: str) -> Dict:
+        """转换 FileDigest 为字典"""
+        result = {
+            "metadata": {
+                "path": str(file_digest.metadata.path),
+                "size": file_digest.metadata.size,
+                "modified_time": file_digest.metadata.modified_time.isoformat(),
+                "created_time": file_digest.metadata.created_time.isoformat(),
+                "file_type": file_digest.metadata.file_type.value,
+                "mime_type": file_digest.metadata.mime_type,
+                "md5_hash": file_digest.metadata.md5_hash,
+                "sha256_hash": file_digest.metadata.sha256_hash
+            }
+        }
+        
+        if mode == "full" and hasattr(file_digest, 'full_content') and file_digest.full_content:
+            result["full_content"] = file_digest.full_content
+        
+        if hasattr(file_digest, 'human_readable_summary') and file_digest.human_readable_summary:
+            result["summary"] = file_digest.human_readable_summary.to_dict()
+        
+        if hasattr(file_digest, 'source_code_analysis') and file_digest.source_code_analysis:
+            result["source_analysis"] = file_digest.source_code_analysis.to_dict()
+        
+        return result
     
     @staticmethod
     def _format_size(size_bytes: int) -> str:
