@@ -713,6 +713,10 @@ class DirectoryDigestBase:
         
         self.file_type_detector = FileTypeDetector()
         
+        # 并行处理配置
+        self.use_parallel = self.config.get('use_parallel', False)
+        self.max_workers = self.config.get('max_workers', os.cpu_count() or 4)
+        
         self.structure: Optional[DirectoryStructure] = None
         self.stats = {
             'total_files': 0,
@@ -1025,6 +1029,24 @@ class DirectoryDigestBase:
         return output_path
 
 
+def parse_context_size(size_str: str) -> int:
+    """解析上下文大小字符串（如 '128k', '64k' 等）"""
+    size_str = size_str.lower().strip()
+    
+    if size_str.endswith('k'):
+        multiplier = 1000
+        size_str = size_str[:-1]
+    else:
+        multiplier = 1
+    
+    try:
+        base_value = float(size_str) if '.' in size_str else int(size_str)
+        return int(base_value * multiplier)
+    except ValueError:
+        print(f"Warning: Could not parse context size '{size_str}', using default 128000", file=sys.stderr)
+        return 128000
+
+
 # ==================== 公共 API 导出 ====================
 
 __all__ = [
@@ -1049,4 +1071,7 @@ __all__ = [
     
     # 配置
     'STRATEGY_CONFIGS',
+    
+    # 工具函数
+    'parse_context_size',
 ]
