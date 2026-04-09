@@ -753,8 +753,18 @@ def main():
     except ImportError:
         USE_RICH = False
         
-        class ColorHelpFormatter(argparse.RawDescriptionHelpFormatter):
+        class ColorHelpFormatter(argparse.RawTextHelpFormatter):  # 改为 RawTextHelpFormatter
             """自定义彩色帮助格式化器"""
+            def __init__(self, *args, **kwargs):
+                # 尝试获取终端宽度，避免自动换行计算错误
+                try:
+                    import shutil
+                    width = shutil.get_terminal_size().columns
+                except Exception:
+                    width = 80
+                kwargs['width'] = width
+                super().__init__(*args, **kwargs)
+            
             def start_section(self, heading):
                 if heading and USE_COLOR:
                     heading = f"{C['BOLD']}{C['MAG']}▸ {heading}{C['RST']}"
@@ -763,10 +773,8 @@ def main():
             def _format_action(self, action):
                 text = super()._format_action(action)
                 if USE_COLOR and action.option_strings:
-                    # 选项名使用绿色
                     for opt in action.option_strings:
                         text = text.replace(opt, f"{C['GRN']}{opt}{C['RST']}")
-                    # 默认值使用黄色高亮
                     if action.default is not None and action.default != argparse.SUPPRESS:
                         text = text.replace(f" (default: {action.default})", 
                                           f" {C['DIM']}(default: {C['YLW']}{action.default}{C['DIM']}){C['RST']}")
