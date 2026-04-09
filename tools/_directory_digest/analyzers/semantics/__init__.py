@@ -15,8 +15,16 @@ from .base import (
     SmartTextProcessor,
     ContentAnalyzer,
 )
+from .codes import (
+    PythonSourceCodeAnalyzer,
+    CFamilySourceCodeAnalyzer,
+    JavaScriptSourceCodeAnalyzer,
+    GenericSourceCodeAnalyzer,
+    CompositeSourceCodeAnalyzer,
+)
 
 __all__ = [
+    # 基础类
     'SemanticAnalysisResult',
     'HumanReadableSummary',
     'SourceCodeAnalysis',
@@ -28,4 +36,11 @@ __all__ = [
     'ComplexityAnalyzer',
     'SmartTextProcessor',
     'ContentAnalyzer',
+    
+    # 代码分析器
+    'PythonSourceCodeAnalyzer',
+    'CFamilySourceCodeAnalyzer',
+    'JavaScriptSourceCodeAnalyzer',
+    'GenericSourceCodeAnalyzer',
+    'CompositeSourceCodeAnalyzer',
 ]
