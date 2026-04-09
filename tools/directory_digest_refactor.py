@@ -753,11 +753,10 @@ def main():
     except ImportError:
         USE_RICH = False
         
-        class ColorHelpFormatter(argparse.RawDescriptionHelpFormatter):
-            """自定义彩色帮助格式化器 - 使用 RawDescriptionHelpFormatter 保留描述格式"""
+        class ColorHelpFormatter(argparse.RawTextHelpFormatter):
+            """自定义彩色帮助格式化器 - 使用 RawTextHelpFormatter 保留所有换行"""
             def __init__(self, *args, **kwargs):
-                # 设置足够大的宽度以避免自动换行破坏格式
-                kwargs['width'] = 200  
+                kwargs['width'] = 120  # 设置合理宽度
                 super().__init__(*args, **kwargs)
             
             def _format_action(self, action):
