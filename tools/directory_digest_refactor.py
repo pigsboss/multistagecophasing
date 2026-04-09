@@ -95,7 +95,7 @@ class DirectoryDigest(DirectoryDigestBase):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         
-        # Initialize statistics
+        # Initialize statistics (与原始代码一致)
         self.stats = {
             'total_files': 0,
             'critical_docs': 0,
@@ -135,7 +135,22 @@ class DirectoryDigest(DirectoryDigestBase):
         self.structure = self._build_directory_structure(self.root)
         
         # 处理所有文件
-        self._process_directory(self.structure, mode)
+        if mode == "sort":
+            # sort 模式只需基础元数据，无需深度内容分析
+            for file_digest in self._collect_all_files_flat():
+                filepath = file_digest.metadata.path
+                file_type = self.file_type_detector.detect(filepath)
+                file_digest.metadata.file_type = file_type
+                
+                # 更新统计
+                type_stat_key = file_type.value
+                if type_stat_key in self.stats:
+                    self.stats[type_stat_key] += 1
+                
+                self._calculate_hashes(file_digest)
+        else:
+            # 其他模式需要深度处理
+            self._process_directory(self.structure, mode)
         
         # 更新统计信息
         self.stats['processing_time'] = time.time() - start_time
@@ -415,13 +430,13 @@ class DirectoryDigest(DirectoryDigestBase):
         
         output_path.parent.mkdir(parents=True, exist_ok=True)
         
-        # Use ExtendedFormatConverter to support sort mode
-        content = ExtendedFormatConverter.convert(output, format, mode)
+        # 修复：使用 FormatConverter 而不是 ExtendedFormatConverter
+        content = FormatConverter.convert(output, format, mode)
         
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write(content)
         
-        print(f"Summary saved to: {output_path}", file=sys.stderr)
+        print(f"Digest saved to: {output_path}", file=sys.stderr)  # 与原始代码一致，输出到 stderr
         return output_path
 
     def _calculate_hashes(self, file_digest: FileDigest):
@@ -825,7 +840,7 @@ Examples:
     if output_to_stdout:
         # 输出到标准输出（支持管道处理）
         try:
-            content = ExtendedFormatConverter.convert(output, args.output, mode=args.mode)
+            content = FormatConverter.convert(output, args.output, mode=args.mode)
             sys.stdout.write(content)
             if not content.endswith('\n'):
                 sys.stdout.write('\n')

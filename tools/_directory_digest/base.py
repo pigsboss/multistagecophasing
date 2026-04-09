@@ -607,7 +607,7 @@ class FormatConverter:
     
     @staticmethod
     def _to_sort_format(digest_data: Dict) -> str:
-        """Generate ls -l style output for sort mode"""
+        """Generate ls -l style output for sort mode (与原始代码一致)"""
         lines = []
         root_dir = digest_data.get('metadata', {}).get('root_directory', '.')
         
@@ -615,7 +615,7 @@ class FormatConverter:
         lines.append(f"Generated: {digest_data.get('metadata', {}).get('generated_at', 'unknown')}")
         lines.append("")
         
-        # 类型映射 (type_key: (display_name, type_char))
+        # 类型映射 (与原始代码一致)
         type_names = {
             'critical_docs': ('Critical Docs', 'C'),
             'reference_docs': ('Reference Docs', 'R'),
@@ -640,10 +640,10 @@ class FormatConverter:
             # 类 ls -l 格式：类型 大小 日期 路径
             for f in files[:100]:  # 限制显示数量
                 path = f.get('path', 'unknown')
-                size = f.get('size_formatted', '0 B')
+                size = f.get('size_formatted', FormatConverter._format_size(f.get('size', 0)))
                 modified = f.get('modified', 'unknown')
                 
-                # 格式化日期
+                # 格式化日期 (与原始代码一致)
                 if modified != 'unknown':
                     try:
                         dt = datetime.fromisoformat(modified)
@@ -661,7 +661,7 @@ class FormatConverter:
             
             lines.append("")
         
-        # 统计摘要
+        # 统计摘要 (与原始代码一致)
         stats = digest_data.get('metadata', {}).get('statistics', {})
         lines.append("Summary:")
         lines.append(f"  Total: {stats.get('total_files', 0)} files, "
@@ -927,7 +927,7 @@ class DirectoryDigestBase:
             else:
                 small_files.append(file_info)
         
-        # 构建报告
+        # 构建报告 (与原始代码一致)
         sort_report = {
             "metadata": {
                 "generated_at": datetime.now().isoformat(),
@@ -980,7 +980,7 @@ class DirectoryDigestBase:
                 }
             }
         
-        # 添加建议
+        # 添加建议 (与原始代码一致)
         recommendations = []
         if large_files:
             recommendations.append(
