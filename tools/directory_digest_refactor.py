@@ -774,12 +774,9 @@ def main():
         
         FormatterClass = ColorHelpFormatter
     
-    # 构建带颜色和图标的帮助文本
+    # 构建带颜色和图标的帮助文本（无方框版本）
     if USE_COLOR or USE_RICH:
-        # 方框宽度：66字符（64内容 + 2边框）
-        description = f"""{C['BOLD']}{C['CYN']}╔════════════════════════════════════════════════════════════════╗{C['RST']}
-{C['BOLD']}{C['CYN']}║{C['RST']}  {C['BOLD']}Directory Digest Tool{C['RST']} - {C['DIM']}Knowledge Digest Generator{C['RST']}           {C['BOLD']}{C['CYN']}║{C['RST']}
-{C['BOLD']}{C['CYN']}╚════════════════════════════════════════════════════════════════╝{C['RST']}
+        description = f"""{C['BOLD']}{C['CYN']}Directory Digest Tool{C['RST']} - {C['DIM']}Knowledge Digest Generator{C['RST']}
 
 {C['DIM']}Recursively digests the filesystem into LLM-understandable summaries.{C['RST']}
 
@@ -794,7 +791,6 @@ def main():
   {C['CYN']}full{C['RST']}       {C['DIM']}Include complete file contents{C['RST']}
   {C['CYN']}sort{C['RST']}       {C['DIM']}List files by type/size with statistics{C['RST']}"""
         
-        # 示例部分也同步更新，移除白色
         epilog = f"""{C['BOLD']}{C['CYN']}📌 Examples:{C['RST']}
   {C['DIM']}# Basic usage - output JSON to stdout{C['RST']}
   {C['GRN']}%(prog)s{C['RST']} /path/to/project
