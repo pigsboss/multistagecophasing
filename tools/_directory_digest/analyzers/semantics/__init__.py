@@ -27,6 +27,13 @@ from .documents import (
     MarkdownDocumentAnalyzer,
     CompositeDocumentAnalyzer,
 )
+from .sheets import (
+    ConfigAnalysisResult,
+    TableAnalysisResult,
+    ConfigFileAnalyzer,
+    TableDataAnalyzer,
+    CompositeSheetAnalyzer,
+)
 
 __all__ = [
     # 基础类
@@ -53,4 +60,11 @@ __all__ = [
     'HumanReadableDocumentAnalyzer',
     'MarkdownDocumentAnalyzer',
     'CompositeDocumentAnalyzer',
+    
+    # 表格/配置文件分析器
+    'ConfigAnalysisResult',
+    'TableAnalysisResult',
+    'ConfigFileAnalyzer',
+    'TableDataAnalyzer',
+    'CompositeSheetAnalyzer',
 ]
