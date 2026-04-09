@@ -753,22 +753,12 @@ def main():
     except ImportError:
         USE_RICH = False
         
-        class ColorHelpFormatter(argparse.RawTextHelpFormatter):  # 改为 RawTextHelpFormatter
-            """自定义彩色帮助格式化器"""
+        class ColorHelpFormatter(argparse.RawDescriptionHelpFormatter):
+            """自定义彩色帮助格式化器 - 使用 RawDescriptionHelpFormatter 保留描述格式"""
             def __init__(self, *args, **kwargs):
-                # 尝试获取终端宽度，避免自动换行计算错误
-                try:
-                    import shutil
-                    width = shutil.get_terminal_size().columns
-                except Exception:
-                    width = 80
-                kwargs['width'] = width
+                # 设置足够大的宽度以避免自动换行破坏格式
+                kwargs['width'] = 200  
                 super().__init__(*args, **kwargs)
-            
-            def start_section(self, heading):
-                if heading and USE_COLOR:
-                    heading = f"{C['BOLD']}{C['MAG']}▸ {heading}{C['RST']}"
-                super().start_section(heading)
             
             def _format_action(self, action):
                 text = super()._format_action(action)
@@ -821,7 +811,7 @@ def main():
   {C['DIM']}# Custom ignore patterns{C['RST']}
   {C['GRN']}%(prog)s{C['RST']} . {C['YLW']}--ignore{C['RST']} "*.log,*.tmp,cache,node_modules"
 
-{C['DIM']}💡 Tip: Install rich-argparse for enhanced color support:{C['RST']} pip install rich-argparse"""
+{C['DIM']}💡 Tip: Install rich-argparse for enhanced color support: pip install rich-argparse{C['RST']}"""
     else:
         # 纯文本版本（无颜色）
         description = """Directory Digest Tool - Knowledge Digest Generator
