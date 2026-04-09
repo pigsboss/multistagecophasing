@@ -141,6 +141,12 @@ class DirectoryDigest(DirectoryDigestBase):
                     self.stats[type_stat_key] += 1
                 
                 self._calculate_hashes(file_digest)
+            
+            # 更新统计信息
+            self.stats['processing_time'] = time.time() - start_time
+            
+            # 关键修复：调用 _generate_sort_output 生成完整报告
+            return self._generate_sort_output()  # 使用基类方法
         else:
             # 其他模式使用处理器注册表进行深度处理
             self.processor_registry.process_directory(
@@ -149,41 +155,15 @@ class DirectoryDigest(DirectoryDigestBase):
                 parallel=self.use_parallel,
                 max_workers=self.max_workers
             )
-        
-        # 更新统计信息
-        self.stats['processing_time'] = time.time() - start_time
-        
-        # 根据模式生成输出
-        if mode == "sort":
-            return self._generate_sort_output()  # 使用基类方法
-        else:
+            
+            # 更新统计信息
+            self.stats['processing_time'] = time.time() - start_time
+            
             return self._generate_output(mode)
     
     
 
 
-    def _generate_output(self, mode: str) -> Dict:
-        """生成完整输出"""
-        if not self.structure:
-            return {}
-        
-        output = {
-            "metadata": {
-                "generated_at": datetime.now().isoformat(),
-                "root_directory": str(self.root),
-                "output_mode": mode,
-                "statistics": self.stats,
-                "context_usage": self.context_manager.get_summary(),
-            },
-            "structure": self.structure.to_dict(mode)
-        }
-        
-        if self.context_manager.file_records:
-            output["context_allocation"] = {
-                "file_records": self.context_manager.file_records
-            }
-        
-        return output
 
 
 def parse_context_size(size_str: str) -> int:

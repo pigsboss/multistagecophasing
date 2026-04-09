@@ -1084,7 +1084,7 @@ class FileProcessorRegistry:
             self.process_file(file_digest, mode)
     
     def _process_parallel(self, files: List[FileDigest], mode: str, max_workers: int):
-        """并行处理文件"""
+        """并行处理文件 - 修正版"""
         import concurrent.futures
         import threading
         import sys
@@ -1092,14 +1092,22 @@ class FileProcessorRegistry:
         # 初始化线程锁
         self._stats_lock = threading.Lock()
         
-        # 由于ContextManager不是线程安全的，需要在主线程中预分配Token
-        # 这里简化处理：先顺序进行Token分配检查，再并行处理内容
+        # 预筛选：顺序检查Token和大小限制（避免在worker中处理）
         files_to_process = []
+        skipped_count = {'skipped_by_context': 0, 'skipped_large_files': 0}
         
         for file_digest in files:
             filepath = file_digest.metadata.path
             
-            # 预检查：获取策略和估算Token
+            # 检查大小限制
+            if file_digest.metadata.size > self.max_file_size:
+                skipped_count['skipped_large_files'] += 1
+                self._process_as_binary(file_digest, mode)
+                with self._stats_lock:
+                    self.stats['binary_files'] += 1
+                continue
+            
+            # 预检查Token（不实际分配，只检查可行性）
             if self.rule_engine:
                 strategy, _ = self.rule_engine.classify_file(filepath)
                 estimated = self.rule_engine.estimate_token_usage(filepath, strategy)
@@ -1107,16 +1115,16 @@ class FileProcessorRegistry:
                 strategy, _ = self._default_classify(file_digest)
                 estimated = self._estimate_tokens(file_digest, strategy)
             
-            # 检查是否能分配（跳过context_manager的实际分配，仅检查）
-            if self.context_manager:
-                if self.context_manager.can_allocate(estimated):
-                    files_to_process.append((file_digest, strategy, estimated))
-                else:
-                    self._update_stats('skipped_by_context')
-            else:
-                files_to_process.append((file_digest, strategy, estimated))
+            if self.context_manager and not self.context_manager.can_allocate(estimated):
+                skipped_count['skipped_by_context'] += 1
+                with self._stats_lock:
+                    self.stats['skipped_by_context'] += 1
+                continue
+            
+            files_to_process.append((file_digest, strategy, estimated))
         
-        # 并行处理文件内容
+        # 并行处理筛选后的文件
+        processed_files = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_file = {
                 executor.submit(self._process_file_worker, fd, mode, st): (fd, st, est)
@@ -1126,21 +1134,23 @@ class FileProcessorRegistry:
             for future in concurrent.futures.as_completed(future_to_file):
                 file_digest, strategy, estimated = future_to_file[future]
                 try:
-                    future.result()
-                    # 成功后分配Token（线程安全地）
-                    if self.context_manager:
-                        file_record = {
-                            "path": str(file_digest.metadata.path),
-                            "strategy": strategy.value,
-                            "estimated_tokens": estimated,
-                            "size": file_digest.metadata.size,
-                        }
-                        # 注意：这里需要在主线程中调用allocate
-                        # 为简化，我们在worker中只处理内容，Token分配在这里记录
-                        self.context_manager.allocate(estimated, file_record)
+                    success = future.result()
+                    if success:
+                        processed_files.append((file_digest, strategy, estimated))
                 except Exception as e:
                     print(f"Warning: Error in parallel processing {file_digest.metadata.path}: {e}", 
                           file=sys.stderr)
+        
+        # 在主线程中统一分配Token和更新最终统计
+        for file_digest, strategy, estimated in processed_files:
+            if self.context_manager:
+                file_record = {
+                    "path": str(file_digest.metadata.path),
+                    "strategy": strategy.value,
+                    "estimated_tokens": estimated,
+                    "size": file_digest.metadata.size,
+                }
+                self.context_manager.allocate(estimated, file_record)
         
         # 清理锁
         self._stats_lock = None
@@ -1150,12 +1160,12 @@ class FileProcessorRegistry:
         try:
             filepath = file_digest.metadata.path
             
-            # 检查大小
+            # 检查大小（虽然已经在主线程检查过，但这里作为二次确认）
             if file_digest.metadata.size > self.max_file_size:
                 self._process_as_binary(file_digest, mode)
                 self._update_stats('skipped_large_files')
                 self._update_stats('binary_files')
-                return
+                return False
             
             # 获取处理器
             processor = self.get_processor(file_digest)
@@ -1165,17 +1175,20 @@ class FileProcessorRegistry:
                 if content:
                     processor.process(file_digest, content, mode, strategy)
                     self._update_stats_by_processor(file_digest, processor)
+                    return True
                 else:
                     self._process_as_binary(file_digest, mode)
                     self._update_stats('binary_files')
+                    return False
             else:
                 self._process_as_binary(file_digest, mode)
                 self._update_stats('binary_files')
+                return False
                 
         except Exception as e:
             import sys
             print(f"Warning: Worker error for {file_digest.metadata.path}: {e}", file=sys.stderr)
-            raise
+            return False
 
 
 # ==================== 公共 API ====================
