@@ -146,15 +146,19 @@ class TextFileProcessor(BaseFileProcessor):
     TEXT_EXTENSIONS = {'.txt', '.md', '.markdown', '.rst', '.tex', '.html', '.htm', '.cmt'}
     
     def can_handle(self, file_digest: FileDigest) -> bool:
-        file_type = file_digest.metadata.file_type
-        if file_type in (FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS):
+        # 优先使用分类阶段确定的类型/策略
+        if file_digest.metadata.file_type in (FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS):
+            return True
+        if file_digest.metadata.processing_strategy in (
+            ProcessingStrategy.SUMMARY_ONLY, 
+            ProcessingStrategy.FULL_CONTENT,
+            ProcessingStrategy.HEADER_WITH_STATS  # 文档类也使用此策略
+        ):
             return True
         
+        # 后备：扩展名检查（用于未经过分类阶段的情况）
         suffix = file_digest.metadata.path.suffix.lower()
-        if suffix in self.TEXT_EXTENSIONS:
-            return True
-        
-        return False
+        return suffix in self.TEXT_EXTENSIONS
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 
                 strategy: ProcessingStrategy = ProcessingStrategy.SUMMARY_ONLY) -> FileDigest:
@@ -282,14 +286,15 @@ class SourceCodeProcessor(BaseFileProcessor):
     }
     
     def can_handle(self, file_digest: FileDigest) -> bool:
+        # 优先使用分类阶段确定的类型/策略
         if file_digest.metadata.file_type == FileType.SOURCE_CODE:
             return True
-        
-        suffix = file_digest.metadata.path.suffix.lower()
-        if suffix in self.CODE_EXTENSIONS:
+        if file_digest.metadata.processing_strategy == ProcessingStrategy.CODE_SKELETON:
             return True
         
-        return False
+        # 后备：扩展名检查（用于未经过分类阶段的情况）
+        suffix = file_digest.metadata.path.suffix.lower()
+        return suffix in self.CODE_EXTENSIONS
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 
                 strategy: ProcessingStrategy = ProcessingStrategy.CODE_SKELETON) -> FileDigest:
@@ -494,12 +499,14 @@ class ConfigFileProcessor(BaseFileProcessor):
     }
     
     def can_handle(self, file_digest: FileDigest) -> bool:
-        if file_digest.metadata.file_type == FileType.TEXT_DATA:
+        # 优先使用分类阶段确定的策略
+        if file_digest.metadata.processing_strategy == ProcessingStrategy.STRUCTURE_EXTRACT:
             return True
         
-        suffix = file_digest.metadata.path.suffix.lower()
-        if suffix in self.CONFIG_EXTENSIONS:
-            return True
+        # 其次检查文件类型
+        if file_digest.metadata.file_type == FileType.TEXT_DATA:
+            suffix = file_digest.metadata.path.suffix.lower()
+            return suffix in self.CONFIG_EXTENSIONS
         
         return False
     
@@ -656,11 +663,20 @@ class DataFileProcessor(BaseFileProcessor):
     DATA_EXTENSIONS = {'.csv', '.tsv', '.log', '.out', '.err', '.dat', '.txt'}
     
     def can_handle(self, file_digest: FileDigest) -> bool:
-        suffix = file_digest.metadata.path.suffix.lower()
-        if suffix in self.DATA_EXTENSIONS:
-            # 避免与其他处理器冲突
-            if file_digest.metadata.file_type not in (FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS, FileType.SOURCE_CODE):
-                return True
+        # 优先使用分类阶段确定的策略和类型
+        if file_digest.metadata.file_type == FileType.TEXT_DATA:
+            # 明确排除配置文件（应由ConfigFileProcessor处理）
+            if file_digest.metadata.processing_strategy == ProcessingStrategy.HEADER_WITH_STATS:
+                suffix = file_digest.metadata.path.suffix.lower()
+                return suffix in self.DATA_EXTENSIONS
+            # 如果没有明确策略，根据扩展名判断，但排除已明确分类的
+            if file_digest.metadata.processing_strategy is None:
+                suffix = file_digest.metadata.path.suffix.lower()
+                if suffix in self.DATA_EXTENSIONS:
+                    # 避免与其他处理器冲突
+                    return file_digest.metadata.file_type not in (
+                        FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS, FileType.SOURCE_CODE
+                    )
         return False
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 

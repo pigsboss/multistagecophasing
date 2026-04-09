@@ -138,10 +138,13 @@ class FileMetadata:
     mime_type: Optional[str] = None
     md5_hash: Optional[str] = None
     sha256_hash: Optional[str] = None
+    # 新增：分类阶段确定的策略和标记
+    processing_strategy: Optional[ProcessingStrategy] = None
+    force_binary: bool = False
     
     def to_dict(self) -> Dict:
         """转换为字典"""
-        return {
+        result = {
             "path": str(self.path),
             "size": self.size,
             "modified_time": self.modified_time.isoformat(),
@@ -151,6 +154,10 @@ class FileMetadata:
             "md5_hash": self.md5_hash,
             "sha256_hash": self.sha256_hash
         }
+        if self.processing_strategy:
+            result["processing_strategy"] = self.processing_strategy.value
+        result["force_binary"] = self.force_binary
+        return result
 
 
 @dataclass

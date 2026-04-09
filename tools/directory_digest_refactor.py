@@ -282,7 +282,10 @@ class DirectoryDigest(DirectoryDigestBase):
         classified_files = []
         for file_digest in all_files:
             classification = self._classify_file(file_digest.metadata.path)
+            # 将分类结果写入元数据，供处理器使用
             file_digest.metadata.file_type = classification.file_type
+            file_digest.metadata.processing_strategy = classification.strategy
+            file_digest.metadata.force_binary = classification.force_binary
             classified_files.append((file_digest, classification))
             
             # 更新统计
@@ -341,8 +344,8 @@ class DirectoryDigest(DirectoryDigestBase):
                     self.stats['skipped_by_context'] += 1
                     return
             
-            # 根据分类结果获取处理器
-            processor = self._get_processor_by_file_type(file_digest.metadata.file_type)
+            # 使用处理器注册表动态获取处理器（基于 classification 中确定的类型和策略）
+            processor = self.processor_registry.get_processor(file_digest)
             
             if processor and not classification.force_binary:
                 # 读取文件内容
@@ -350,16 +353,13 @@ class DirectoryDigest(DirectoryDigestBase):
                 if content:
                     # 使用分类中的策略进行处理
                     processor.process(file_digest, content, mode, classification.strategy)
-                    # 统计已在分类阶段更新
                     return
                 else:
                     self._process_as_binary(file_digest, mode)
                     self.stats['binary_files'] += 1
-                    return
             else:
                 self._process_as_binary(file_digest, mode)
                 self.stats['binary_files'] += 1
-                return
                 
         except Exception as e:
             import sys
@@ -370,25 +370,6 @@ class DirectoryDigest(DirectoryDigestBase):
             except:
                 pass
     
-    def _get_processor_by_file_type(self, file_type: FileType) -> Optional[Any]:
-        """根据文件类型获取处理器"""
-        # 简化实现，实际应使用处理器注册表
-        from tools._directory_digest.processors import (
-            TextFileProcessor, SourceCodeProcessor, 
-            ConfigFileProcessor, DataFileProcessor
-        )
-        
-        config = self.config
-        
-        if file_type == FileType.SOURCE_CODE:
-            return SourceCodeProcessor(config)
-        elif file_type in [FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS]:
-            return TextFileProcessor(config)
-        elif file_type == FileType.TEXT_DATA:
-            # 根据扩展名决定使用配置处理器还是数据处理器
-            return ConfigFileProcessor(config)  # 简化处理
-        else:
-            return None
     
     def _read_file_content(self, filepath: Path) -> Optional[str]:
         """读取文件内容"""
