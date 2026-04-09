@@ -52,7 +52,7 @@ class ExtendedFormatConverter(FormatConverter):
     
     @staticmethod
     def _to_sort_format(digest_data: Dict) -> str:
-        """Generate ls -l style output for sort mode"""
+        """Generate ls -l style output for sort mode - 与原始代码完全一致"""
         lines = []
         root_dir = digest_data.get('metadata', {}).get('root_directory', '.')
         
@@ -60,7 +60,7 @@ class ExtendedFormatConverter(FormatConverter):
         lines.append(f"Generated: {digest_data.get('metadata', {}).get('generated_at', 'unknown')}")
         lines.append("")
         
-        # Type mapping (type_key: (display_name, type_char))
+        # 类型映射 (type_key: (display_name, type_char))
         type_names = {
             'critical_docs': ('Critical Docs', 'C'),
             'reference_docs': ('Reference Docs', 'R'),
@@ -82,13 +82,13 @@ class ExtendedFormatConverter(FormatConverter):
             lines.append(f"{type_name} ({len(files)} files, {ExtendedFormatConverter._format_size(total_size)})")
             lines.append("-" * 80)
             
-            # Format: Type  Size  Date  Path (similar to ls -l)
-            for f in files[:100]:  # Limit display to 100 files per type
+            # 类 ls -l 格式：类型 大小 日期 路径
+            for f in files[:100]:  # 限制显示数量
                 path = f.get('path', 'unknown')
                 size = f.get('size_formatted', '0 B')
                 modified = f.get('modified', 'unknown')
                 
-                # Format date
+                # 格式化日期 - 与原始代码一致
                 if modified != 'unknown':
                     try:
                         dt = datetime.fromisoformat(modified)
@@ -98,7 +98,7 @@ class ExtendedFormatConverter(FormatConverter):
                 else:
                     date_str = "unknown"
                 
-                # Output: TypeChar  Size  Date  Path
+                # 格式：类型 大小 日期 路径
                 lines.append(f"{type_char}  {size:>10}  {date_str:>12}  {path}")
             
             if len(files) > 100:
@@ -106,7 +106,7 @@ class ExtendedFormatConverter(FormatConverter):
             
             lines.append("")
         
-        # Summary statistics
+        # 统计摘要 - 与原始代码一致
         stats = digest_data.get('metadata', {}).get('statistics', {})
         lines.append("Summary:")
         lines.append(f"  Total: {stats.get('total_files', 0)} files, "
@@ -624,10 +624,10 @@ class DirectoryDigest(DirectoryDigestBase):
         return False
     
     def _generate_sort_output(self) -> Dict:
-        """Generate sorted classification output (ls -l style)"""
+        """Generate sorted classification output (ls -l style) - 与原始代码逻辑完全一致"""
         all_files = self._collect_all_files_flat()
         
-        # Group by type
+        # 按类型分组，同时保留完整元数据 - 与原始代码一致
         by_type = {
             FileType.CRITICAL_DOCS.value: [],
             FileType.REFERENCE_DOCS.value: [],
@@ -637,18 +637,19 @@ class DirectoryDigest(DirectoryDigestBase):
             FileType.UNKNOWN.value: []
         }
         
-        # Group by size
+        # 按大小分组
         large_files = []      # > 1MB
         medium_files = []     # 100KB - 1MB
         small_files = []      # < 100KB
         
         for f in all_files:
             file_type = f.metadata.file_type.value
+            # 使用 hasattr 检查，与原始代码一致
             file_info = {
                 'path': str(f.metadata.path.relative_to(self.root)),
                 'size': f.metadata.size,
-                'size_formatted': self._format_size(f.metadata.size),
-                'modified': f.metadata.modified_time.isoformat() if f.metadata.modified_time else 'unknown',
+                'size_formatted': self._format_bytes(f.metadata.size),  # 使用 _format_bytes
+                'modified': f.metadata.modified_time.isoformat() if hasattr(f.metadata, 'modified_time') and f.metadata.modified_time else 'unknown',
                 'type': file_type,
                 'is_binary': file_type == FileType.BINARY_FILES.value
             }
@@ -658,7 +659,7 @@ class DirectoryDigest(DirectoryDigestBase):
             else:
                 by_type[FileType.UNKNOWN.value].append(file_info)
             
-            # Size grouping
+            # 按大小分组
             size = f.metadata.size
             if size > 1024 * 1024:
                 large_files.append(file_info)
@@ -667,7 +668,7 @@ class DirectoryDigest(DirectoryDigestBase):
             else:
                 small_files.append(file_info)
         
-        # Build report structure (must match original exactly)
+        # 构建报告 - 与原始代码结构完全一致
         sort_report = {
             "metadata": {
                 "generated_at": datetime.now().isoformat(),
@@ -688,12 +689,12 @@ class DirectoryDigest(DirectoryDigestBase):
             }
         }
         
-        # Generate classification details
+        # 为每种类型生成详细信息 - 与原始代码一致
         for type_name, files in by_type.items():
             if not files:
                 continue
                 
-            # Group by extension
+            # 按扩展名分组
             by_ext = {}
             for f in files:
                 path = f['path']
@@ -702,12 +703,13 @@ class DirectoryDigest(DirectoryDigestBase):
                     by_ext[ext] = []
                 by_ext[ext].append(path)
             
+            # 计算总大小
             total_size = sum(f['size'] for f in files)
             
             sort_report["classification"][type_name] = {
                 "count": len(files),
                 "total_size_bytes": total_size,
-                "total_size_formatted": self._format_size(total_size),
+                "total_size_formatted": self._format_bytes(total_size),
                 "extensions": {
                     ext: {
                         "count": len(paths),
@@ -719,14 +721,14 @@ class DirectoryDigest(DirectoryDigestBase):
                 }
             }
         
-        # Generate recommendations (must match original logic)
+        # 添加建议 - 与原始代码一致
         recommendations = []
         if large_files:
             recommendations.append(
                 f"Found {len(large_files)} large files (>1MB). "
                 f"In 'full' mode, use --max-content-size to limit full content output."
             )
-        
+
         if by_type.get(FileType.UNKNOWN.value, []):
             count = len(by_type[FileType.UNKNOWN.value])
             if count > 5:
@@ -816,6 +818,10 @@ class DirectoryDigest(DirectoryDigestBase):
         p = math.pow(1024, i)
         s = round(size_bytes / p, 2)
         return f"{s} {units[i]}"
+    
+    def _format_bytes(self, size_bytes: int) -> str:
+        """格式化字节大小为人类可读 - 与原始代码一致"""
+        return self._format_size(size_bytes)
 
 
 def parse_context_size(size_str: str) -> int:
@@ -1039,7 +1045,7 @@ Examples:
     output_to_stdout = (args.save is None or args.save == '-')
     
     if output_to_stdout:
-        # Output to stdout (supports piping)
+        # 输出到标准输出（支持管道处理）
         try:
             content = ExtendedFormatConverter.convert(output, args.output, mode=args.mode)
             sys.stdout.write(content)
@@ -1047,14 +1053,14 @@ Examples:
                 sys.stdout.write('\n')
             sys.stdout.flush()
         except BrokenPipeError:
-            # Ignore pipe break errors (e.g., output truncated by head/tail)
+            # 忽略管道中断错误（如输出被 head/tail 截断）
             pass
-        
-        # Statistics to stderr
+            
+        # 统计信息输出到 stderr - 与原始代码一致
         if args.verbose or args.mode == "sort":
             stats = output['metadata']['statistics']
             ctx_usage = output['metadata'].get('context_usage')
-            
+                
             print(f"\n[Summary] Files: {stats['total_files']}, "
                   f"Critical: {stats.get('critical_docs', 0)}, "
                   f"Reference: {stats.get('reference_docs', 0)}, "
@@ -1062,24 +1068,24 @@ Examples:
                   f"Text Data: {stats.get('text_data', 0)}, "
                   f"Binary: {stats.get('binary_files', 0)}", 
                   file=sys.stderr)
-            
+                
             if stats.get('skipped_large_files', 0) > 0:
                 print(f"         Skipped (size): {stats['skipped_large_files']}", file=sys.stderr)
-            
+                
             if stats.get('skipped_by_context', 0) > 0:
                 print(f"         Skipped (context): {stats['skipped_by_context']}", file=sys.stderr)
-            
+                
             if ctx_usage:
                 print(f"[Context] Used: {ctx_usage['used_tokens']:,}/{ctx_usage['max_tokens']:,} tokens "
                       f"({ctx_usage['token_utilization']:.1%})", file=sys.stderr)
             else:
                 print(f"[Context] Not applicable for sort mode", file=sys.stderr)
-            
+                
             if args.mode == "sort" and "recommendations" in output:
                 for rec in output["recommendations"]:
                     print(f"[Tip] {rec}", file=sys.stderr)
-        
-        return None  # Return None for stdout mode
+            
+        return None  # stdout 模式返回 None
         
     else:
         # Write to specified file

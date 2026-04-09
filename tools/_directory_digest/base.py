@@ -769,6 +769,64 @@ class DirectoryDigestBase:
             "structure": self.structure.to_dict(mode)
         }
     
+    def _generate_sort_output(self) -> Dict:
+        """
+        在基类中提供 sort 模式的默认实现
+        子类可以覆盖此方法以提供完整功能
+        """
+        all_files = self._collect_all_files_flat()
+        
+        # 基础分类
+        by_type = {
+            FileType.CRITICAL_DOCS.value: [],
+            FileType.REFERENCE_DOCS.value: [],
+            FileType.SOURCE_CODE.value: [],
+            FileType.TEXT_DATA.value: [],
+            FileType.BINARY_FILES.value: [],
+            FileType.UNKNOWN.value: []
+        }
+        
+        for f in all_files:
+            file_type = f.metadata.file_type.value
+            file_info = {
+                'path': str(f.metadata.path.relative_to(self.root)),
+                'size': f.metadata.size,
+                'size_formatted': self._format_size(f.metadata.size),
+                'modified': f.metadata.modified_time.isoformat() if hasattr(f.metadata, 'modified_time') and f.metadata.modified_time else 'unknown',
+                'type': file_type,
+            }
+            
+            if file_type in by_type:
+                by_type[file_type].append(file_info)
+            else:
+                by_type[FileType.UNKNOWN.value].append(file_info)
+        
+        return {
+            "metadata": {
+                "generated_at": datetime.now().isoformat(),
+                "root_directory": str(self.root),
+                "output_mode": "sort",
+                "statistics": self.stats,
+                "context_usage": self.context_manager.get_summary() if hasattr(self, 'context_manager') else {}
+            },
+            "file_listings": {
+                k: sorted(v, key=lambda x: x['path']) 
+                for k, v in by_type.items() if v
+            }
+        }
+    
+    @staticmethod
+    def _format_size(size_bytes: int) -> str:
+        """格式化文件大小"""
+        if size_bytes == 0:
+            return "0 B"
+        import math
+        units = ['B', 'KB', 'MB', 'GB', 'TB']
+        i = int(math.floor(math.log(size_bytes, 1024)))
+        p = math.pow(1024, i)
+        s = round(size_bytes / p, 2)
+        return f"{s} {units[i]}"
+    
     def save_output(self, output: Dict, format: str = "json", output_path: Optional[Path] = None, mode: str = None):
         """保存输出到文件"""
         if not output_path:
