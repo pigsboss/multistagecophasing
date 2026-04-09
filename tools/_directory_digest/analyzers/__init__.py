@@ -4,6 +4,12 @@
 
 from .base import AnalysisResult, BaseAnalyzer, CompositeAnalyzer
 from .metadata import MetadataAnalysisResult, MetadataAnalyzer
+from .encoding import (
+    BomInfo,
+    EncodingCandidate,
+    EncodingAnalysisResult,
+    EncodingAnalyzer,
+)
 
 __all__ = [
     'AnalysisResult',
@@ -11,4 +17,8 @@ __all__ = [
     'CompositeAnalyzer',
     'MetadataAnalysisResult',
     'MetadataAnalyzer',
+    'BomInfo',
+    'EncodingCandidate',
+    'EncodingAnalysisResult',
+    'EncodingAnalyzer',
 ]
