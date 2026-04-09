@@ -18,24 +18,29 @@
    - 分配token
 
 4. 内容分析与处理
-   a) 文本文件 (HumanReadableSummarizer)
+   a) 元数据分析 (MetadataAnalyzer)
+      - 提取文件系统元数据（大小、时间、权限等）
+      - 检测文件类型
+      - 收集额外文件属性
+   
+   b) 文本文件 (HumanReadableSummarizer)
       - 检测编码
       - 分析文本指标（阅读时间、难度、主题、情感）
       - 提取标题、关键章节
       - 智能截断（结构化数据文件）
    
-   b) 源代码文件 (SourceCodeAnalyzer)
+   c) 源代码文件 (SourceCodeAnalyzer)
       - AST分析（Python）或正则分析（其他语言）
       - 提取导入、函数、类
       - 代码复杂度分析 (ComplexityAnalyzer)
       - 代码风格检查
    
-   c) 配置/结构化文件 (StructureExtract)
+   d) 配置/结构化文件 (StructureExtract)
       - 提取键值对结构
       - 智能文本处理 (SmartTextProcessor)
       - 保留头部和元数据，截断数据区
    
-   d) 二进制文件
+   e) 二进制文件
       - 仅计算哈希值
       - 记录元数据
 
@@ -49,6 +54,7 @@
 - SourceCodeAnalysis: 源代码分析结果
 - FileDigest: 单个文件摘要
 - DirectoryStructure: 目录结构
+- MetadataAnalysisResult: 元数据分析结果
 ===========================================================================
 """
 
