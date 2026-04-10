@@ -155,19 +155,36 @@ class TextFileProcessor(BaseFileProcessor):
         self.debug = config.get('debug', False) if config else False
     
     def can_handle(self, file_digest: FileDigest) -> bool:
+        # 添加调试输出
+        if self.debug:
+            import sys
+            print(f"[DEBUG:TextFileProcessor.can_handle] Checking file: {file_digest.metadata.path}", file=sys.stderr)
+            print(f"[DEBUG:TextFileProcessor.can_handle]   File type: {file_digest.metadata.file_type}", file=sys.stderr)
+            print(f"[DEBUG:TextFileProcessor.can_handle]   Strategy: {file_digest.metadata.processing_strategy}", file=sys.stderr)
+        
         # 优先使用分类阶段确定的类型/策略
         if file_digest.metadata.file_type in (FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS):
+            if self.debug:
+                import sys
+                print(f"[DEBUG:TextFileProcessor.can_handle]   File type is CRITICAL_DOCS or REFERENCE_DOCS: True", file=sys.stderr)
             return True
         if file_digest.metadata.processing_strategy in (
             ProcessingStrategy.SUMMARY_ONLY, 
             ProcessingStrategy.FULL_CONTENT,
             ProcessingStrategy.HEADER_WITH_STATS  # 文档类也使用此策略
         ):
+            if self.debug:
+                import sys
+                print(f"[DEBUG:TextFileProcessor.can_handle]   Strategy matches text file strategies: True", file=sys.stderr)
             return True
         
         # 后备：扩展名检查（用于未经过分类阶段的情况）
         suffix = file_digest.metadata.path.suffix.lower()
-        return suffix in self.TEXT_EXTENSIONS
+        result = suffix in self.TEXT_EXTENSIONS
+        if self.debug:
+            import sys
+            print(f"[DEBUG:TextFileProcessor.can_handle]   Suffix {suffix} in TEXT_EXTENSIONS: {result}", file=sys.stderr)
+        return result
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 
                 strategy: ProcessingStrategy = ProcessingStrategy.SUMMARY_ONLY) -> FileDigest:
@@ -823,35 +840,59 @@ class DataFileProcessor(BaseFileProcessor):
         
         # 导入智能分析器 - 修正导入路径
         try:
-            # 使用相对导入（从 processors 到 analyzers）
-            from ..analyzers.semantics.sheets import SmartDataFileAnalyzer
+            # 使用绝对导入路径
+            from tools._directory_digest.analyzers.semantics.sheets import SmartDataFileAnalyzer
             self.smart_analyzer = SmartDataFileAnalyzer(debug=self.debug)
             self.smart_analyzer_available = True
             if self.debug:
                 import sys
                 print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer loaded successfully", file=sys.stderr)
         except ImportError as e:
-            self.smart_analyzer = None
-            self.smart_analyzer_available = False
-            if self.debug:
-                import sys
-                print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer not available: {e}", file=sys.stderr)
+            # 尝试相对导入作为后备
+            try:
+                from ..analyzers.semantics.sheets import SmartDataFileAnalyzer
+                self.smart_analyzer = SmartDataFileAnalyzer(debug=self.debug)
+                self.smart_analyzer_available = True
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer loaded via relative import", file=sys.stderr)
+            except ImportError as e2:
+                self.smart_analyzer = None
+                self.smart_analyzer_available = False
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer not available: {e2}", file=sys.stderr)
     
     def can_handle(self, file_digest: FileDigest) -> bool:
+        # 添加调试输出
+        if self.debug:
+            import sys
+            print(f"[DEBUG:DataFileProcessor.can_handle] Checking file: {file_digest.metadata.path}", file=sys.stderr)
+            print(f"[DEBUG:DataFileProcessor.can_handle]   File type: {file_digest.metadata.file_type}", file=sys.stderr)
+            print(f"[DEBUG:DataFileProcessor.can_handle]   Strategy: {file_digest.metadata.processing_strategy}", file=sys.stderr)
+        
         # 优先使用分类阶段确定的策略和类型
         if file_digest.metadata.file_type == FileType.TEXT_DATA:
             # 明确排除配置文件（应由ConfigFileProcessor处理）
             if file_digest.metadata.processing_strategy == ProcessingStrategy.HEADER_WITH_STATS:
                 suffix = file_digest.metadata.path.suffix.lower()
-                return suffix in self.DATA_EXTENSIONS
+                result = suffix in self.DATA_EXTENSIONS
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor.can_handle]   TEXT_DATA with HEADER_WITH_STATS, suffix {suffix} in DATA_EXTENSIONS: {result}", file=sys.stderr)
+                return result
             # 如果没有明确策略，根据扩展名判断，但排除已明确分类的
             if file_digest.metadata.processing_strategy is None:
                 suffix = file_digest.metadata.path.suffix.lower()
                 if suffix in self.DATA_EXTENSIONS:
                     # 避免与其他处理器冲突
-                    return file_digest.metadata.file_type not in (
+                    result = file_digest.metadata.file_type not in (
                         FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS, FileType.SOURCE_CODE
                     )
+                    if self.debug:
+                        import sys
+                        print(f"[DEBUG:DataFileProcessor.can_handle]   TEXT_DATA with no strategy, suffix {suffix} in DATA_EXTENSIONS, not other types: {result}", file=sys.stderr)
+                    return result
         
         # 或者，如果文件策略明确为HEADER_WITH_STATS，即使不在扩展名列表中，也应该处理
         # 这是为了处理规则引擎分配了HEADER_WITH_STATS策略但扩展名不在列表中的情况
@@ -859,12 +900,26 @@ class DataFileProcessor(BaseFileProcessor):
             # 检查是否是SPICE内核文件或其他数据文件
             suffix = file_digest.metadata.path.suffix.lower()
             if suffix in ('.tls', '.tpc', '.ker', '.cmt', '.tm'):  # SPICE内核文件
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor.can_handle]   HEADER_WITH_STATS with SPICE suffix {suffix}: True", file=sys.stderr)
                 return True
             
             # 使用智能分析器检测是否需要处理
             if self.smart_analyzer_available:
-                return self.smart_analyzer.can_handle(file_digest.metadata.path, None)
-            
+                result = self.smart_analyzer.can_handle(file_digest.metadata.path, None)
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor.can_handle]   smart_analyzer.can_handle: {result}", file=sys.stderr)
+                return result
+            else:
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor.can_handle]   smart_analyzer not available", file=sys.stderr)
+        
+        if self.debug:
+            import sys
+            print(f"[DEBUG:DataFileProcessor.can_handle]   No match, returning False", file=sys.stderr)
         return False
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 
@@ -1124,9 +1179,24 @@ class FileProcessorRegistry:
     
     def get_processor(self, file_digest: FileDigest) -> Optional[BaseFileProcessor]:
         """获取适合此文件的处理器"""
+        if self.debug:
+            import sys
+            print(f"[DEBUG:ProcessorRegistry.get_processor] Finding processor for: {file_digest.metadata.path}", file=sys.stderr)
+        
         for processor in self.processors:
-            if processor.can_handle(file_digest):
+            can_handle = processor.can_handle(file_digest)
+            if self.debug:
+                import sys
+                print(f"[DEBUG:ProcessorRegistry.get_processor]   {type(processor).__name__}.can_handle: {can_handle}", file=sys.stderr)
+            if can_handle:
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:ProcessorRegistry.get_processor]   Selected processor: {type(processor).__name__}", file=sys.stderr)
                 return processor
+        
+        if self.debug:
+            import sys
+            print(f"[DEBUG:ProcessorRegistry.get_processor]   No processor found", file=sys.stderr)
         return None
     
     def process_file(self, file_digest: FileDigest, mode: str = "framework", 
