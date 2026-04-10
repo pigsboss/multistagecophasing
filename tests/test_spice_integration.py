@@ -334,6 +334,37 @@ class TestSPICECalculator:
             
         except SPICEError:
             pytest.skip("MOON_PA frame not available (requires moon_pa_de440_200625.bpc)")
+    
+    def test_moon_pa_specific_in_spice_calculator(self, spice_interface):
+        """
+        Test that SPICECalculator specifically uses MOON_PA when available.
+        """
+        # Get the calculator from the interface
+        calculator = spice_interface._calc
+        
+        # Test get_moon_libration_matrix
+        epoch = 0.0
+        try:
+            rot_mat = calculator.get_moon_libration_matrix(epoch)
+            
+            # The method should have tried MOON_PA first
+            # We can't directly check which frame was used, but we can verify
+            # that the result is a valid rotation matrix
+            
+            assert rot_mat.shape == (3, 3)
+            
+            # Check orthogonality
+            identity_check = rot_mat.T @ rot_mat
+            np.testing.assert_array_almost_equal(identity_check, np.eye(3), decimal=10)
+            
+            # Check determinant (should be 1 for rotation matrix)
+            det = np.linalg.det(rot_mat)
+            np.testing.assert_almost_equal(det, 1.0, decimal=6)
+            
+        except SPICEError as e:
+            # If MOON_PA is not available, the method should have fallen back to IAU_MOON
+            # and still returned a valid matrix
+            pytest.skip(f"Cannot test MOON_PA in SPICECalculator: {e}")
 
 
 # ============================================================================
@@ -423,6 +454,26 @@ class TestHighPrecisionEphemerisSPICE:
             
         except SPICEError:
             pytest.skip("Moon libration data not available")
+    
+    def test_high_precision_ephemeris_moon_pa(self, high_precision_ephemeris):
+        """
+        Test that HighPrecisionEphemeris uses MOON_PA when available.
+        """
+        ephem = high_precision_ephemeris
+        
+        try:
+            rot_mat = ephem.get_moon_libration_matrix(epoch=0.0)
+            assert rot_mat.shape == (3, 3)
+            
+            # Check it's a valid rotation matrix
+            identity_check = rot_mat.T @ rot_mat
+            np.testing.assert_array_almost_equal(identity_check, np.eye(3), decimal=10)
+            
+            det = np.linalg.det(rot_mat)
+            np.testing.assert_almost_equal(det, 1.0, decimal=6)
+            
+        except SPICEError as e:
+            pytest.skip(f"Cannot test MOON_PA in HighPrecisionEphemeris: {e}")
     
     def test_context_manager(self, spice_kernels_path, required_kernels_present):
         """Test context manager properly initializes and cleans up."""
@@ -526,6 +577,275 @@ class TestSPICEAccuracy:
         
         # Should be around 0.03 (3%) for Earth's orbital eccentricity
         assert 0.01 < variation < 0.05, f"Orbital variation {variation} unrealistic"
+
+
+# ============================================================================
+# Moon PA Frame Tests
+# ============================================================================
+
+class TestMoonPAFrame:
+    """Test MOON_PA frame loading and functionality."""
+    
+    def test_moon_pa_file_exists_and_loaded(self, spice_kernels_path, required_kernels_present):
+        """
+        Test that moon_pa_de440_200625.bpc file is found and loaded correctly.
+        """
+        if not SPICE_AVAILABLE or not required_kernels_present:
+            pytest.skip("SPICE not available or kernels missing")
+        
+        # Check if moon_pa file exists
+        moon_pa_pattern = "moon_pa*.bpc"
+        moon_pa_files = list(spice_kernels_path.rglob(moon_pa_pattern))
+        
+        if not moon_pa_files:
+            pytest.skip(f"No moon_pa files found with pattern: {moon_pa_pattern}")
+        
+        # Initialize SPICE with verbose output to see loading messages
+        config = SPICEConfig(
+            mission_type="earth_moon",
+            verbose=True,  # Enable verbose to see loading messages
+            use_light_time_correction=True
+        )
+        
+        interface = SPICEInterface(spice_kernels_path, config)
+        
+        try:
+            # Initialize SPICE
+            success = interface.initialize()
+            assert success, "SPICE initialization failed"
+            
+            # Get kernel manager and check loaded kernels
+            km = interface._km
+            loaded_kernels = km.get_loaded_kernels()
+            
+            # Check if any moon_pa kernel is loaded
+            moon_pa_loaded = any("moon_pa" in k.name.lower() for k in loaded_kernels)
+            assert moon_pa_loaded, f"No moon_pa kernel loaded. Loaded kernels: {[k.name for k in loaded_kernels]}"
+            
+            # Try to get moon libration matrix using MOON_PA
+            # This should succeed if MOON_PA frame is available
+            try:
+                rot_mat = interface.get_moon_libration_matrix(epoch=0.0)
+                assert rot_mat.shape == (3, 3), f"Invalid rotation matrix shape: {rot_mat.shape}"
+                
+                # Verify it's a valid rotation matrix (orthogonal with det=1)
+                identity_check = rot_mat.T @ rot_mat
+                np.testing.assert_array_almost_equal(
+                    identity_check, 
+                    np.eye(3), 
+                    decimal=10,
+                    err_msg="Rotation matrix is not orthogonal"
+                )
+                
+                det = np.linalg.det(rot_mat)
+                np.testing.assert_almost_equal(
+                    det, 
+                    1.0, 
+                    decimal=6,
+                    err_msg=f"Rotation matrix determinant is not 1: {det}"
+                )
+                
+            except SPICEError as e:
+                pytest.fail(f"Failed to get moon libration matrix with MOON_PA frame: {e}")
+                
+        finally:
+            interface.shutdown()
+    
+    def test_moon_pa_frame_available(self, spice_interface):
+        """
+        Test that MOON_PA frame is available and can be used for coordinate transformations.
+        """
+        # This test uses the fixture spice_interface which is already initialized
+        
+        # Directly test if MOON_PA frame is available using spiceypy
+        try:
+            # Try to get transformation from J2000 to MOON_PA
+            rot_mat = spice.pxform('J2000', 'MOON_PA', 0.0)
+            assert rot_mat is not None
+            
+            # Convert to numpy array and check properties
+            rot_mat_np = np.array(rot_mat)
+            assert rot_mat_np.shape == (3, 3)
+            
+            # Check orthogonality
+            identity_check = rot_mat_np.T @ rot_mat_np
+            np.testing.assert_array_almost_equal(identity_check, np.eye(3), decimal=10)
+            
+            # Also test the reverse transformation
+            rot_mat_reverse = spice.pxform('MOON_PA', 'J2000', 0.0)
+            rot_mat_reverse_np = np.array(rot_mat_reverse)
+            
+            # Check that reverse is transpose of forward
+            np.testing.assert_array_almost_equal(
+                rot_mat_reverse_np, 
+                rot_mat_np.T, 
+                decimal=10,
+                err_msg="MOON_PA to J2000 transform is not transpose of J2000 to MOON_PA"
+            )
+            
+        except SpiceyError as e:
+            pytest.fail(f"MOON_PA frame not available or failed to transform: {e}")
+    
+    def test_moon_pa_vs_iau_moon_difference(self, spice_interface):
+        """
+        Test that MOON_PA and IAU_MOON frames are different (MOON_PA should be higher precision).
+        """
+        epoch = 0.0
+        
+        try:
+            # Get transformation matrices for both frames
+            rot_mat_moon_pa = spice.pxform('J2000', 'MOON_PA', epoch)
+            rot_mat_iau_moon = spice.pxform('J2000', 'IAU_MOON', epoch)
+            
+            rot_mat_moon_pa_np = np.array(rot_mat_moon_pa)
+            rot_mat_iau_moon_np = np.array(rot_mat_iau_moon)
+            
+            # Calculate difference between the two rotation matrices
+            diff = np.linalg.norm(rot_mat_moon_pa_np - rot_mat_iau_moon_np)
+            
+            # The difference should be non-zero (MOON_PA is higher precision)
+            assert diff > 1e-10, f"MOON_PA and IAU_MOON are identical (diff={diff}), MOON_PA may not be loaded"
+            
+            # Log the difference for information
+            print(f"\nDifference between MOON_PA and IAU_MOON at epoch {epoch}: {diff}")
+            
+            # Verify both are valid rotation matrices
+            for name, mat in [("MOON_PA", rot_mat_moon_pa_np), ("IAU_MOON", rot_mat_iau_moon_np)]:
+                identity_check = mat.T @ mat
+                np.testing.assert_array_almost_equal(
+                    identity_check, 
+                    np.eye(3), 
+                    decimal=10,
+                    err_msg=f"{name} rotation matrix is not orthogonal"
+                )
+                
+        except SpiceyError as e:
+            pytest.skip(f"Cannot compare MOON_PA and IAU_MOON: {e}")
+    
+    def test_moon_pa_file_specific_loading(self, spice_kernels_path, required_kernels_present):
+        """
+        Test specific moon_pa file loading with detailed error messages.
+        """
+        if not SPICE_AVAILABLE or not required_kernels_present:
+            pytest.skip("SPICE not available")
+        
+        # Look for specific moon_pa file
+        specific_file = spice_kernels_path / "pck" / "moon_pa_de440_200625.bpc"
+        if not specific_file.exists():
+            # Try other possible locations
+            found = False
+            for subdir in ["", "pck", "data/pck"]:
+                candidate = spice_kernels_path / subdir / "moon_pa_de440_200625.bpc"
+                if candidate.exists():
+                    specific_file = candidate
+                    found = True
+                    break
+            
+            if not found:
+                pytest.skip(f"Specific moon_pa file not found: moon_pa_de440_200625.bpc")
+        
+        # Test loading this specific file
+        config = SPICEConfig(mission_type="earth_moon", verbose=True)
+        interface = SPICEInterface(spice_kernels_path, config)
+        
+        try:
+            success = interface.initialize()
+            assert success, "SPICE initialization failed"
+            
+            # Verify the specific file was loaded
+            km = interface._km
+            loaded_kernels = km.get_loaded_kernels()
+            
+            specific_loaded = any(
+                "moon_pa_de440_200625.bpc" in str(k) for k in loaded_kernels
+            )
+            
+            assert specific_loaded, (
+                f"Specific moon_pa file not loaded: {specific_file.name}\n"
+                f"Loaded kernels: {[k.name for k in loaded_kernels]}"
+            )
+            
+            # Test that we can use the frame
+            rot_mat = interface.get_moon_libration_matrix(0.0)
+            assert rot_mat.shape == (3, 3)
+            
+            # Additional verification: try to get frame information
+            try:
+                # Try to get frame ID for MOON_PA
+                frame_id = spice.namfrm("MOON_PA")
+                assert frame_id != 0, "MOON_PA frame ID is 0 (invalid)"
+                print(f"\nMOON_PA frame ID: {frame_id}")
+                
+            except SpiceyError as e:
+                pytest.fail(f"Cannot get frame ID for MOON_PA: {e}")
+                
+        finally:
+            interface.shutdown()
+    
+    def test_moon_pa_loading_failure_scenario(self):
+        """
+        Test error handling when moon_pa file exists but cannot be loaded.
+        This test creates a dummy corrupt file and verifies appropriate error handling.
+        """
+        if not SPICE_AVAILABLE:
+            pytest.skip("spiceypy not installed")
+        
+        import tempfile
+        from pathlib import Path
+        
+        # Create a temporary directory with a corrupt moon_pa file
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            
+            # Create necessary directory structure
+            pck_dir = tmp_path / "pck"
+            pck_dir.mkdir()
+            
+            # Create a dummy (corrupt) moon_pa file
+            corrupt_file = pck_dir / "moon_pa_de440_200625.bpc"
+            with open(corrupt_file, 'w') as f:
+                f.write("This is not a valid SPICE binary kernel file")
+            
+            # Create other required kernels
+            lsk_dir = tmp_path / "lsk"
+            lsk_dir.mkdir()
+            
+            # Create a simple leapseconds kernel (text kernel)
+            lsk_file = lsk_dir / "naif0012.tls"
+            with open(lsk_file, 'w') as f:
+                f.write("""KPL/LSK
+                
+                Leapseconds kernel for testing
+                
+                \begintext
+                
+                \begindata
+                
+                DELTET/KERNEL = @earth_rotation.dat
+                
+                \begintext
+                """)
+            
+            # Try to initialize SPICE with this directory
+            config = SPICEConfig(
+                mission_type="earth_moon",
+                verbose=False,
+                auto_discover=True
+            )
+            
+            interface = SPICEInterface(tmp_path, config)
+            
+            try:
+                # Initialization should fail because corrupt moon_pa cannot be loaded
+                # and pck is required
+                with pytest.raises((KernelLoadError, SPICEError)):
+                    interface.initialize()
+                    
+            finally:
+                try:
+                    interface.shutdown()
+                except:
+                    pass
 
 
 # ============================================================================

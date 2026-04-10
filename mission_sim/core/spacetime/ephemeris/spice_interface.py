@@ -258,9 +258,13 @@ class SPICEKernelManager:
             raise KernelNotFoundError(f"Kernel file not found: {path}")
         
         # 使用 spiceypy 加载
-        spice.furnsh(str(path))
-        self.loaded_kernels.append(path)
-        self._kernel_handles[ktype] = len(self.loaded_kernels) - 1
+        try:
+            spice.furnsh(str(path))
+            self.loaded_kernels.append(path)
+            self._kernel_handles[ktype] = len(self.loaded_kernels) - 1
+        except Exception as e:
+            # 提供更详细的错误信息
+            raise KernelLoadError(f"Failed to load kernel {path}: {e}")
     
     def unload_all(self) -> None:
         """卸载所有内核"""
