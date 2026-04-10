@@ -94,7 +94,7 @@ class SPICEKernelManager:
         },
         'pck': {
             'patterns': ['pck*.tpc', 'moon_pa*.bpc', 'earth*.bpc', 'earth*.tf'],
-            'required': False,
+            'required': True,  # 修改为 True，因为 moon_pa 现在被认为是必需的
             'description': 'Planetary constants (orientation/shape)'
         },
         'spk_planets': {
@@ -207,35 +207,49 @@ class SPICEKernelManager:
         
         # Try loading in priority order
         for pattern in config['patterns']:
-            # Search in root and subdirectories
+            # 搜索所有子目录
             paths = list(self.kernel_root.rglob(pattern))
-            # Also check direct subdirectories
+            
+            # 如果没有找到，也检查常见的子目录结构
             if not paths:
-                for subdir in ['lsk', 'pck', 'spk', 'fk', 'ik', 'spk/planets', 'fk/satellites']:
+                # 定义常见的内核子目录
+                common_subdirs = ['pck', 'lsk', 'spk', 'fk', 'ik', 
+                                 'spk/planets', 'fk/satellites', 'pck/planets']
+                for subdir in common_subdirs:
                     candidate = self.kernel_root / subdir / pattern
                     if candidate.exists():
                         paths.append(candidate)
             
             if paths:
-                # Sort by filename, typically newest version first (e.g., de440 > de430)
-                paths.sort(reverse=True)
+                # 优先选择文件名更长的（通常包含更多信息，如 moon_pa_de440_200625.bpc）
+                # 或按特定规则排序
+                if 'moon_pa' in pattern:
+                    # 对于 moon_pa 内核，按文件名长度和内容排序
+                    paths.sort(key=lambda p: (len(p.name), p.name), reverse=True)
+                else:
+                    # 其他内核按文件名倒序（通常更新的版本在后）
+                    paths.sort(reverse=True)
+                
                 selected = paths[0]
                 
                 try:
                     self._load_single_kernel(selected, ktype)
                     found = True
                     if self.config.verbose:
-                        print(f"[SPICE] Loaded {ktype}: {selected.name}")
+                        print(f"[SPICE] Loaded {ktype}: {selected.relative_to(self.kernel_root)}")
                     break
                 except Exception as e:
                     warnings.warn(f"Failed to load kernel {selected}: {e}")
                     continue
         
         if not found and config['required']:
-            # Use English error message per MCPC coding standards
+            # 提供更详细的错误信息
+            search_paths = [str(self.kernel_root / subdir) for subdir in 
+                           ['', 'pck', 'lsk', 'spk', 'fk', 'ik', 'spk/planets', 'fk/satellites']]
             raise KernelNotFoundError(
                 f"Required kernel '{ktype}' not found. "
-                f"Searched patterns: {config['patterns']}"
+                f"Patterns: {config['patterns']}. "
+                f"Searched in: {search_paths}"
             )
     
     def _load_single_kernel(self, path: Path, ktype: str) -> None:
@@ -481,23 +495,31 @@ class SPICECalculator:
     
     def get_moon_libration_matrix(self, epoch: float) -> np.ndarray:
         """
-        获取月球天平动矩阵（J2000 -> IAU_MOON）
+        获取月球天平动矩阵（J2000 -> MOON_PA）
         
-        使用 IAU（国际天文学联合会）定义的月球坐标系。
-        这是一个稳定的坐标系，总是可用，不需要额外的姿态内核。
+        优先使用高精度的 MOON_PA 坐标系，如果失败则回退到 IAU_MOON。
         
         Args:
             epoch: 历书时秒
         
         Returns:
-            np.ndarray: 3x3 旋转矩阵（从 J2000 到 IAU_MOON 坐标系）
+            np.ndarray: 3x3 旋转矩阵（从 J2000 到月球主轴坐标系）
         """
         try:
-            # 使用 IAU_MOON 坐标系，这是 SPICE 内置的，总是可用
-            rot_mat = spice.pxform('J2000', 'IAU_MOON', epoch)
+            # 首先尝试使用 MOON_PA（高精度月球姿态坐标系）
+            rot_mat = spice.pxform('J2000', 'MOON_PA', epoch)
+            if self.config.verbose:
+                print(f"[SPICE] Using high-precision MOON_PA frame for libration matrix")
             return np.array(rot_mat)
         except SpiceyError as e:
-            raise SPICEError(f"Failed to get moon libration matrix: {e}")
+            # MOON_PA 不可用，回退到 IAU_MOON（国际天文学联合会定义的月球坐标系）
+            if self.config.verbose:
+                print(f"[SPICE] MOON_PA not available, falling back to IAU_MOON: {e}")
+            try:
+                rot_mat = spice.pxform('J2000', 'IAU_MOON', epoch)
+                return np.array(rot_mat)
+            except SpiceyError as e2:
+                raise SPICEError(f"Failed to get moon libration matrix: {e2}")
     
     def utc_to_et(self, utc: str) -> float:
         """
