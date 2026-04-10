@@ -488,7 +488,7 @@ class DirectoryDigest(DirectoryDigestBase):
                                    final_strategy: ProcessingStrategy, 
                                    mode: str):
         """
-        使用最终确定的策略处理文件
+        使用最终确定的策略处理文件 - 增强错误处理
         """
         try:
             filepath = file_digest.metadata.path
@@ -518,6 +518,28 @@ class DirectoryDigest(DirectoryDigestBase):
                 # 记录实际使用的策略
                 file_digest.actual_strategy = final_strategy.value
                 
+                # 检查是否成功生成了摘要
+                if (final_strategy == ProcessingStrategy.HEADER_WITH_STATS and 
+                    file_digest.human_readable_summary is None):
+                    # HEADER_WITH_STATS策略必须有摘要，如果缺失则尝试降级
+                    if self.debug:
+                        print(f"[DEBUG]   WARNING: HEADER_WITH_STATS strategy but no summary generated", file=sys.stderr)
+                    
+                    # 尝试作为简单文本处理
+                    try:
+                        content = self._read_file_content(filepath)
+                        if content:
+                            simple_summary = HumanReadableSummary(
+                                title=filepath.name,
+                                line_count=len(content.split('\n')),
+                                character_count=len(content),
+                                first_lines=content.split('\n')[:10],
+                                summary=f"Basic text file: {len(content)} characters"
+                            )
+                            file_digest.human_readable_summary = simple_summary
+                    except Exception:
+                        pass
+                
                 # 添加debug输出
                 if self.debug:
                     import sys
@@ -526,21 +548,9 @@ class DirectoryDigest(DirectoryDigestBase):
                     if file_digest.full_content:
                         print(f"[DEBUG]   Full content length: {len(file_digest.full_content)} chars", file=sys.stderr)
                     else:
-                        print(f"[DEBUG]   WARNING: Full content is None despite success", file=sys.stderr)
+                        print(f"[DEBUG]   Full content is None", file=sys.stderr)
+                    print(f"[DEBUG]   human_readable_summary set: {file_digest.human_readable_summary is not None}", file=sys.stderr)
                 
-                # 在full模式下，如果策略是FULL_CONTENT但full_content未设置，则强制设置
-                if mode == "full" and final_strategy == ProcessingStrategy.FULL_CONTENT and not file_digest.full_content:
-                    if self.debug:
-                        print(f"[DEBUG]   CRITICAL: FULL_CONTENT strategy but full_content not set, reading and setting now", file=sys.stderr)
-                    try:
-                        content = self._read_file_content(filepath)
-                        if content:
-                            file_digest.full_content = content
-                            if self.debug:
-                                print(f"[DEBUG]     Set full_content, length: {len(content)} chars", file=sys.stderr)
-                    except Exception as e:
-                        if self.debug:
-                            print(f"[DEBUG]     Failed to read content: {e}", file=sys.stderr)
             else:
                 # 处理失败，作为二进制处理
                 file_digest.metadata.file_type = FileType.BINARY_FILES

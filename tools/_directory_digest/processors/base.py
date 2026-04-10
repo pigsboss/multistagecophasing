@@ -814,12 +814,24 @@ class DataFileProcessor(BaseFileProcessor):
     
     DATA_EXTENSIONS = {
         '.csv', '.tsv', '.log', '.out', '.err', '.dat', '.txt',
-        '.tls', '.tpc', '.ker'  # 添加SPICE内核文件扩展名
+        '.tls', '.tpc', '.ker', '.cmt', '.tm'  # 扩展SPICE内核文件
     }
     
     def __init__(self, config: Optional[Dict] = None):
         super().__init__(config)
         self.debug = config.get('debug', False) if config else False
+        
+        # 导入智能分析器
+        try:
+            from analyzers.semantics.sheets import SmartDataFileAnalyzer
+            self.smart_analyzer = SmartDataFileAnalyzer(debug=self.debug)
+            self.smart_analyzer_available = True
+        except ImportError:
+            self.smart_analyzer = None
+            self.smart_analyzer_available = False
+            if self.debug:
+                import sys
+                print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer not available", file=sys.stderr)
     
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的策略和类型
@@ -842,13 +854,24 @@ class DataFileProcessor(BaseFileProcessor):
         if file_digest.metadata.processing_strategy == ProcessingStrategy.HEADER_WITH_STATS:
             # 检查是否是SPICE内核文件或其他数据文件
             suffix = file_digest.metadata.path.suffix.lower()
-            if suffix in ('.tls', '.tpc', '.ker'):  # SPICE内核文件
+            if suffix in ('.tls', '.tpc', '.ker', '.cmt', '.tm'):  # SPICE内核文件
                 return True
+            
+            # 使用智能分析器检测是否需要处理
+            if self.smart_analyzer_available:
+                return self.smart_analyzer.can_handle(file_digest.metadata.path, None)
             
         return False
     
     def process(self, file_digest: FileDigest, content: str, mode: str = "framework", 
                 strategy: ProcessingStrategy = ProcessingStrategy.HEADER_WITH_STATS) -> FileDigest:
+        
+        import sys
+        
+        if self.debug:
+            print(f"[DEBUG:DataFileProcessor] Processing file: {file_digest.metadata.path}", file=sys.stderr)
+            print(f"[DEBUG:DataFileProcessor]   Strategy: {strategy}", file=sys.stderr)
+            print(f"[DEBUG:DataFileProcessor]   File type: {file_digest.metadata.file_type}", file=sys.stderr)
         
         if not content:
             return file_digest
@@ -883,25 +906,35 @@ class DataFileProcessor(BaseFileProcessor):
     
     def _generate_data_summary(self, filepath: Path, content: str,
                                strategy: ProcessingStrategy) -> HumanReadableSummary:
-        """生成数据文件摘要"""
+        """生成数据文件摘要 - 增强版，支持智能分析"""
         lines = content.split('\n')
         line_count = len(lines)
         
         suffix = filepath.suffix.lower()
         
-        # 计算统计信息
-        stats = self._calculate_data_stats(content, suffix)
+        # 尝试使用智能分析器
+        smart_analysis = None
+        if self.smart_analyzer_available:
+            try:
+                analysis_result = self.smart_analyzer.analyze(filepath, content)
+                if analysis_result.success:
+                    smart_analysis = analysis_result.metadata.get("data_analysis", {})
+                    if self.debug:
+                        import sys
+                        print(f"[DEBUG:DataFileProcessor] Smart analysis successful for {filepath}", file=sys.stderr)
+            except Exception as e:
+                if self.debug:
+                    import sys
+                    print(f"[DEBUG:DataFileProcessor] Smart analysis failed for {filepath}: {e}", file=sys.stderr)
         
-        # 提取头部
-        header_lines = self._extract_header(lines, suffix)
+        # 计算通用统计信息
+        stats = self._calculate_data_stats(content, suffix, smart_analysis)
         
-        summary_parts = [
-            f"Data type: {suffix[1:] if suffix else 'text'}",
-            f"Total lines: {line_count}"
-        ]
+        # 智能提取头部
+        header_lines = self._extract_smart_header(filepath, content, suffix, smart_analysis)
         
-        for key, value in stats.items():
-            summary_parts.append(f"{key}: {value}")
+        # 构建摘要
+        summary_parts = self._build_summary_parts(filepath, content, suffix, stats, smart_analysis)
         
         return HumanReadableSummary(
             title=filepath.name,
@@ -911,11 +944,36 @@ class DataFileProcessor(BaseFileProcessor):
             summary='\n'.join(summary_parts)
         )
     
-    def _calculate_data_stats(self, content: str, suffix: str) -> Dict[str, Any]:
-        """计算数据统计信息"""
+    def _calculate_data_stats(self, content: str, suffix: str, smart_analysis: Optional[Dict]) -> Dict[str, Any]:
+        """计算数据统计信息 - 增强版，结合智能分析"""
         stats = {}
         lines = content.split('\n')
         
+        # 如果有智能分析结果，优先使用
+        if smart_analysis:
+            smart_stats = smart_analysis.get("stats", {})
+            if smart_stats:
+                stats.update(smart_stats)
+                # 重命名一些键以保持一致性
+                key_mapping = {
+                    "total_lines": "Total lines",
+                    "estimated_records": "Estimated records",
+                    "estimated_columns": "Estimated columns",
+                    "non_empty_lines": "Non-empty lines",
+                }
+                
+                for smart_key, display_key in key_mapping.items():
+                    if smart_key in smart_stats:
+                        stats[display_key] = smart_stats[smart_key]
+        
+        # 如果没有智能分析或缺少某些统计，计算基本统计
+        if "Total lines" not in stats:
+            stats["Total lines"] = len(lines)
+        
+        if "Non-empty lines" not in stats:
+            stats["Non-empty lines"] = sum(1 for l in lines if l.strip())
+        
+        # 文件特定统计
         if suffix == '.csv':
             # CSV 统计
             non_empty_lines = [l for l in lines if l.strip()]
@@ -936,19 +994,31 @@ class DataFileProcessor(BaseFileProcessor):
                 stats["Warnings"] = warning_count
         
         # 通用统计
-        stats["File size"] = f"{len(content)} chars"
+        if "File size" not in stats:
+            stats["File size"] = f"{len(content)} chars"
         
         return stats
     
-    def _extract_header(self, lines: List[str], suffix: str) -> List[str]:
-        """提取数据文件头部"""
+    def _extract_smart_header(self, filepath: Path, content: str, suffix: str, 
+                             smart_analysis: Optional[Dict]) -> List[str]:
+        """智能提取数据文件头部"""
+        lines = content.split('\n')
+        
+        # 如果有智能分析结果，使用其头部信息
+        if smart_analysis:
+            partitions = smart_analysis.get("partitions", {})
+            header_lines = partitions.get("header_lines", [])
+            if header_lines:
+                return header_lines[:30]  # 限制头部大小
+        
+        # 否则使用通用头部提取
         header_lines = []
         
         for i, line in enumerate(lines):
             stripped = line.strip()
             
             # 保留注释行
-            if stripped and stripped.startswith(('#', '//', '/*', '*', '!')):
+            if stripped and stripped.startswith(('#', '//', '/*', '*', '!', 'C', 'CC')):
                 header_lines.append(line)
                 continue
             
@@ -968,6 +1038,45 @@ class DataFileProcessor(BaseFileProcessor):
                     break
         
         return header_lines[:30]
+    
+    def _build_summary_parts(self, filepath: Path, content: str, suffix: str,
+                            stats: Dict[str, Any], smart_analysis: Optional[Dict]) -> List[str]:
+        """构建摘要部分"""
+        summary_parts = [
+            f"Data type: {suffix[1:] if suffix else 'text'}"
+        ]
+        
+        # 如果有智能分析，添加文件类型信息
+        if smart_analysis:
+            file_type = smart_analysis.get("file_type", "")
+            structure_type = smart_analysis.get("structure_type", "")
+            
+            if file_type:
+                summary_parts.append(f"File type: {file_type}")
+            if structure_type:
+                summary_parts.append(f"Structure: {structure_type}")
+        
+        # 添加统计信息
+        for key, value in stats.items():
+            # 只添加一些关键统计信息
+            if key in ["Total lines", "Non-empty lines", "Estimated records", 
+                      "Estimated columns", "Data rows (approx)", "Columns (approx)"]:
+                summary_parts.append(f"{key}: {value}")
+        
+        # 添加智能分析的其他信息
+        if smart_analysis:
+            partitions = smart_analysis.get("partitions", {})
+            if partitions.get("data_section_start") is not None:
+                summary_parts.append(f"Data starts at line: {partitions['data_section_start']}")
+            
+            if "comment_ratio" in partitions:
+                summary_parts.append(f"Comments: {partitions['comment_ratio']:.1%}")
+        
+        # 特殊文件类型提示
+        if suffix in ('.tls', '.tpc', '.ker', '.cmt'):
+            summary_parts.append("Note: SPICE kernel file - contains structured ephemeris data")
+        
+        return summary_parts
 
 
 # ==================== 重构后的处理器注册表 ====================
@@ -1494,10 +1603,11 @@ def create_default_registry(rule_engine=None,
     )
     
     # 按优先级顺序注册（先注册的优先级高）
+    # DataFileProcessor 应该在 TextFileProcessor 之前，以正确处理数据文件
+    registry.register(DataFileProcessor(config))  # 增强的数据文件处理器
     registry.register(TextFileProcessor(config))
     registry.register(SourceCodeProcessor(config))
     registry.register(ConfigFileProcessor(config))
-    registry.register(DataFileProcessor(config))
     
     return registry
 
