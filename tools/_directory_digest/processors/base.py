@@ -821,17 +821,21 @@ class DataFileProcessor(BaseFileProcessor):
         super().__init__(config)
         self.debug = config.get('debug', False) if config else False
         
-        # 导入智能分析器
+        # 导入智能分析器 - 修正导入路径
         try:
-            from analyzers.semantics.sheets import SmartDataFileAnalyzer
+            # 使用相对导入（从 processors 到 analyzers）
+            from ..analyzers.semantics.sheets import SmartDataFileAnalyzer
             self.smart_analyzer = SmartDataFileAnalyzer(debug=self.debug)
             self.smart_analyzer_available = True
-        except ImportError:
+            if self.debug:
+                import sys
+                print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer loaded successfully", file=sys.stderr)
+        except ImportError as e:
             self.smart_analyzer = None
             self.smart_analyzer_available = False
             if self.debug:
                 import sys
-                print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer not available", file=sys.stderr)
+                print(f"[DEBUG:DataFileProcessor] SmartDataFileAnalyzer not available: {e}", file=sys.stderr)
     
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的策略和类型
