@@ -286,9 +286,11 @@ class DirectoryDigest(DirectoryDigestBase):
         # 第一阶段：制定初始策略
         initial_strategies = {}
         for file_digest in all_files:
-            # 检测文件类型
-            file_type = self.file_type_detector.detect(file_digest.metadata.path)
+            # 使用规则引擎进行文件分类（优先于简单的扩展名检测）
+            classification = self._classify_file(file_digest.metadata.path)
+            file_type = classification.file_type
             file_digest.metadata.file_type = file_type
+            file_digest.metadata.force_binary = classification.force_binary
             
             # 将字符串模式转换为枚举
             try:
@@ -297,10 +299,20 @@ class DirectoryDigest(DirectoryDigestBase):
                 # 如果mode不是有效的OutputMode，使用FRAMEWORK作为默认
                 output_mode_enum = OutputMode.FRAMEWORK
             
-            # 获取初始策略
-            initial_strategy = InitialEmbeddingStrategy.get_initial_strategy(
-                output_mode_enum, file_type
-            )
+            # 获取初始策略，优先使用规则引擎指定的策略
+            # 如果规则引擎指定了非METADATA_ONLY策略，则直接使用
+            if classification.strategy != ProcessingStrategy.METADATA_ONLY:
+                initial_strategy = classification.strategy
+            else:
+                # 否则根据文件类型和输出模式获取默认策略
+                initial_strategy = InitialEmbeddingStrategy.get_initial_strategy(
+                    output_mode_enum, file_type
+                )
+            
+            # 根据输出模式进行最终调整
+            if mode == "sort":
+                # sort模式：强制使用METADATA_ONLY
+                initial_strategy = ProcessingStrategy.METADATA_ONLY
             
             # 将策略写入元数据
             file_digest.metadata.processing_strategy = initial_strategy
