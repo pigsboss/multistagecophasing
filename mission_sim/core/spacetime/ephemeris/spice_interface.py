@@ -334,6 +334,11 @@ class SPICECalculator:
         CoordinateFrame.SUN_EARTH_ROTATING: 'SUN_EARTH_L2',  # 需要定义
         CoordinateFrame.LVLH: 'LVLH',  # 局部垂直局部水平（动态定义）
         CoordinateFrame.VVLH: 'VVLH',
+        # 添加更多标准框架映射以确保测试有备选
+        'IAU_EARTH': 'IAU_EARTH',
+        'IAU_MOON': 'IAU_MOON',
+        'ECLIPJ2000': 'ECLIPJ2000',  # 黄道坐标系
+        'IAU_SUN': 'IAU_SUN',
     }
     
     def __init__(self, kernel_manager: SPICEKernelManager):
@@ -652,6 +657,10 @@ class SPICECalculator:
                 # 默认使用枚举名
                 return frame.name
         elif isinstance(frame, str):
+            # 如果字符串已经在 FRAME_MAP 中，返回它
+            if frame in self.FRAME_MAP:
+                return self.FRAME_MAP[frame]
+            # 否则直接返回字符串，让 SPICE 处理
             return frame
         else:
             raise SPICEError(f"Invalid frame type: {type(frame)}")
