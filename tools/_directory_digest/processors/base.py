@@ -147,6 +147,10 @@ class TextFileProcessor(BaseFileProcessor):
     
     TEXT_EXTENSIONS = {'.txt', '.md', '.markdown', '.rst', '.tex', '.html', '.htm', '.cmt'}
     
+    def __init__(self, config: Optional[Dict] = None):
+        super().__init__(config)
+        self.debug = config.get('debug', False) if config else False
+    
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的类型/策略
         if file_digest.metadata.file_type in (FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS):
@@ -167,7 +171,7 @@ class TextFileProcessor(BaseFileProcessor):
         
         # 添加debug输出
         import sys
-        debug = getattr(self, 'debug', False)
+        debug = self.debug
         if debug:
             print(f"[DEBUG:TextFileProcessor] Processing file: {file_digest.metadata.path}", file=sys.stderr)
             print(f"[DEBUG:TextFileProcessor]   Strategy: {strategy}", file=sys.stderr)
@@ -188,8 +192,6 @@ class TextFileProcessor(BaseFileProcessor):
             if debug:
                 print(f"[DEBUG:TextFileProcessor]   FULL_CONTENT strategy", file=sys.stderr)
                 print(f"[DEBUG:TextFileProcessor]     File size: {file_digest.metadata.size}, max_full_content_size: {self.max_full_content_size}", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     File size type: {type(file_digest.metadata.size)}, value: {file_digest.metadata.size}", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     max_full_content_size type: {type(self.max_full_content_size)}, value: {self.max_full_content_size}", file=sys.stderr)
             
             # FULL_CONTENT策略必须设置full_content，无论文件大小
             # 但在文件过大时进行截断
@@ -219,17 +221,10 @@ class TextFileProcessor(BaseFileProcessor):
             # 确保不设置human_readable_summary
             file_digest.human_readable_summary = None
             
-            # 在返回前再次确认设置
             if debug:
-                print(f"[DEBUG:TextFileProcessor]   Before return from FULL_CONTENT:", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     metadata.strategy: {file_digest.metadata.processing_strategy}", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     full_content type: {type(file_digest.full_content)}", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     full_content is None: {file_digest.full_content is None}", file=sys.stderr)
-                if file_digest.full_content:
-                    print(f"[DEBUG:TextFileProcessor]     full_content length: {len(file_digest.full_content)} chars", file=sys.stderr)
-                    # 打印前100个字符以供验证
-                    print(f"[DEBUG:TextFileProcessor]     full_content preview (first 100 chars): {repr(file_digest.full_content[:100])}", file=sys.stderr)
-                print(f"[DEBUG:TextFileProcessor]     human_readable_summary: {file_digest.human_readable_summary}", file=sys.stderr)
+                print(f"[DEBUG:TextFileProcessor]   After FULL_CONTENT processing:", file=sys.stderr)
+                print(f"[DEBUG:TextFileProcessor]     full_content set: {file_digest.full_content is not None}", file=sys.stderr)
+                print(f"[DEBUG:TextFileProcessor]     human_readable_summary set: {file_digest.human_readable_summary is not None}", file=sys.stderr)
             
             return file_digest
             
@@ -396,6 +391,10 @@ class SourceCodeProcessor(BaseFileProcessor):
         '.jsx', '.tsx', '.go', '.rs', '.rb', '.php', '.swift',
         '.sh', '.bash', '.ps1', '.bat', '.cmd', '.css', '.scss'
     }
+    
+    def __init__(self, config: Optional[Dict] = None):
+        super().__init__(config)
+        self.debug = config.get('debug', False) if config else False
     
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的类型/策略
@@ -622,6 +621,10 @@ class ConfigFileProcessor(BaseFileProcessor):
         '.cfg', '.conf', '.env', '.properties', '.tf', '.tls'
     }
     
+    def __init__(self, config: Optional[Dict] = None):
+        super().__init__(config)
+        self.debug = config.get('debug', False) if config else False
+    
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的策略
         if file_digest.metadata.processing_strategy == ProcessingStrategy.STRUCTURE_EXTRACT:
@@ -798,6 +801,10 @@ class DataFileProcessor(BaseFileProcessor):
     """数据文件处理器（CSV、TSV、日志等）"""
     
     DATA_EXTENSIONS = {'.csv', '.tsv', '.log', '.out', '.err', '.dat', '.txt'}
+    
+    def __init__(self, config: Optional[Dict] = None):
+        super().__init__(config)
+        self.debug = config.get('debug', False) if config else False
     
     def can_handle(self, file_digest: FileDigest) -> bool:
         # 优先使用分类阶段确定的策略和类型
@@ -1017,11 +1024,6 @@ class FileProcessorRegistry:
                 strategy = file_digest.metadata.processing_strategy
                 if self.debug:
                     print(f"[DEBUG:ProcessorRegistry]   Using metadata strategy: {strategy}", file=sys.stderr)
-                # 重新获取force_binary（从元数据或重新分类）
-                if self.rule_engine:
-                    _, force_binary = self.rule_engine.classify_file(filepath)
-                else:
-                    _, force_binary = self._default_classify(file_digest)
             else:
                 # 重新分类（原有逻辑）
                 if self.debug:
@@ -1038,13 +1040,7 @@ class FileProcessorRegistry:
                 print(f"[DEBUG:ProcessorRegistry]   Final strategy: {strategy}", file=sys.stderr)
                 print(f"[DEBUG:ProcessorRegistry]   Force binary: {force_binary}", file=sys.stderr)
             
-            # 2. 估算token消耗
-            if self.rule_engine:
-                estimated_tokens = self.rule_engine.estimate_token_usage(filepath, strategy)
-            else:
-                estimated_tokens = self._estimate_tokens(file_digest, strategy)
-            
-            # 3. 检查文件大小限制
+            # 2. 检查文件大小限制
             if file_digest.metadata.size > self.max_file_size:
                 if self.debug:
                     print(f"[DEBUG:ProcessorRegistry]   File size {file_digest.metadata.size} exceeds max {self.max_file_size}, skipping", file=sys.stderr)
@@ -1052,19 +1048,7 @@ class FileProcessorRegistry:
                 self._process_as_binary(file_digest, mode)
                 return True
             
-            # 4. 检查上下文限制（Token分配）- 仅当不是 full 模式时进行降级
-            if self.context_manager and mode != "full":
-                allocation_result = self._check_and_allocate_context(estimated_tokens, file_digest, strategy)
-                if not allocation_result[0]:  # 解构元组检查结果
-                    if self.debug:
-                        print(f"[DEBUG:ProcessorRegistry]   Token allocation failed, skipping file", file=sys.stderr)
-                    self._update_stats('skipped_by_context')
-                    return False
-                # 使用可能降级后的策略
-                strategy = allocation_result[1]
-                estimated_tokens = allocation_result[2]
-            
-            # 5. 根据策略处理文件
+            # 4. 根据策略处理文件
             if force_binary or strategy == ProcessingStrategy.METADATA_ONLY:
                 if self.debug:
                     print(f"[DEBUG:ProcessorRegistry]   Force binary or METADATA_ONLY, processing as binary", file=sys.stderr)
@@ -1092,8 +1076,20 @@ class FileProcessorRegistry:
                         if strategy == ProcessingStrategy.FULL_CONTENT:
                             print(f"[DEBUG:ProcessorRegistry]   FULL_CONTENT strategy, max_full_content_size: {processor.max_full_content_size}", file=sys.stderr)
                     
+                    # 设置处理器的debug标志
+                    if hasattr(processor, 'debug'):
+                        processor.debug = self.debug
+                    
                     # 执行处理（传入策略确保一致性）
+                    original_content = content  # 保存原始内容
                     file_digest = processor.process(file_digest, content, mode, strategy)
+                    
+                    # 检查：如果策略是FULL_CONTENT，但full_content没有被设置，则用原始内容设置
+                    if strategy == ProcessingStrategy.FULL_CONTENT and file_digest.full_content is None:
+                        if self.debug:
+                            print(f"[DEBUG:ProcessorRegistry]   WARNING: Processor didn't set full_content for FULL_CONTENT strategy, setting it now", file=sys.stderr)
+                        file_digest.full_content = original_content
+                        file_digest.human_readable_summary = None
                     
                     if self.debug:
                         print(f"[DEBUG:ProcessorRegistry]   After processor.process:", file=sys.stderr)
@@ -1107,20 +1103,6 @@ class FileProcessorRegistry:
                     # 根据文件类型更新统计
                     self._update_stats_by_processor(file_digest, processor)
                     
-                    # 在 full 模式下保存完整内容（如果处理器未设置）
-                    if mode == "full" and strategy == ProcessingStrategy.FULL_CONTENT and not file_digest.full_content:
-                        if self.debug:
-                            print(f"[DEBUG:ProcessorRegistry]   WARNING: Processor didn't set full_content for FULL_CONTENT strategy, setting it now", file=sys.stderr)
-                        # 重新读取内容并设置
-                        try:
-                            with open(filepath, 'r', encoding='utf-8') as f:
-                                fallback_content = f.read()
-                            file_digest.full_content = fallback_content
-                            if self.debug:
-                                print(f"[DEBUG:ProcessorRegistry]     Set fallback full_content, length: {len(fallback_content)} chars", file=sys.stderr)
-                        except Exception as e:
-                            if self.debug:
-                                print(f"[DEBUG:ProcessorRegistry]     Failed to read fallback content: {e}", file=sys.stderr)
                 else:
                     # 无匹配处理器，作为二进制处理
                     if self.debug:
