@@ -1,0 +1,119 @@
+# SPICE Kernels Directory Processing Rules
+# 为 tools/directory_digest_refactor.py 定制的规则配置
+# 将自动应用于 spice_kernels/ 目录的分析
+
+file_classifications:
+  # 1. SPICE 内核文件（二进制格式）-> 仅元数据
+  - name: "spice_binary_kernels"
+    patterns: ["*.bsp", "*.bpc", "*.bc", "*.bds"]
+    strategy: "metadata_only"
+    priority: 95
+    force_binary: true
+    comment: "SPICE 二进制内核文件（通常较大，不分析内容）"
+
+  # 2. SPICE 文本内核文件 -> 头部统计
+  - name: "spice_text_kernels"
+    patterns: ["*.tpc", "*.tsc", "*.tls", "*.tf", "*.ti", "*.to", "*.tbc", "*.tds", "*.tfc", "*.tbs"]
+    strategy: "header_with_stats"
+    priority: 85
+    max_size_kb: 1024  # 1MB
+    comment: "SPICE 文本内核文件（提取头部和统计信息）"
+
+  # 3. 内核注释文件 -> 完整内容或摘要
+  - name: "spice_comment_files"
+    patterns: ["*.cmt", "*.comment", "*.notes", "*.readme"]
+    strategy: "summary_only"
+    priority: 90
+    max_size_kb: 256  # 256KB
+    comment: "SPICE 内核注释文件（包含重要元数据）"
+
+  # 4. 配置文件 -> 结构提取
+  - name: "spice_configs"
+    patterns: ["*.ker", "*.conf", "*.cfg", "*.ini", "*.yml", "*.yaml", "*.json"]
+    strategy: "structure_extract"
+    priority: 80
+    max_size_kb: 512
+    comment: "SPICE 配置文件（提取键值结构）"
+
+  # 5. 元数据文档 -> 完整内容或摘要
+  - name: "spice_documentation"
+    patterns: ["README*", "readme*", "LICENSE*", "COPYING*", "NOTICE*", "CHANGELOG*", "AUTHORS*", "NEWS*"]
+    strategy: "full_content"
+    priority: 100
+    max_size_kb: 128
+    comment: "SPICE 内核文档文件（关键文档）"
+
+  # 6. 数据文件（可能是文本或二进制）-> 元数据或头部统计
+  - name: "spice_data_files"
+    patterns: ["*.dat", "*.fits", "*.h5", "*.hdf5", "*.csv", "*.txt"]
+    strategy: "header_with_stats"
+    priority: 70
+    max_size_kb: 2048
+    comment: "SPICE 相关数据文件"
+
+  # 7. 其他内核扩展名 -> 头部统计
+  - name: "other_spice_extensions"
+    patterns: ["*.x*", "*.v*", "*.a*", "*.p*", "*.s*", "*.o*"]
+    strategy: "header_with_stats"
+    priority: 60
+    max_size_kb: 512
+    comment: "其他SPICE内核文件扩展名"
+
+# 忽略模式（如果不想处理某些文件）
+ignore_patterns:
+  - "*.zip"
+  - "*.tar.gz"
+  - "*.tar.bz2"
+  - "*.tgz"
+  - "backup_*"
+  - "old_*"
+  - "temp_*"
+  - ".git*"
+  - "__pycache__"
+  - "*.pyc"
+  - "*.pyo"
+
+# 全局配置
+config:
+  max_file_size_mb: 10240  # 10GB，超过此大小的文件将完全跳过
+  context_size_tokens: 128000  # 目标LLM上下文大小
+  token_utilization_warning: 0.8  # 令牌利用率超过此阈值时发出警告
+  parallel_processing: true  # 启用并行处理（如果文件数 > 100）
+
+# 处理建议
+recommendations:
+  - "二进制内核文件（.bsp, .bpc）通常较大，建议只保留元数据和哈希值"
+  - "文本内核文件（.tpc, .tls）可以提取头部信息，无需完整内容"
+  - "注释文件（.cmt）包含重要元数据，应完整分析"
+  - "使用 --max-size 参数限制处理的最大文件大小"
+  - "在 sort 模式下查看文件分类统计，优化规则配置"
+
+# 扩展名参考（供维护者参考）
+extension_reference:
+  spice_binary_kernels:
+    - ".bsp": "Binary SPK (ephemeris) kernel"
+    - ".bpc": "Binary PCK (planet constants) kernel"
+    - ".bc": "Binary CK (orientation) kernel"
+    - ".bds": "Binary DSK (shape) kernel"
+  
+  spice_text_kernels:
+    - ".tpc": "Text PCK kernel"
+    - ".tsc": "Text SCLK kernel"
+    - ".tls": "Text LSK kernel"
+    - ".tf": "Text FK kernel"
+    - ".ti": "Text IK kernel"
+    - ".to": "Text MK kernel"
+    - ".tbc": "Text CK kernel"
+    - ".tds": "Text DSK kernel"
+    - ".tfc": "Text FURNSH kernel"
+    - ".tbs": "Text SPK kernel"
+  
+  metadata:
+    - ".cmt": "Comment file with kernel metadata"
+    - ".ker": "Kernel database index file"
+    - ".conf": "Configuration file"
+  
+  documentation:
+    - "README*": "Project documentation"
+    - "LICENSE*": "Licensing information"
+    - "CHANGELOG*": "Version history"
