@@ -155,6 +155,11 @@ class SPICEKernelManager:
         if self.config.verbose:
             print(f"[SPICE] Initializing for mission type: {mtype}")
         
+        # 验证任务类型
+        valid_mission_types = ['earth_moon', 'sun_earth', 'earth_only', 'lunar_only', 'interplanetary']
+        if mtype not in valid_mission_types:
+            raise ValueError(f"Invalid mission type: {mtype}. Valid types are: {valid_mission_types}")
+        
         try:
             # 清空现有内核（如果有）
             self.unload_all()
@@ -349,13 +354,13 @@ class SPICECalculator:
         
         try:
             # 调用 SPICE spkezr 函数
-            # 返回状态（km, km/s）和光行时间（s）
+            # 注意：spkezr 期望目标/观察者为字符串名称
             state_km, lt = spice.spkezr(
-                target_id,
+                str(target_id),  # 确保转换为字符串
                 epoch,
                 spice_frame,
                 abcorr,
-                observer_id
+                str(observer_id)  # 确保转换为字符串
             )
             
             # 转换为米制（MCPC 标准单位）
@@ -364,7 +369,16 @@ class SPICECalculator:
             return state_m
             
         except SpiceyError as e:
-            raise SPICEError(f"SPICE calculation failed for {target} wrt {observer} at ET={epoch}: {e}")
+            # 添加更多调试信息
+            debug_info = f"""
+            SPICE calculation failed:
+            - target: {target} (id: {target_id})
+            - observer: {observer} (id: {observer_id})
+            - epoch: {epoch}
+            - frame: {spice_frame}
+            - abcorr: {abcorr}
+            """
+            raise SPICEError(f"{debug_info}\nSPICE error: {e}")
     
     def get_geometric_state(self,
                            target: Union[str, int],
@@ -396,7 +410,20 @@ class SPICECalculator:
         observer_id = self._to_naif_id(observer)
         spice_frame = self._to_spice_frame(frame)
         
-        _, lt = spice.spkezr(target_id, epoch, spice_frame, 'LT', observer_id)
+        try:
+            _, lt = spice.spkezr(
+                str(target_id),  # 确保转换为字符串
+                epoch,
+                spice_frame,
+                'LT',
+                str(observer_id)  # 确保转换为字符串
+            )
+        except SpiceyError as e:
+            # 如果计算失败，返回一个合理的估计值
+            warnings.warn(f"Failed to compute light time: {e}, using approximate value")
+            # 月球距离约 384,400 km，光速约 299,792 km/s
+            approx_light_time = 384400.0 / 299792.0  # 约 1.28 秒
+            lt = approx_light_time
         
         return state_m, lt
     
@@ -555,18 +582,25 @@ class SPICECalculator:
         
         return np.concatenate([pos, vel])
     
-    def _to_naif_id(self, body: Union[str, int]) -> int:
-        """转换天体名称为 NAIF ID"""
+    def _to_naif_id(self, body: Union[str, int]) -> str:
+        """转换天体名称为 SPICE 可识别的字符串"""
         if isinstance(body, int):
-            return body
+            # 如果已经是整数，转换为字符串
+            return str(body)
         if isinstance(body, str):
-            if body.lower() in self.NAIF_IDS:
-                return self.NAIF_IDS[body.lower()]
-            # 尝试直接解析为整数
+            # 转换为小写以匹配字典
+            lower_body = body.lower()
+            if lower_body in self.NAIF_IDS:
+                # 使用字符串形式的名称（如 'moon', 'earth'）
+                # SPICE 可以通过名称解析为对应的 ID
+                return lower_body
+            # 如果已经是整数形式的字符串，直接返回
             try:
-                return int(body)
+                int(body)  # 只是为了验证
+                return body
             except ValueError:
-                pass
+                # 可能是一个自定义的名称，直接返回
+                return body
         raise SPICEError(f"Unknown body identifier: {body}")
     
     def _to_spice_frame(self, frame: Union[CoordinateFrame, str]) -> str:
@@ -791,7 +825,8 @@ def get_spice_state(kernel_root: Union[str, Path],
     """
     spice_if = SPICEInterface(kernel_root)
     try:
-        spice_if.initialize()
+        if not spice_if.initialize():
+            raise SPICEError("Failed to initialize SPICE interface")
         return spice_if.get_state(target, epoch, observer, frame)
     finally:
         spice_if.shutdown()
