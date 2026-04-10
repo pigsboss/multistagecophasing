@@ -1069,3 +1069,217 @@ Operation Modes:
 
 if __name__ == "__main__":
     main()
+#!/usr/bin/env python3
+"""
+Directory Digest - 目录分析工具
+重构版本，整合了新的处理器架构和规则引擎
+"""
+
+import os
+import sys
+import argparse
+from pathlib import Path
+from typing import Optional
+
+# 导入基础模块
+sys.path.insert(0, str(Path(__file__).parent))
+from _directory_digest import (
+    DirectoryDigestBase,
+    ProcessingStrategy,
+    FileType,
+    OutputFormats,
+    parse_context_size,
+)
+from _directory_digest.processors import create_default_registry
+
+def main():
+    """主函数"""
+    # 创建解析器
+    parser = argparse.ArgumentParser(
+        prog='directory_digest',
+        description='分析目录结构并生成摘要报告',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  %(prog)s /path/to/directory                    # 基本分析
+  %(prog)s /path/to/directory --mode full        # 完整模式（包含文件内容）
+  %(prog)s /path/to/directory --mode sort        # 分类排序模式
+  %(prog)s /path/to/directory --format json      # 输出JSON格式
+  %(prog)s /path/to/directory --output report.md # 保存到指定文件
+  
+使用规则文件:
+  %(prog)s /path/to/directory --rules spice_kernels/.rules.yml
+  
+上下文管理:
+  %(prog)s /path/to/directory --context-size 64k # 设置上下文大小为64k tokens
+        """
+    )
+    
+    # 必需参数
+    parser.add_argument(
+        'directory',
+        type=str,
+        help='要分析的目录路径'
+    )
+    
+    # 模式选项
+    parser.add_argument(
+        '--mode', '-m',
+        type=str,
+        choices=['framework', 'full', 'sort'],
+        default='framework',
+        help='输出模式: framework(框架模式,默认), full(完整内容), sort(分类排序)'
+    )
+    
+    # 输出格式
+    parser.add_argument(
+        '--format', '-f',
+        type=str,
+        choices=['json', 'yaml', 'md', 'html', 'toml', 'txt'],
+        default='json',
+        help='输出格式: json, yaml, md, html, toml, txt'
+    )
+    
+    # 输出文件
+    parser.add_argument(
+        '--output', '-o',
+        type=str,
+        help='输出文件路径（默认：在目标目录中生成时间戳文件）'
+    )
+    
+    # 规则文件
+    parser.add_argument(
+        '--rules',
+        type=str,
+        help='规则文件路径（YAML格式）'
+    )
+    
+    # 上下文大小
+    parser.add_argument(
+        '--context-size',
+        type=str,
+        default='128k',
+        help='LLM上下文大小（例如: 128k, 64k, 32k）'
+    )
+    
+    # 最大文件大小
+    parser.add_argument(
+        '--max-file-size',
+        type=str,
+        help='最大文件大小限制（例如: 10M, 1G, 100K）'
+    )
+    
+    # 并行处理
+    parser.add_argument(
+        '--parallel',
+        action='store_true',
+        help='启用并行处理'
+    )
+    
+    # 详细输出
+    parser.add_argument(
+        '--verbose', '-v',
+        action='store_true',
+        help='显示详细处理信息'
+    )
+    
+    # 解析参数
+    args = parser.parse_args()
+    
+    # 验证目录
+    target_dir = Path(args.directory).resolve()
+    if not target_dir.exists():
+        print(f"错误: 目录不存在: {target_dir}", file=sys.stderr)
+        sys.exit(1)
+    if not target_dir.is_dir():
+        print(f"错误: 路径不是目录: {target_dir}", file=sys.stderr)
+        sys.exit(1)
+    
+    # 解析上下文大小
+    try:
+        context_size = parse_context_size(args.context_size)
+    except ValueError as e:
+        print(f"错误: 无效的上下文大小格式: {args.context_size}", file=sys.stderr)
+        print(f"      请使用如 '128k', '64k', '32k' 的格式", file=sys.stderr)
+        sys.exit(1)
+    
+    # 解析最大文件大小
+    max_file_size = None
+    if args.max_file_size:
+        try:
+            # 简单的解析逻辑
+            size_str = args.max_file_size.lower()
+            if size_str.endswith('k'):
+                max_file_size = int(size_str[:-1]) * 1024
+            elif size_str.endswith('m'):
+                max_file_size = int(size_str[:-1]) * 1024 * 1024
+            elif size_str.endswith('g'):
+                max_file_size = int(size_str[:-1]) * 1024 * 1024 * 1024
+            else:
+                max_file_size = int(size_str)
+        except ValueError:
+            print(f"警告: 无法解析最大文件大小: {args.max_file_size}", file=sys.stderr)
+            print(f"      请使用如 '10M', '1G', '100K' 的格式", file=sys.stderr)
+            max_file_size = 10 * 1024 * 1024 * 1024  # 默认10GB
+    
+    # 构建配置
+    config = {
+        'context_size': context_size,
+        'use_parallel': args.parallel,
+        'max_workers': os.cpu_count() or 4,
+    }
+    
+    if args.rules:
+        rules_path = Path(args.rules).resolve()
+        if rules_path.exists():
+            config['rules_file'] = rules_path
+        else:
+            print(f"警告: 规则文件不存在: {rules_path}", file=sys.stderr)
+    
+    if max_file_size:
+        config['max_file_size'] = max_file_size
+    
+    # 创建摘要生成器
+    try:
+        digest = DirectoryDigestBase(target_dir, config)
+        
+        # 根据模式生成摘要
+        if args.mode == 'sort':
+            output_data = digest._generate_sort_output()
+        else:
+            output_data = digest.create_basic_digest(args.mode)
+        
+        # 确定输出路径
+        output_path = None
+        if args.output:
+            output_path = Path(args.output).resolve()
+        
+        # 保存输出
+        saved_path = digest.save_output(
+            output_data, 
+            args.format, 
+            output_path,
+            args.mode
+        )
+        
+        if args.verbose:
+            print(f"处理完成: {saved_path}")
+            stats = output_data.get('metadata', {}).get('statistics', {})
+            print(f"文件统计:")
+            print(f"  总文件数: {stats.get('total_files', 0)}")
+            print(f"  关键文档: {stats.get('critical_docs', 0)}")
+            print(f"  参考文档: {stats.get('reference_docs', 0)}")
+            print(f"  源代码: {stats.get('source_code', 0)}")
+            print(f"  文本数据: {stats.get('text_data', 0)}")
+            print(f"  二进制文件: {stats.get('binary_files', 0)}")
+            print(f"  未知类型: {stats.get('unknown', 0)}")
+        
+    except Exception as e:
+        print(f"错误: 处理过程中发生异常: {e}", file=sys.stderr)
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == '__main__':
+    main()
