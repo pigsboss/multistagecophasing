@@ -796,7 +796,6 @@ Operation Modes:
   %(prog)s /data --max-size 100 --parallel --workers 8"""
     
     parser = argparse.ArgumentParser(
-        prog="directory_digest_refactor",
         description=description,
         formatter_class=FormatterClass,
         epilog=epilog,
