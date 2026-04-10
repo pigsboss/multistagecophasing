@@ -354,9 +354,8 @@ class DirectoryDigest(DirectoryDigestBase):
                     # 使用分类中的策略进行处理
                     processor.process(file_digest, content, mode, classification.strategy)
                     
-                    # 修复：对于full模式且策略为FULL_CONTENT，强制保存完整内容
-                    if mode == "full" and classification.strategy == ProcessingStrategy.FULL_CONTENT:
-                        file_digest.full_content = content  # ✅ 修正属性名
+                    # 注意：处理器已经在 process 方法中根据策略设置了完整内容
+                    # 不再需要在这里重复设置
                     
                     return
                 else:

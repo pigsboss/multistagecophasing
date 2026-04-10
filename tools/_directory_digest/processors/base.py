@@ -314,7 +314,7 @@ class SourceCodeProcessor(BaseFileProcessor):
         file_digest.source_code_analysis = analysis
         
         # 生成简单摘要（仅在非 FULL_CONTENT 策略时嵌入，避免与全文重复）
-        if strategy not in (ProcessingStrategy.METADATA_ONLY, ProcessingStrategy.FULL_CONTENT):
+        if strategy != ProcessingStrategy.FULL_CONTENT:
             summary = self._generate_code_summary(filepath, content, analysis)
             file_digest.human_readable_summary = summary
         
@@ -1206,6 +1206,7 @@ class FileProcessorRegistry:
             if processor and strategy != ProcessingStrategy.METADATA_ONLY:
                 content = self._read_file_content(filepath)
                 if content:
+                    # 调用处理器处理，处理器会根据策略决定是否设置完整内容和摘要
                     processor.process(file_digest, content, mode, strategy)
                     self._update_stats_by_processor(file_digest, processor)
                     return True
