@@ -173,9 +173,10 @@ class TextFileProcessor(BaseFileProcessor):
             if strategy == ProcessingStrategy.FULL_CONTENT:
                 file_digest.full_content = content
         
-        # 生成摘要（即使在 FULL_CONTENT 策略下也生成）
-        summary = self._generate_summary(filepath, content, strategy)
-        file_digest.human_readable_summary = summary
+        # 生成摘要（仅在非 FULL_CONTENT 策略时嵌入，避免信息冗余和Token浪费）
+        if strategy != ProcessingStrategy.FULL_CONTENT:
+            summary = self._generate_summary(filepath, content, strategy)
+            file_digest.human_readable_summary = summary
         
         return file_digest
     
@@ -308,12 +309,12 @@ class SourceCodeProcessor(BaseFileProcessor):
         if self._should_include_full_content(file_digest, mode):
             file_digest.full_content = content
         
-        # 分析代码
+        # 分析代码（结构分析对代码文件始终有价值）
         analysis = self._analyze_code(filepath, content, strategy)
         file_digest.source_code_analysis = analysis
         
-        # 也生成简单摘要
-        if strategy != ProcessingStrategy.METADATA_ONLY:
+        # 生成简单摘要（仅在非 FULL_CONTENT 策略时嵌入，避免与全文重复）
+        if strategy not in (ProcessingStrategy.METADATA_ONLY, ProcessingStrategy.FULL_CONTENT):
             summary = self._generate_code_summary(filepath, content, analysis)
             file_digest.human_readable_summary = summary
         
@@ -525,9 +526,10 @@ class ConfigFileProcessor(BaseFileProcessor):
         # 分析配置结构
         config_analysis = self._analyze_config(filepath, content, strategy)
         
-        # 生成摘要
-        summary = self._generate_config_summary(filepath, content, config_analysis, strategy)
-        file_digest.human_readable_summary = summary
+        # 生成摘要（仅在非 FULL_CONTENT 策略时嵌入，全文已包含完整信息）
+        if strategy != ProcessingStrategy.FULL_CONTENT:
+            summary = self._generate_config_summary(filepath, content, config_analysis, strategy)
+            file_digest.human_readable_summary = summary
         
         return file_digest
     
