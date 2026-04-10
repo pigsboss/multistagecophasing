@@ -45,6 +45,13 @@ class ProcessingStrategy(Enum):
     METADATA_ONLY = "metadata_only"
 
 
+class OutputMode(Enum):
+    """输出模式枚举"""
+    SORT = "sort"
+    FRAMEWORK = "framework"
+    FULL = "full"
+
+
 class FileType(Enum):
     """文件类型枚举"""
     CRITICAL_DOCS = "critical_docs"
@@ -167,17 +174,40 @@ class FileDigest:
     full_content: Optional[str] = None
     human_readable_summary: Optional[Any] = None
     source_code_analysis: Optional[Any] = None
+    # 添加：记录实际使用的处理策略
+    actual_strategy: Optional[str] = None
     
     def to_dict(self, mode: str = "framework") -> Dict:
         """转换为字典"""
         result = {"metadata": self.metadata.to_dict()}
-        if mode == "full" and self.full_content:
+        
+        # 记录实际使用的策略
+        if self.actual_strategy:
+            result["actual_processing_strategy"] = self.actual_strategy
+        
+        # 根据策略决定输出哪些内容
+        strategy = self.metadata.processing_strategy
+        
+        if strategy == ProcessingStrategy.FULL_CONTENT and self.full_content:
+            # FULL_CONTENT策略：只输出完整内容
             result["full_content"] = self.full_content
-        # 无条件包含摘要（如果存在）
-        if self.human_readable_summary:
+            
+        elif strategy == ProcessingStrategy.SUMMARY_ONLY and self.human_readable_summary:
+            # SUMMARY_ONLY策略：只输出摘要
             result["summary"] = getattr(self.human_readable_summary, 'to_dict', lambda: {})()
-        if self.source_code_analysis:
-            result["source_analysis"] = getattr(self.source_code_analysis, 'to_dict', lambda: {})()
+            
+        elif strategy == ProcessingStrategy.CODE_SKELETON:
+            # CODE_SKELETON策略：输出源代码分析
+            if self.source_code_analysis:
+                result["source_analysis"] = getattr(self.source_code_analysis, 'to_dict', lambda: {})()
+            if self.human_readable_summary:
+                result["summary"] = getattr(self.human_readable_summary, 'to_dict', lambda: {})()
+                
+        elif strategy in [ProcessingStrategy.STRUCTURE_EXTRACT, ProcessingStrategy.HEADER_WITH_STATS]:
+            # 结构提取或头部统计：输出摘要
+            if self.human_readable_summary:
+                result["summary"] = getattr(self.human_readable_summary, 'to_dict', lambda: {})()
+        
         return result
 
 
@@ -195,6 +225,89 @@ class DirectoryStructure:
             "files": [f.to_dict(mode) for f in self.files],
             "subdirectories": {name: d.to_dict(mode) for name, d in self.subdirectories.items()}
         }
+
+
+# ==================== 初始嵌入策略配置 ====================
+
+class InitialEmbeddingStrategy:
+    """初始嵌入策略配置"""
+    
+    @staticmethod
+    def get_initial_strategy(output_mode: OutputMode, file_type: FileType) -> ProcessingStrategy:
+        """根据输出模式和文件类型获取初始嵌入策略"""
+        if output_mode == OutputMode.SORT:
+            # sort模式：所有文件只输出基本metadata
+            return ProcessingStrategy.METADATA_ONLY
+            
+        elif output_mode == OutputMode.FRAMEWORK:
+            # framework模式
+            if file_type == FileType.CRITICAL_DOCS:
+                return ProcessingStrategy.FULL_CONTENT
+            elif file_type == FileType.REFERENCE_DOCS:
+                return ProcessingStrategy.SUMMARY_ONLY  # 极简摘要
+            elif file_type == FileType.SOURCE_CODE:
+                return ProcessingStrategy.CODE_SKELETON
+            elif file_type == FileType.TEXT_DATA:
+                return ProcessingStrategy.HEADER_WITH_STATS
+            else:  # BINARY_FILES, UNKNOWN
+                return ProcessingStrategy.METADATA_ONLY
+                
+        elif output_mode == OutputMode.FULL:
+            # full模式
+            if file_type in [FileType.CRITICAL_DOCS, FileType.REFERENCE_DOCS, 
+                           FileType.SOURCE_CODE, FileType.TEXT_DATA]:
+                return ProcessingStrategy.FULL_CONTENT
+            else:  # BINARY_FILES, UNKNOWN
+                return ProcessingStrategy.METADATA_ONLY
+        
+        return ProcessingStrategy.METADATA_ONLY
+    
+    @staticmethod
+    def get_priority(file_type: FileType) -> int:
+        """获取文件类型优先级（数值越小优先级越高）"""
+        priority_map = {
+            FileType.CRITICAL_DOCS: 1,      # 最高优先级
+            FileType.REFERENCE_DOCS: 2,     # 次高优先级
+            FileType.TEXT_DATA: 3,          # 中等优先级
+            FileType.SOURCE_CODE: 4,        # 较低优先级
+            FileType.BINARY_FILES: 5,       # 不调整（已是最低）
+            FileType.UNKNOWN: 5             # 不调整（已是最低）
+        }
+        return priority_map.get(file_type, 5)
+    
+    @staticmethod
+    def get_strategy_hierarchy(file_type: FileType) -> List[ProcessingStrategy]:
+        """获取策略降级序列（从高到低）"""
+        from typing import List
+        
+        if file_type == FileType.CRITICAL_DOCS:
+            return [
+                ProcessingStrategy.FULL_CONTENT,
+                ProcessingStrategy.SUMMARY_ONLY,
+                ProcessingStrategy.METADATA_ONLY
+            ]
+        elif file_type == FileType.REFERENCE_DOCS:
+            return [
+                ProcessingStrategy.FULL_CONTENT,
+                ProcessingStrategy.SUMMARY_ONLY,
+                ProcessingStrategy.HEADER_WITH_STATS,
+                ProcessingStrategy.METADATA_ONLY
+            ]
+        elif file_type == FileType.SOURCE_CODE:
+            return [
+                ProcessingStrategy.FULL_CONTENT,
+                ProcessingStrategy.CODE_SKELETON,
+                ProcessingStrategy.METADATA_ONLY
+            ]
+        elif file_type == FileType.TEXT_DATA:
+            return [
+                ProcessingStrategy.FULL_CONTENT,
+                ProcessingStrategy.STRUCTURE_EXTRACT,
+                ProcessingStrategy.HEADER_WITH_STATS,
+                ProcessingStrategy.METADATA_ONLY
+            ]
+        else:  # BINARY_FILES, UNKNOWN
+            return [ProcessingStrategy.METADATA_ONLY]
 
 
 # ==================== 策略配置映射 ====================

@@ -168,34 +168,59 @@ class TextFileProcessor(BaseFileProcessor):
         
         filepath = file_digest.metadata.path
         
-        # 处理完整内容：对于 FULL_CONTENT 策略，总是设置完整内容（如果文件大小允许）
-        if strategy == ProcessingStrategy.FULL_CONTENT and file_digest.metadata.size <= self.max_full_content_size:
-            file_digest.full_content = content
-        # 对于其他策略，仅在 full 模式下且文件大小允许时设置完整内容
-        elif self._should_include_full_content(file_digest, mode):
-            file_digest.full_content = content
-        
-        # 生成摘要：对于 FULL_CONTENT 策略，生成最小化摘要
+        # 根据策略决定输出内容，确保不冗余
         if strategy == ProcessingStrategy.FULL_CONTENT:
-            # 为 FULL_CONTENT 策略生成一个最小化的摘要
-            lines = content.split('\n')
-            summary = HumanReadableSummary(
-                title=self._extract_title(filepath, lines),
-                line_count=len(lines),
-                word_count=len(re.findall(r'\b[\w\u4e00-\u9fff]+\b', content)),
-                character_count=len(content),
-                encoding=self._detect_encoding(content),
-                first_lines=lines[:min(5, len(lines))],
-                last_lines=[],
-                summary=f"File uses FULL_CONTENT strategy. Complete content ({len(content)} characters) is included."
-            )
+            # FULL_CONTENT策略：只嵌入全文，不生成摘要
+            if file_digest.metadata.size <= self.max_full_content_size:
+                file_digest.full_content = content
+            # 不设置human_readable_summary
+            return file_digest
+            
+        elif strategy == ProcessingStrategy.SUMMARY_ONLY:
+            # SUMMARY_ONLY策略：只生成极简摘要，不嵌入全文
+            summary = self._generate_minimal_summary(filepath, content)
             file_digest.human_readable_summary = summary
+            return file_digest
+            
+        elif strategy == ProcessingStrategy.HEADER_WITH_STATS:
+            # HEADER_WITH_STATS策略：生成头部信息和统计
+            summary = self._generate_header_stats_summary(filepath, content)
+            file_digest.human_readable_summary = summary
+            return file_digest
+            
         else:
-            # 对于其他策略，生成正常摘要
-            summary = self._generate_summary(filepath, content, strategy)
+            # 其他策略，默认生成摘要
+            summary = self._generate_minimal_summary(filepath, content)
             file_digest.human_readable_summary = summary
-        
-        return file_digest
+            return file_digest
+    
+    def _generate_minimal_summary(self, filepath: Path, content: str) -> HumanReadableSummary:
+        """生成极简摘要"""
+        lines = content.split('\n')
+        return HumanReadableSummary(
+            title=self._extract_title(filepath, lines),
+            line_count=len(lines),
+            word_count=len(re.findall(r'\b[\w\u4e00-\u9fff]+\b', content)),
+            character_count=len(content),
+            encoding=self._detect_encoding(content),
+            first_lines=lines[:min(3, len(lines))],
+            last_lines=[],
+            summary=f"Minimal summary: {len(lines)} lines, {len(content)} characters"
+        )
+    
+    def _generate_header_stats_summary(self, filepath: Path, content: str) -> HumanReadableSummary:
+        """生成头部信息和统计摘要"""
+        lines = content.split('\n')
+        return HumanReadableSummary(
+            title=self._extract_title(filepath, lines),
+            line_count=len(lines),
+            word_count=len(re.findall(r'\b[\w\u4e00-\u9fff]+\b', content)),
+            character_count=len(content),
+            encoding=self._detect_encoding(content),
+            first_lines=lines[:min(10, len(lines))],
+            last_lines=[],
+            summary=f"Header with stats: {len(lines)} lines total"
+        )
     
     def _generate_summary(self, filepath: Path, content: str, 
                          strategy: ProcessingStrategy) -> HumanReadableSummary:

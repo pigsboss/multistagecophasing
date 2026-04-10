@@ -29,6 +29,8 @@ from tools._directory_digest import (
     DirectoryDigestBase,
     STRATEGY_CONFIGS,
     FileClassification,
+    OutputMode,
+    InitialEmbeddingStrategy,
 )
 
 # Import processor registry
@@ -114,6 +116,9 @@ class DirectoryDigest(DirectoryDigestBase):
         else:
             self.human_summarizer = None
             self.source_analyzer = None
+            
+        # 添加两阶段策略相关的状态
+        self.final_strategies = {}  # 存储最终确定的策略
     
     def _classify_file(self, filepath: Path) -> FileClassification:
         """
@@ -264,7 +269,7 @@ class DirectoryDigest(DirectoryDigestBase):
     
     def create_digest(self, mode: str = "framework") -> Dict:
         """
-        创建完整目录摘要
+        创建完整目录摘要 - 使用两阶段策略
         
         Args:
             mode: 输出模式，"framework"、"full" 或 "sort"
@@ -272,57 +277,223 @@ class DirectoryDigest(DirectoryDigestBase):
         import time
         start_time = time.time()
         
-        # 构建目录结构（自动使用基类方法）
+        # 构建目录结构
         self.structure = self._build_directory_structure(self.root)
         
         # 收集所有文件
         all_files = self._collect_all_files_flat()
         
-        # 第一阶段：统一分类所有文件
-        classified_files = []
+        # 第一阶段：制定初始策略
+        initial_strategies = {}
         for file_digest in all_files:
-            classification = self._classify_file(file_digest.metadata.path)
-            # 将分类结果写入元数据，供处理器使用
-            file_digest.metadata.file_type = classification.file_type
-            file_digest.metadata.processing_strategy = classification.strategy
-            file_digest.metadata.force_binary = classification.force_binary
-            classified_files.append((file_digest, classification))
+            # 检测文件类型
+            file_type = self.file_type_detector.detect(file_digest.metadata.path)
+            file_digest.metadata.file_type = file_type
             
-            # 更新统计
-            type_stat_key = classification.file_type.value
+            # 将字符串模式转换为枚举
+            try:
+                output_mode_enum = OutputMode(mode)
+            except ValueError:
+                # 如果mode不是有效的OutputMode，使用FRAMEWORK作为默认
+                output_mode_enum = OutputMode.FRAMEWORK
+            
+            # 获取初始策略
+            initial_strategy = InitialEmbeddingStrategy.get_initial_strategy(
+                output_mode_enum, file_type
+            )
+            
+            # 将策略写入元数据
+            file_digest.metadata.processing_strategy = initial_strategy
+            initial_strategies[file_digest] = initial_strategy
+            
+            # 更新统计和计算哈希
+            type_stat_key = file_type.value
             if type_stat_key in self.stats:
                 self.stats[type_stat_key] += 1
-            
-            # 计算哈希值
             self._calculate_hashes(file_digest)
         
-        # 第二阶段：根据模式处理
+        # 第二阶段：根据token约束调整策略
+        adjusted_strategies = self._adjust_strategies_by_token_limit(
+            initial_strategies, mode
+        )
+        
+        # 存储最终策略
+        self.final_strategies = adjusted_strategies
+        
+        # 第三阶段：执行最终策略
+        for file_digest, final_strategy in adjusted_strategies.items():
+            # 更新元数据中的策略
+            file_digest.metadata.processing_strategy = final_strategy
+            
+            # 执行处理
+            self._process_with_final_strategy(file_digest, final_strategy, mode)
+        
+        # 更新处理时间
+        self.stats['processing_time'] = time.time() - start_time
+        
+        # 根据模式生成输出
         if mode == "sort":
-            # sort模式只需基础元数据，使用已分类的类型
-            self.stats['processing_time'] = time.time() - start_time
-            return self._generate_sort_output_unified(classified_files)
+            return self._generate_sort_output_unified(all_files)
         else:
-            # framework/full模式使用处理器注册表进行深度处理
-            # 但需要先修改处理器注册表以使用已分类的结果
-            
-            # 临时解决方案：将分类结果传递给处理器注册表
-            for file_digest, classification in classified_files:
-                # 设置处理策略到元数据中，供处理器使用
-                file_digest.metadata.processing_strategy = classification.strategy
-                file_digest.metadata.force_binary = classification.force_binary
-            
-            # 使用修改后的处理器注册表
-            self._process_with_classified_files(classified_files, mode)
-            
-            # 更新统计信息
-            self.stats['processing_time'] = time.time() - start_time
-            
             return self._generate_output(mode)
     
-    def _process_with_classified_files(self, classified_files, mode: str):
-        """使用已分类的文件列表进行处理"""
-        for file_digest, classification in classified_files:
-            self._process_single_file_with_classification(file_digest, classification, mode)
+    def _adjust_strategies_by_token_limit(self, initial_strategies: dict, mode: str) -> dict:
+        """
+        根据token资源约束调整策略
+        
+        Args:
+            initial_strategies: 初始策略映射
+            mode: 输出模式
+            
+        Returns:
+            调整后的策略映射
+        """
+        # 如果没有上下文管理器，直接使用初始策略
+        if not self.context_manager:
+            return initial_strategies
+        
+        # 估算总token消耗
+        total_tokens = 0
+        token_estimates = {}
+        
+        for file_digest, strategy in initial_strategies.items():
+            if self.rule_engine:
+                estimated = self.rule_engine.estimate_token_usage(
+                    file_digest.metadata.path, strategy
+                )
+            else:
+                estimated = self._estimate_tokens(
+                    file_digest.metadata.path, strategy
+                )
+            token_estimates[file_digest] = estimated
+            total_tokens += estimated
+        
+        # 检查是否超出限制
+        available_tokens = self.context_manager.available_tokens
+        if total_tokens <= available_tokens:
+            return initial_strategies
+        
+        # 如果超出限制，按优先级降级策略
+        import sys
+        print(f"Warning: Estimated tokens ({total_tokens:,}) exceed available ({available_tokens:,}). Adjusting strategies...", 
+              file=sys.stderr)
+        
+        # 准备调整：按优先级排序文件
+        files_by_priority = []
+        for file_digest in initial_strategies.keys():
+            file_type = file_digest.metadata.file_type
+            priority = InitialEmbeddingStrategy.get_priority(file_type)
+            files_by_priority.append((priority, file_type, file_digest))
+        
+        # 按优先级排序（优先级低的先调整）
+        files_by_priority.sort(key=lambda x: (-x[0], x[1].value))
+        
+        adjusted_strategies = initial_strategies.copy()
+        
+        # 逐步降级策略直到满足token限制
+        while total_tokens > available_tokens and files_by_priority:
+            priority, file_type, file_digest = files_by_priority.pop(0)
+            
+            current_strategy = adjusted_strategies[file_digest]
+            current_estimate = token_estimates[file_digest]
+            
+            # 获取策略降级序列
+            strategy_hierarchy = InitialEmbeddingStrategy.get_strategy_hierarchy(file_type)
+            
+            try:
+                current_index = strategy_hierarchy.index(current_strategy)
+                if current_index + 1 < len(strategy_hierarchy):
+                    # 降级到下一个策略
+                    new_strategy = strategy_hierarchy[current_index + 1]
+                    
+                    # 重新估算token
+                    if self.rule_engine:
+                        new_estimate = self.rule_engine.estimate_token_usage(
+                            file_digest.metadata.path, new_strategy
+                        )
+                    else:
+                        new_estimate = self._estimate_tokens(
+                            file_digest.metadata.path, new_strategy
+                        )
+                    
+                    # 更新总token数
+                    total_tokens = total_tokens - current_estimate + new_estimate
+                    
+                    # 更新策略和估算
+                    adjusted_strategies[file_digest] = new_strategy
+                    token_estimates[file_digest] = new_estimate
+                    
+                    print(f"  - Downgraded {file_digest.metadata.path.name} from {current_strategy.value} to {new_strategy.value}", 
+                          file=sys.stderr)
+                else:
+                    # 已经是最后一级，无法再降级
+                    continue
+                    
+            except ValueError:
+                # 当前策略不在降级序列中（如METADATA_ONLY）
+                continue
+        
+        if total_tokens > available_tokens:
+            print(f"Warning: Could not fit within token limit even after downgrading. "
+                  f"Final estimate: {total_tokens:,} tokens, available: {available_tokens:,}", 
+                  file=sys.stderr)
+        
+        return adjusted_strategies
+    
+    def _process_with_final_strategy(self, file_digest: FileDigest, 
+                                   final_strategy: ProcessingStrategy, 
+                                   mode: str):
+        """
+        使用最终确定的策略处理文件
+        
+        Args:
+            file_digest: 文件摘要对象
+            final_strategy: 最终策略
+            mode: 输出模式
+        """
+        try:
+            filepath = file_digest.metadata.path
+            
+            # 对于METADATA_ONLY策略，只处理元数据
+            if final_strategy == ProcessingStrategy.METADATA_ONLY:
+                # 哈希值已在第一阶段计算
+                file_digest.metadata.file_type = FileType.BINARY_FILES
+                file_digest.actual_strategy = final_strategy.value
+                return
+            
+            # 获取处理器
+            processor = self.processor_registry.get_processor(file_digest)
+            if not processor:
+                # 无匹配处理器，作为二进制处理
+                file_digest.metadata.file_type = FileType.BINARY_FILES
+                file_digest.actual_strategy = "NO_PROCESSOR"
+                return
+            
+            # 读取文件内容
+            content = self._read_file_content(filepath)
+            if not content:
+                # 无法读取内容，作为二进制处理
+                file_digest.metadata.file_type = FileType.BINARY_FILES
+                file_digest.actual_strategy = "NO_CONTENT"
+                return
+            
+            # 清除之前可能设置的内容（确保不冗余）
+            file_digest.full_content = None
+            file_digest.human_readable_summary = None
+            file_digest.source_code_analysis = None
+            
+            # 调用处理器处理，传入最终策略
+            processor.process(file_digest, content, mode, final_strategy)
+            
+            # 记录实际使用的策略
+            file_digest.actual_strategy = final_strategy.value
+            
+        except Exception as e:
+            import sys
+            print(f"Warning: Error processing file {file_digest.metadata.path}: {e}", file=sys.stderr)
+            # 出错时作为二进制文件处理
+            file_digest.metadata.file_type = FileType.BINARY_FILES
+            file_digest.actual_strategy = "ERROR"
     
     def _process_single_file_with_classification(self, file_digest: FileDigest,
                                                 classification: FileClassification,
@@ -414,12 +585,12 @@ class DirectoryDigest(DirectoryDigestBase):
         
         return self.context_manager.allocate(classification.estimated_tokens, file_record)
     
-    def _generate_sort_output_unified(self, classified_files) -> Dict:
+    def _generate_sort_output_unified(self, all_files) -> Dict:
         """
-        生成分类排序输出（使用已分类的文件）
+        生成分类排序输出（使用所有文件）
         
         Args:
-            classified_files: 已分类的文件列表，每个元素为(file_digest, classification)
+            all_files: 所有文件摘要列表
             
         Returns:
             Dict: 分类报告
@@ -439,7 +610,7 @@ class DirectoryDigest(DirectoryDigestBase):
         medium_files = []     # 100KB - 1MB
         small_files = []      # < 100KB
         
-        for file_digest, classification in classified_files:
+        for file_digest in all_files:
             file_type = file_digest.metadata.file_type.value
             file_info = {
                 'path': str(file_digest.metadata.path.relative_to(self.root)),
@@ -448,8 +619,8 @@ class DirectoryDigest(DirectoryDigestBase):
                 'modified': file_digest.metadata.modified_time.isoformat() if file_digest.metadata.modified_time else 'unknown',
                 'type': file_type,
                 'is_binary': file_type == FileType.BINARY_FILES.value,
-                'strategy': classification.strategy.value,
-                'estimated_tokens': classification.estimated_tokens
+                'strategy': file_digest.metadata.processing_strategy.value if file_digest.metadata.processing_strategy else 'unknown',
+                'actual_strategy': file_digest.actual_strategy if hasattr(file_digest, 'actual_strategy') else 'unknown'
             }
             
             if file_type in by_type:
@@ -553,6 +724,18 @@ class DirectoryDigest(DirectoryDigestBase):
             },
             "structure": self.structure.to_dict(mode)
         }
+        
+        # 添加策略使用统计
+        if hasattr(self, 'final_strategies') and self.final_strategies:
+            strategy_counts = {}
+            for file_digest, strategy in self.final_strategies.items():
+                strategy_name = strategy.value
+                strategy_counts[strategy_name] = strategy_counts.get(strategy_name, 0) + 1
+            
+            output["strategy_statistics"] = {
+                "total_files": len(self.final_strategies),
+                "by_strategy": strategy_counts
+            }
         
         if self.context_manager.file_records:
             output["context_allocation"] = {
