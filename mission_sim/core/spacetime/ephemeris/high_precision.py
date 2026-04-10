@@ -189,7 +189,8 @@ class HighPrecisionEphemeris(Ephemeris):
             super().__init__(times, states, frame)
         else:
             # 不提供数据时，创建一个空的基类实例（仅用于接口兼容）
-            super().__init__([0.0], np.zeros((1, 6)), frame or CoordinateFrame.J2000_ECI)
+            # 使用2个点以满足CubicSpline的要求（需要≥2个点）
+            super().__init__([0.0, 1.0], np.zeros((2, 6)), frame or CoordinateFrame.J2000_ECI)
         
         self.config = config or EphemerisConfig()
         self.verbose = self.config.verbose

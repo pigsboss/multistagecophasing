@@ -31,8 +31,11 @@ import os
 # 尝试导入 spiceypy，若失败则标记为不可用
 try:
     import spiceypy as spice
+    from spiceypy.utils.exceptions import SpiceyError
     SPICE_AVAILABLE = True
 except ImportError:
+    spice = None
+    SpiceyError = None
     SPICE_AVAILABLE = False
     warnings.warn("spiceypy not installed. SPICE functionality will be disabled.")
 
@@ -360,7 +363,7 @@ class SPICECalculator:
             
             return state_m
             
-        except spice.SpiceError as e:
+        except SpiceyError as e:
             raise SPICEError(f"SPICE calculation failed for {target} wrt {observer} at ET={epoch}: {e}")
     
     def get_geometric_state(self,
@@ -418,7 +421,7 @@ class SPICECalculator:
         try:
             rot_mat = spice.pxform(from_str, to_str, epoch)
             return np.array(rot_mat)
-        except spice.SpiceError as e:
+        except SpiceyError as e:
             raise SPICEError(f"Failed to get rotation matrix from {from_str} to {to_str}: {e}")
     
     def transform_state(self,
@@ -463,13 +466,13 @@ class SPICECalculator:
             # MOON_PA 是 Principal Axis 坐标系（物理主轴）
             rot_mat = spice.pxform('J2000', 'MOON_PA', epoch)
             return np.array(rot_mat)
-        except spice.SpiceError as e:
+        except SpiceyError as e:
             # 如果 MOON_PA 未定义，尝试 IAU_MOON
             try:
                 rot_mat = spice.pxform('J2000', 'IAU_MOON', epoch)
                 warnings.warn("MOON_PA not available, using IAU_MOON instead")
                 return np.array(rot_mat)
-            except:
+            except SpiceyError:
                 raise SPICEError(f"Failed to get moon libration matrix: {e}")
     
     def utc_to_et(self, utc: str) -> float:
@@ -484,7 +487,7 @@ class SPICECalculator:
         """
         try:
             return spice.utc2et(utc)
-        except spice.SpiceError as e:
+        except SpiceyError as e:
             raise SPICEError(f"Failed to convert UTC '{utc}' to ET: {e}")
     
     def et_to_utc(self, et: float, format: str = 'ISOC') -> str:
@@ -500,7 +503,7 @@ class SPICECalculator:
         """
         try:
             return spice.et2utc(et, format, 6)  # 6位小数精度
-        except spice.SpiceError as e:
+        except SpiceyError as e:
             raise SPICEError(f"Failed to convert ET {et} to UTC: {e}")
     
     def get_lagrange_point_state(self,
