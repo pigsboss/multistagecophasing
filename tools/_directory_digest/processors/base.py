@@ -689,13 +689,14 @@ class DataFileProcessor(BaseFileProcessor):
         
         filepath = file_digest.metadata.path
         
-        # 数据文件一般不包含完整内容（除非特别小）
-        if mode == "full" and file_digest.metadata.size < 100 * 1024:  # <100KB
+        # 处理完整内容（仅在 FULL_CONTENT 策略且模式为 full 时）
+        if mode == "full" and strategy == ProcessingStrategy.FULL_CONTENT:
             file_digest.full_content = content
         
-        # 生成数据摘要
-        summary = self._generate_data_summary(filepath, content, strategy)
-        file_digest.human_readable_summary = summary
+        # 生成数据摘要（仅在非 FULL_CONTENT 策略时嵌入，避免信息冗余）
+        if strategy != ProcessingStrategy.FULL_CONTENT:
+            summary = self._generate_data_summary(filepath, content, strategy)
+            file_digest.human_readable_summary = summary
         
         return file_digest
     
