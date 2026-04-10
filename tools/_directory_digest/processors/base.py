@@ -928,13 +928,15 @@ class FileProcessorRegistry:
                 return processor
         return None
     
-    def process_file(self, file_digest: FileDigest, mode: str = "framework") -> bool:
+    def process_file(self, file_digest: FileDigest, mode: str = "framework", 
+                    strategy: Optional[ProcessingStrategy] = None) -> bool:
         """
         处理单个文件 - 整合原 _process_file 逻辑
         
         Args:
             file_digest: 文件摘要对象
             mode: 输出模式 ("full", "framework", "sort")
+            strategy: 指定的处理策略（可选，默认从元数据或重新分类获取）
             
         Returns:
             bool: 处理是否成功
@@ -944,12 +946,27 @@ class FileProcessorRegistry:
         filepath = file_digest.metadata.path
         
         try:
-            # 1. 获取处理策略（使用规则引擎）
-            if self.rule_engine:
-                strategy, force_binary = self.rule_engine.classify_file(filepath)
+            # 1. 获取处理策略（优先使用传入的参数或元数据中的策略）
+            if strategy is not None:
+                # 使用传入的策略
+                pass
+            elif file_digest.metadata.processing_strategy is not None:
+                # 使用元数据中已设置的策略
+                strategy = file_digest.metadata.processing_strategy
+                # 重新获取force_binary（从元数据或重新分类）
+                if self.rule_engine:
+                    _, force_binary = self.rule_engine.classify_file(filepath)
+                else:
+                    _, force_binary = self._default_classify(file_digest)
             else:
-                # 无规则引擎时的默认策略
-                strategy, force_binary = self._default_classify(file_digest)
+                # 重新分类（原有逻辑）
+                if self.rule_engine:
+                    strategy, force_binary = self.rule_engine.classify_file(filepath)
+                else:
+                    strategy, force_binary = self._default_classify(file_digest)
+            
+            # 强制二进制标记优先从元数据获取
+            force_binary = getattr(file_digest.metadata, 'force_binary', False)
             
             # 2. 估算token消耗
             if self.rule_engine:
@@ -963,11 +980,15 @@ class FileProcessorRegistry:
                 self._process_as_binary(file_digest, mode)
                 return True
             
-            # 4. 检查上下文限制（Token分配）
-            if self.context_manager:
-                if not self._check_and_allocate_context(estimated_tokens, file_digest, strategy):
+            # 4. 检查上下文限制（Token分配）- 仅当不是 full 模式时进行降级
+            if self.context_manager and mode != "full":
+                allocation_result = self._check_and_allocate_context(estimated_tokens, file_digest, strategy)
+                if not allocation_result[0]:  # 解构元组检查结果
                     self._update_stats('skipped_by_context')
                     return False
+                # 使用可能降级后的策略
+                strategy = allocation_result[1]
+                estimated_tokens = allocation_result[2]
             
             # 5. 根据策略处理文件
             if force_binary or strategy == ProcessingStrategy.METADATA_ONLY:
@@ -985,14 +1006,14 @@ class FileProcessorRegistry:
                         self._update_stats('binary_files')
                         return True
                     
-                    # 执行处理
+                    # 执行处理（传入策略确保一致性）
                     processor.process(file_digest, content, mode, strategy)
                     
                     # 根据文件类型更新统计
                     self._update_stats_by_processor(file_digest, processor)
                     
-                    # 在 full 模式下保存完整内容
-                    if mode == "full" and strategy == ProcessingStrategy.FULL_CONTENT:
+                    # 在 full 模式下保存完整内容（如果处理器未设置）
+                    if mode == "full" and strategy == ProcessingStrategy.FULL_CONTENT and not file_digest.full_content:
                         file_digest.full_content = content
                 else:
                     # 无匹配处理器，作为二进制处理
@@ -1004,7 +1025,6 @@ class FileProcessorRegistry:
         except Exception as e:
             import sys
             print(f"Warning: Error processing file {filepath}: {e}", file=sys.stderr)
-            # 出错时作为二进制文件处理，确保不中断流程
             try:
                 self._process_as_binary(file_digest, mode)
                 self._update_stats('binary_files')
@@ -1014,8 +1034,13 @@ class FileProcessorRegistry:
     
     def _check_and_allocate_context(self, estimated_tokens: int, 
                                    file_digest: FileDigest, 
-                                   strategy: ProcessingStrategy) -> bool:
-        """检查并分配上下文Token，支持策略降级"""
+                                   strategy: ProcessingStrategy) -> Tuple[bool, ProcessingStrategy, int]:
+        """
+        检查并分配上下文Token，支持策略降级
+        
+        Returns:
+            Tuple[bool, ProcessingStrategy, int]: (是否成功, 最终策略, 最终估算tokens)
+        """
         # 尝试分配Token
         if not self.context_manager.can_allocate(estimated_tokens):
             # Token不足，尝试降级策略
@@ -1026,7 +1051,7 @@ class FileProcessorRegistry:
                 downgraded_tokens = self._estimate_tokens(file_digest, downgraded_strategy)
             
             if not self.context_manager.can_allocate(downgraded_tokens):
-                return False
+                return False, strategy, estimated_tokens
             
             # 使用降级后的策略
             strategy = downgraded_strategy
@@ -1040,7 +1065,8 @@ class FileProcessorRegistry:
             "size": file_digest.metadata.size,
         }
         
-        return self.context_manager.allocate(estimated_tokens, file_record)
+        success = self.context_manager.allocate(estimated_tokens, file_record)
+        return success, strategy, estimated_tokens
     
     def _process_as_binary(self, file_digest: FileDigest, mode: str) -> bool:
         """处理为二进制文件 - 仅计算哈希"""

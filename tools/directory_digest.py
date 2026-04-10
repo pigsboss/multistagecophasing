@@ -102,11 +102,17 @@ class DirectoryDigest(DirectoryDigestBase):
         super().__init__(*args, **kwargs)
         
         # 初始化处理器注册表（新的核心组件）
+        processor_config = self.config.copy()
+        # 在full模式下增加全文大小限制
+        if mode == "full":
+            # full模式下增加全文大小限制到100MB或根据配置
+            processor_config['max_full_content_size'] = processor_config.get('max_full_content_size', 100 * 1024 * 1024)
+        
         self.processor_registry = create_default_registry(
             rule_engine=self.rule_engine,
             context_manager=self.context_manager,
             stats=self.stats,
-            config=self.config
+            config=processor_config
         )
         
         # 保留高级分析器组件（如果语义分析可用）
@@ -276,6 +282,21 @@ class DirectoryDigest(DirectoryDigestBase):
         """
         import time
         start_time = time.time()
+        
+        # 重新配置处理器注册表以适应当前模式
+        processor_config = self.config.copy()
+        # 在full模式下增加全文大小限制
+        if mode == "full":
+            # full模式下增加全文大小限制到100MB或根据配置
+            processor_config['max_full_content_size'] = processor_config.get('max_full_content_size', 100 * 1024 * 1024)
+        
+        # 重新创建处理器注册表
+        self.processor_registry = create_default_registry(
+            rule_engine=self.rule_engine,
+            context_manager=self.context_manager,
+            stats=self.stats,
+            config=processor_config
+        )
         
         # 构建目录结构
         self.structure = self._build_directory_structure(self.root)
@@ -475,13 +496,11 @@ class DirectoryDigest(DirectoryDigestBase):
             # 对于METADATA_ONLY策略，只处理元数据
             if final_strategy == ProcessingStrategy.METADATA_ONLY:
                 # 哈希值已在第一阶段计算
-                # 关键修复：不要修改file_type，保留原始分类（关键文档、源代码等）以供sort模式正确分类
                 file_digest.actual_strategy = final_strategy.value
                 return
             
-            # 使用处理器注册表处理文件，确保统计信息正确更新
-            # 这比直接调用processor.process()更好，因为它会更新file_type统计
-            success = self.processor_registry.process_file(file_digest, mode)
+            # 使用处理器注册表处理文件，传入确定的策略
+            success = self.processor_registry.process_file(file_digest, mode, strategy=final_strategy)
             
             if success:
                 # 记录实际使用的策略
