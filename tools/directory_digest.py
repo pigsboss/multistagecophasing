@@ -28,7 +28,7 @@ from tools._directory_digest import (
     FormatConverter,
     DirectoryDigestBase,
     STRATEGY_CONFIGS,
-    FileClassification,  # 添加新的导入
+    FileClassification,
 )
 
 # Import processor registry
@@ -413,29 +413,6 @@ class DirectoryDigest(DirectoryDigestBase):
         
         return self.context_manager.allocate(classification.estimated_tokens, file_record)
     
-    def _generate_output(self, mode: str) -> Dict:
-        """生成完整输出"""
-        if not self.structure:
-            return {}
-        
-        output = {
-            "metadata": {
-                "generated_at": datetime.now().isoformat(),
-                "root_directory": str(self.root),
-                "output_mode": mode,
-                "statistics": self.stats,
-                "context_usage": self.context_manager.get_summary(),
-            },
-            "structure": self.structure.to_dict(mode)
-        }
-        
-        if self.context_manager.file_records:
-            output["context_allocation"] = {
-                "file_records": self.context_manager.file_records
-            }
-        
-        return output
-    
     def _generate_sort_output_unified(self, classified_files) -> Dict:
         """
         生成分类排序输出（使用已分类的文件）
@@ -582,126 +559,6 @@ class DirectoryDigest(DirectoryDigestBase):
             }
         
         return output
-    
-    def _generate_sort_output(self) -> Dict:
-        """
-        生成分类排序输出（完整版，与原始代码逻辑一致）
-        包含文件类型分类、大小分类、扩展名统计和建议
-        """
-        all_files = self._collect_all_files_flat()
-        
-        # 按类型分组，同时保留完整元数据
-        by_type = {
-            FileType.CRITICAL_DOCS.value: [],
-            FileType.REFERENCE_DOCS.value: [],
-            FileType.SOURCE_CODE.value: [],
-            FileType.TEXT_DATA.value: [],
-            FileType.BINARY_FILES.value: [],
-            FileType.UNKNOWN.value: []
-        }
-        
-        # 按大小分组
-        large_files = []      # > 1MB
-        medium_files = []     # 100KB - 1MB
-        small_files = []      # < 100KB
-        
-        for f in all_files:
-            file_type = f.metadata.file_type.value
-            file_info = {
-                'path': str(f.metadata.path.relative_to(self.root)),
-                'size': f.metadata.size,
-                'size_formatted': self._format_size(f.metadata.size),
-                'modified': f.metadata.modified_time.isoformat() if f.metadata.modified_time else 'unknown',
-                'type': file_type,
-                'is_binary': file_type == FileType.BINARY_FILES.value
-            }
-            
-            if file_type in by_type:
-                by_type[file_type].append(file_info)
-            else:
-                by_type[FileType.UNKNOWN.value].append(file_info)
-            
-            # 按大小分组
-            size = f.metadata.size
-            if size > 1024 * 1024:
-                large_files.append(file_info)
-            elif size > 100 * 1024:
-                medium_files.append(file_info)
-            else:
-                small_files.append(file_info)
-        
-        # 构建报告 (与原始代码一致)
-        sort_report = {
-            "metadata": {
-                "generated_at": datetime.now().isoformat(),
-                "root_directory": str(self.root),
-                "output_mode": "sort",
-                "statistics": self.stats,
-                "context_usage": self.context_manager.get_summary()  # 确保包含此字段
-            },
-            "classification": {},
-            "by_size": {
-                "large_files": large_files,
-                "medium_files": medium_files,
-                "small_files": small_files
-            },
-            "file_listings": {
-                k: sorted(v, key=lambda x: x['path']) 
-                for k, v in by_type.items() if v
-            }
-        }
-        
-        # 为每种类型生成详细信息（包括扩展名统计）
-        for type_name, files in by_type.items():
-            if not files:
-                continue
-                
-            # 按扩展名分组
-            by_ext = {}
-            for f in files:
-                path = f['path']
-                ext = Path(path).suffix.lower() or "(no extension)"
-                if ext not in by_ext:
-                    by_ext[ext] = []
-                by_ext[ext].append(path)
-            
-            # 计算总大小
-            total_size = sum(f['size'] for f in files)
-            
-            sort_report["classification"][type_name] = {
-                "count": len(files),
-                "total_size_bytes": total_size,
-                "total_size_formatted": self._format_size(total_size),
-                "extensions": {
-                    ext: {
-                        "count": len(paths),
-                        "files": sorted(paths)[:10],  # 只显示前10个
-                        "truncated": len(paths) > 10,
-                        "total_count": len(paths)
-                    }
-                    for ext, paths in sorted(by_ext.items(), key=lambda x: len(x[1]), reverse=True)
-                }
-            }
-        
-        # 添加建议 (与原始代码一致)
-        recommendations = []
-        if large_files:
-            recommendations.append(
-                f"Found {len(large_files)} large files (>1MB). "
-                f"In 'full' mode, use --max-content-size to limit full content output."
-            )
-
-        if by_type.get(FileType.UNKNOWN.value, []):
-            count = len(by_type[FileType.UNKNOWN.value])
-            if count > 5:
-                recommendations.append(
-                    f"Found {count} unknown type files. Consider reviewing or adding to ignore patterns."
-                )
-        
-        sort_report["recommendations"] = recommendations
-        
-        return sort_report
-    
     
 
 
