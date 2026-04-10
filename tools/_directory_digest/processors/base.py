@@ -173,7 +173,7 @@ class TextFileProcessor(BaseFileProcessor):
             if strategy == ProcessingStrategy.FULL_CONTENT:
                 file_digest.full_content = content
         
-        # 生成摘要
+        # 生成摘要（即使在 FULL_CONTENT 策略下也生成）
         summary = self._generate_summary(filepath, content, strategy)
         file_digest.human_readable_summary = summary
         

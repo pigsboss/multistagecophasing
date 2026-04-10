@@ -173,6 +173,7 @@ class FileDigest:
         result = {"metadata": self.metadata.to_dict()}
         if mode == "full" and self.full_content:
             result["full_content"] = self.full_content
+        # 无条件包含摘要（如果存在）
         if self.human_readable_summary:
             result["summary"] = getattr(self.human_readable_summary, 'to_dict', lambda: {})()
         if self.source_code_analysis:
