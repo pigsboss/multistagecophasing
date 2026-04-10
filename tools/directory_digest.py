@@ -338,13 +338,13 @@ class DirectoryDigest(DirectoryDigestBase):
                 self.stats['binary_files'] += 1
                 return
             
-            # 检查Token限制
-            if self.context_manager:
+            # 检查Token限制（仅在非full模式或需要时）
+            if self.context_manager and mode != "full":
                 if not self._check_and_allocate_context(classification, file_digest):
                     self.stats['skipped_by_context'] += 1
                     return
             
-            # 使用处理器注册表动态获取处理器（基于 classification 中确定的类型和策略）
+            # 使用处理器注册表动态获取处理器
             processor = self.processor_registry.get_processor(file_digest)
             
             if processor and not classification.force_binary:
@@ -353,6 +353,11 @@ class DirectoryDigest(DirectoryDigestBase):
                 if content:
                     # 使用分类中的策略进行处理
                     processor.process(file_digest, content, mode, classification.strategy)
+                    
+                    # 修复：对于full模式且策略为FULL_CONTENT，强制保存完整内容
+                    if mode == "full" and classification.strategy == ProcessingStrategy.FULL_CONTENT:
+                        file_digest.full_content = content  # ✅ 修正属性名
+                    
                     return
                 else:
                     self._process_as_binary(file_digest, mode)
