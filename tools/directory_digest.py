@@ -794,13 +794,16 @@ Operation Modes:
     
     # 如果没有提供 --rules 参数，尝试从默认位置查找规则文件
     if not args.rules:
+        target_dir = Path(args.directory)  # 在目标目录下查找，而不是CWD
         default_rules_paths = [
-            Path.cwd() / ".digest_rules.yaml",
-            Path.cwd() / ".digest_rules.yml",
-            Path.cwd() / "digest_rules.yaml",
-            Path.cwd() / "digest_rules.yml",
-            Path.cwd() / "rules.yaml",
-            Path.cwd() / "rules.yml",
+            target_dir / ".digest_rules.yaml",
+            target_dir / ".digest_rules.yml",
+            target_dir / "digest_rules.yaml",
+            target_dir / "digest_rules.yml",
+            target_dir / "rules.yaml",
+            target_dir / "rules.yml",
+            target_dir / ".rules.yaml",
+            target_dir / ".rules.yml",
         ]
         
         for rules_path in default_rules_paths:
