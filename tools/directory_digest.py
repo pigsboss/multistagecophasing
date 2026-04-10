@@ -463,7 +463,7 @@ class DirectoryDigest(DirectoryDigestBase):
             # 对于METADATA_ONLY策略，只处理元数据
             if final_strategy == ProcessingStrategy.METADATA_ONLY:
                 # 哈希值已在第一阶段计算
-                file_digest.metadata.file_type = FileType.BINARY_FILES
+                # 关键修复：不要修改file_type，保留原始分类（关键文档、源代码等）以供sort模式正确分类
                 file_digest.actual_strategy = final_strategy.value
                 return
             
