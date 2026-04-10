@@ -338,7 +338,8 @@ class DirectoryDigest(DirectoryDigestBase):
                 self.stats['binary_files'] += 1
                 return
             
-            # 检查Token限制（仅在非full模式或需要时）
+            # 对于 FULL_CONTENT 策略，总是尝试处理内容
+            # 对于其他策略，检查Token限制（仅在非full模式时）
             if self.context_manager and mode != "full":
                 if not self._check_and_allocate_context(classification, file_digest):
                     self.stats['skipped_by_context'] += 1
@@ -353,10 +354,6 @@ class DirectoryDigest(DirectoryDigestBase):
                 if content:
                     # 使用分类中的策略进行处理
                     processor.process(file_digest, content, mode, classification.strategy)
-                    
-                    # 注意：处理器已经在 process 方法中根据策略设置了完整内容
-                    # 不再需要在这里重复设置
-                    
                     return
                 else:
                     self._process_as_binary(file_digest, mode)
