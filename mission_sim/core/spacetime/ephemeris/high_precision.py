@@ -60,7 +60,7 @@ class EphemerisConfig:
     verbose: bool = False
 
 
-class HighPrecisionEphemeris(Ephemeris):
+class HighPrecisionEphemeris:
     """
     高精度星历类
     
@@ -133,8 +133,6 @@ class HighPrecisionEphemeris(Ephemeris):
         Args:
             config: 星历配置，如为None则使用默认配置
         """
-        super().__init__(t0=0.0, dt=1.0, state0=np.zeros(6))  # 基类初始化
-        
         self.config = config or EphemerisConfig()
         self.verbose = self.config.verbose
         
@@ -251,16 +249,15 @@ class HighPrecisionEphemeris(Ephemeris):
     
     def get_interpolated_state(self, t: float) -> np.ndarray:
         """
-        获取插值状态（实现基类抽象方法）
+        获取指定时间的插值状态
         
         Args:
             t: 时间（秒）
             
         Returns:
-            np.ndarray: 插值状态 [x, y, z, vx, vy, vz]
+            np.ndarray: 状态 [x, y, z, vx, vy, vz]
         """
-        # 注意：基类方法需要重写以实现具体插值逻辑
-        # 这里返回地球在J2000系的状态作为示例
+        # This method provides compatibility with code expecting an Ephemeris-like interface
         return self.get_state(
             target_body=CelestialBody.EARTH,
             epoch=t,
