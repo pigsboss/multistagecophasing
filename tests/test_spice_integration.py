@@ -451,6 +451,8 @@ class TestHighPrecisionEphemerisSPICE:
         
         ephem.shutdown()
     
+    @pytest.mark.filterwarnings("ignore:SPICE initialization error")
+    @pytest.mark.filterwarnings("ignore:SPICE not initialized")
     def test_spice_fallback_to_analytical(self):
         """Test fallback to analytical mode when SPICE fails."""
         # Create with invalid path
