@@ -187,7 +187,10 @@ class TextFileProcessor(BaseFileProcessor):
         filepath = file_digest.metadata.path
         
         # 根据策略决定输出内容，确保不冗余
-        if strategy == ProcessingStrategy.FULL_CONTENT:
+        # 使用枚举值进行比较，而不是枚举对象本身
+        strategy_value = strategy.value if hasattr(strategy, 'value') else str(strategy)
+        
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value:
             # FULL_CONTENT策略：只嵌入全文，不生成摘要
             if debug:
                 print(f"[DEBUG:TextFileProcessor]   FULL_CONTENT strategy", file=sys.stderr)
@@ -228,7 +231,7 @@ class TextFileProcessor(BaseFileProcessor):
             
             return file_digest
             
-        elif strategy == ProcessingStrategy.SUMMARY_ONLY:
+        elif strategy_value == ProcessingStrategy.SUMMARY_ONLY.value:
             # SUMMARY_ONLY策略：只生成极简摘要，不嵌入全文
             if debug:
                 print(f"[DEBUG:TextFileProcessor]   SUMMARY_ONLY strategy", file=sys.stderr)
@@ -238,7 +241,7 @@ class TextFileProcessor(BaseFileProcessor):
             file_digest.full_content = None
             return file_digest
             
-        elif strategy == ProcessingStrategy.HEADER_WITH_STATS:
+        elif strategy_value == ProcessingStrategy.HEADER_WITH_STATS.value:
             # HEADER_WITH_STATS策略：生成头部信息和统计
             if debug:
                 print(f"[DEBUG:TextFileProcessor]   HEADER_WITH_STATS strategy", file=sys.stderr)
@@ -415,8 +418,11 @@ class SourceCodeProcessor(BaseFileProcessor):
         
         filepath = file_digest.metadata.path
         
+        # 使用枚举值进行比较，而不是枚举对象本身
+        strategy_value = strategy.value if hasattr(strategy, 'value') else str(strategy)
+        
         # 处理完整内容：对于 FULL_CONTENT 策略，总是设置完整内容（如果文件大小允许）
-        if strategy == ProcessingStrategy.FULL_CONTENT and file_digest.metadata.size <= self.max_full_content_size:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value and file_digest.metadata.size <= self.max_full_content_size:
             file_digest.full_content = content
             # FULL_CONTENT策略：不生成摘要
             file_digest.human_readable_summary = None
@@ -432,7 +438,7 @@ class SourceCodeProcessor(BaseFileProcessor):
         file_digest.source_code_analysis = analysis
         
         # 生成摘要：对于 FULL_CONTENT 策略，不生成摘要
-        if strategy == ProcessingStrategy.FULL_CONTENT:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value:
             # 已经设置为None，不需要额外处理
             pass
         else:
@@ -645,8 +651,11 @@ class ConfigFileProcessor(BaseFileProcessor):
         
         filepath = file_digest.metadata.path
         
+        # 使用枚举值进行比较，而不是枚举对象本身
+        strategy_value = strategy.value if hasattr(strategy, 'value') else str(strategy)
+        
         # 处理完整内容：对于 FULL_CONTENT 策略，总是设置完整内容（如果文件大小允许）
-        if strategy == ProcessingStrategy.FULL_CONTENT and file_digest.metadata.size <= self.max_full_content_size:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value and file_digest.metadata.size <= self.max_full_content_size:
             file_digest.full_content = content
             # FULL_CONTENT策略：不生成摘要
             file_digest.human_readable_summary = None
@@ -661,7 +670,7 @@ class ConfigFileProcessor(BaseFileProcessor):
         config_analysis = self._analyze_config(filepath, content, strategy)
         
         # 生成摘要：对于 FULL_CONTENT 策略，不生成摘要
-        if strategy == ProcessingStrategy.FULL_CONTENT:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value:
             # 已经设置为None，不需要额外处理
             pass
         else:
@@ -831,20 +840,23 @@ class DataFileProcessor(BaseFileProcessor):
         
         filepath = file_digest.metadata.path
         
+        # 使用枚举值进行比较，而不是枚举对象本身
+        strategy_value = strategy.value if hasattr(strategy, 'value') else str(strategy)
+        
         # 处理完整内容：对于 FULL_CONTENT 策略，总是设置完整内容（如果文件大小允许）
-        if strategy == ProcessingStrategy.FULL_CONTENT and file_digest.metadata.size <= self.max_full_content_size:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value and file_digest.metadata.size <= self.max_full_content_size:
             file_digest.full_content = content
             # FULL_CONTENT策略：不生成摘要
             file_digest.human_readable_summary = None
         else:
             # 对于其他策略，仅在 full 模式下且文件大小允许时设置完整内容
-            if mode == "full" and strategy == ProcessingStrategy.FULL_CONTENT:
+            if mode == "full" and strategy_value == ProcessingStrategy.FULL_CONTENT.value:
                 file_digest.full_content = content
             else:
                 file_digest.full_content = None
         
         # 生成摘要：对于 FULL_CONTENT 策略，不生成摘要
-        if strategy == ProcessingStrategy.FULL_CONTENT:
+        if strategy_value == ProcessingStrategy.FULL_CONTENT.value:
             # 已经设置为None，不需要额外处理
             pass
         else:
