@@ -214,6 +214,17 @@ class TestSPICEKernelManager:
         with pytest.raises(KernelNotFoundError):
             manager = SPICEKernelManager("/nonexistent/path")
             manager.initialize()
+    
+    def test_invalid_kernel_type(self, spice_kernels_path, required_kernels_present):
+        """Test that invalid mission type raises appropriate error."""
+        if not SPICE_AVAILABLE or not required_kernels_present:
+            pytest.skip("SPICE not available or kernels missing")
+        
+        manager = SPICEKernelManager(spice_kernels_path)
+        
+        # 改为期望 ValueError 而不是 KernelNotFoundError
+        with pytest.raises(ValueError):
+            manager.initialize("invalid_mission_type")
 
 
 # ============================================================================
