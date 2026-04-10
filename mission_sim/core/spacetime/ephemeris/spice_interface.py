@@ -155,9 +155,10 @@ class SPICEKernelManager:
         if self.config.verbose:
             print(f"[SPICE] Initializing for mission type: {mtype}")
         
-        # 验证任务类型
+        # Validate mission type
         valid_mission_types = ['earth_moon', 'sun_earth', 'earth_only', 'lunar_only', 'interplanetary']
         if mtype not in valid_mission_types:
+            # Use English error message per MCPC coding standards
             raise ValueError(f"Invalid mission type: {mtype}. Valid types are: {valid_mission_types}")
         
         try:
@@ -192,10 +193,10 @@ class SPICEKernelManager:
     
     def _load_kernel_type(self, ktype: str) -> None:
         """
-        加载特定类型的内核
+        Load specific kernel type
         
         Args:
-            ktype: 内核类型键（如 'lsk', 'spk_planets'）
+            ktype: Kernel type key (e.g., 'lsk', 'spk_planets')
         """
         if ktype not in self.KERNEL_PATTERNS:
             warnings.warn(f"Unknown kernel type: {ktype}")
@@ -204,11 +205,11 @@ class SPICEKernelManager:
         config = self.KERNEL_PATTERNS[ktype]
         found = False
         
-        # 按优先级顺序尝试加载
+        # Try loading in priority order
         for pattern in config['patterns']:
-            # 在根目录和子目录中搜索
+            # Search in root and subdirectories
             paths = list(self.kernel_root.rglob(pattern))
-            # 也检查直接子目录
+            # Also check direct subdirectories
             if not paths:
                 for subdir in ['lsk', 'pck', 'spk', 'fk', 'ik', 'spk/planets', 'fk/satellites']:
                     candidate = self.kernel_root / subdir / pattern
@@ -216,7 +217,7 @@ class SPICEKernelManager:
                         paths.append(candidate)
             
             if paths:
-                # 按文件名排序，通常最新的版本排在前面（如 de440 > de430）
+                # Sort by filename, typically newest version first (e.g., de440 > de430)
                 paths.sort(reverse=True)
                 selected = paths[0]
                 
@@ -231,6 +232,7 @@ class SPICEKernelManager:
                     continue
         
         if not found and config['required']:
+            # Use English error message per MCPC coding standards
             raise KernelNotFoundError(
                 f"Required kernel '{ktype}' not found. "
                 f"Searched patterns: {config['patterns']}"
@@ -369,7 +371,7 @@ class SPICECalculator:
             return state_m
             
         except SpiceyError as e:
-            # 添加更多调试信息
+            # Add debug information in English per MCPC coding standards
             debug_info = f"""
             SPICE calculation failed:
             - target: {target} (id: {target_id})

@@ -472,7 +472,8 @@ class TestSPICEErrorHandling:
         
         manager = SPICEKernelManager(spice_kernels_path)
         
-        with pytest.raises(KernelNotFoundError):
+        # Expect ValueError because mission type validation happens before kernel loading
+        with pytest.raises(ValueError):
             manager.initialize("invalid_mission_type")
 
 
