@@ -407,3 +407,210 @@ def lvlh_to_absolute(r_chief_abs: np.ndarray, v_chief_abs: np.ndarray,
     v_deputy_abs = v_c + delta_v_abs
     
     return r_deputy_abs, v_deputy_abs
+
+
+# =====================================================================
+# 通用数学工具：开普勒方程求解器（跨域共享）
+# =====================================================================
+
+def solve_kepler_equation_batch(
+    M_array: np.ndarray, 
+    e: float, 
+    max_iter: int = 10, 
+    tol: float = 1e-12
+) -> np.ndarray:
+    """
+    Batch solve Kepler's equation: M = E - e * sin(E)
+    
+    Uses vectorized Newton-Raphson iteration for efficient computation.
+    
+    Args:
+        M_array: Mean anomaly array (rad), shape (N,)
+        e: Eccentricity (0 ≤ e < 1)
+        max_iter: Maximum number of iterations
+        tol: Convergence tolerance
+        
+    Returns:
+        np.ndarray: Eccentric anomaly array (rad), shape (N,)
+        
+    Raises:
+        ValueError: If parameters are invalid
+    """
+    if e < 0 or e >= 1:
+        raise ValueError(
+            f"Eccentricity must be 0 ≤ e < 1, got e={e:.6f}"
+        )
+    
+    # Wrap mean anomaly to [0, 2π)
+    M_wrapped = M_array % (2 * np.pi)
+    
+    # Initial guess: for small eccentricity, E ≈ M
+    E = M_wrapped.copy()
+    
+    # Newton-Raphson iteration: E_{i+1} = E_i - (E_i - e*sin(E_i) - M) / (1 - e*cos(E_i))
+    for _ in range(max_iter):
+        f = E - e * np.sin(E) - M_wrapped
+        f_prime = 1 - e * np.cos(E)
+        delta = f / f_prime
+        E -= delta
+        
+        # Check convergence
+        if np.max(np.abs(delta)) < tol:
+            break
+    
+    return E
+
+
+def solve_kepler_equation_scalar(
+    M: float, 
+    e: float, 
+    max_iter: int = 10, 
+    tol: float = 1e-12
+) -> float:
+    """
+    Scalar version to solve Kepler's equation: M = E - e * sin(E)
+    
+    Args:
+        M: Mean anomaly (rad)
+        e: Eccentricity (0 ≤ e < 1)
+        max_iter: Maximum number of iterations
+        tol: Convergence tolerance
+        
+    Returns:
+        float: Eccentric anomaly (rad)
+    """
+    # Wrap call to batch version (for consistency)
+    M_array = np.array([M])
+    E_array = solve_kepler_equation_batch(M_array, e, max_iter, tol)
+    return E_array[0]
+
+
+def orbital_elements_to_cartesian_batch(
+    a: float,
+    e: float,
+    i: float,
+    Omega: float,
+    omega: float,
+    M_array: np.ndarray,
+    mu: float
+) -> np.ndarray:
+    """
+    Batch convert orbital elements to Cartesian state vectors (vectorized)
+    
+    Convert a set of mean anomalies to corresponding state vectors,
+    suitable for generating orbital time series.
+    
+    Args:
+        a: Semi-major axis (m), scalar
+        e: Eccentricity, scalar
+        i: Inclination (rad), scalar
+        Omega: Right ascension of ascending node (rad), scalar
+        omega: Argument of periapsis (rad), scalar
+        M_array: Mean anomaly array (rad), shape (N,)
+        mu: Gravitational parameter (m³/s²), scalar
+        
+    Returns:
+        np.ndarray: Cartesian state vector array, shape (N, 6)
+        
+    Raises:
+        ValueError: If orbital parameters are invalid
+    """
+    # Parameter validation
+    if a <= 0:
+        raise ValueError(f"Semi-major axis must be positive, got a={a:.6e} m")
+    
+    if e < 0 or e >= 1:
+        raise ValueError(
+            f"Eccentricity must be 0 ≤ e < 1 for elliptical orbits, got e={e:.6f}"
+        )
+    
+    # Check p = a*(1-e²) to avoid division by zero or negative
+    p = a * (1 - e**2)
+    if p <= 0:
+        raise ValueError(
+            f"Parameter p = a*(1-e²) must be positive, got p={p:.6e} "
+            f"(a={a:.6e}, e={e:.6f})"
+        )
+    
+    # Solve Kepler's equation (batch)
+    E_array = solve_kepler_equation_batch(M_array, e)
+    
+    # Calculate true anomaly (vectorized)
+    sqrt_one_plus_e = np.sqrt(1 + e)
+    sqrt_one_minus_e = np.sqrt(1 - e)
+    nu_array = 2 * np.arctan2(
+        sqrt_one_plus_e * np.sin(E_array / 2),
+        sqrt_one_minus_e * np.cos(E_array / 2)
+    )
+    
+    # Calculate orbital plane positions and velocities (vectorized)
+    r_array = a * (1 - e * np.cos(E_array))
+    x_orb_array = r_array * np.cos(nu_array)
+    y_orb_array = r_array * np.sin(nu_array)
+    
+    sqrt_mu_over_p = np.sqrt(mu / p)
+    vx_orb_array = -sqrt_mu_over_p * np.sin(nu_array)
+    vy_orb_array = sqrt_mu_over_p * (e + np.cos(nu_array))
+    
+    # Build rotation matrix (3-1-3 sequence: Ω, i, ω)
+    cos_Omega = np.cos(Omega)
+    sin_Omega = np.sin(Omega)
+    cos_i = np.cos(i)
+    sin_i = np.sin(i)
+    cos_omega = np.cos(omega)
+    sin_omega = np.sin(omega)
+    
+    R = np.array([
+        [cos_Omega * cos_omega - sin_Omega * sin_omega * cos_i,
+         -cos_Omega * sin_omega - sin_Omega * cos_omega * cos_i,
+         sin_Omega * sin_i],
+        [sin_Omega * cos_omega + cos_Omega * sin_omega * cos_i,
+         -sin_Omega * sin_omega + cos_Omega * cos_omega * cos_i,
+         -cos_Omega * sin_i],
+        [sin_omega * sin_i,
+         cos_omega * sin_i,
+         cos_i]
+    ])
+    
+    # Batch rotation to inertial frame
+    # Build orbital plane state matrix (N, 6)
+    N = len(M_array)
+    states_orbital = np.zeros((N, 6))
+    states_orbital[:, 0] = x_orb_array
+    states_orbital[:, 1] = y_orb_array
+    # z_orb remains 0
+    states_orbital[:, 3] = vx_orb_array
+    states_orbital[:, 4] = vy_orb_array
+    # vz_orb remains 0
+    
+    # Apply rotation matrix to position and velocity
+    pos_inertial = states_orbital[:, 0:3] @ R.T
+    vel_inertial = states_orbital[:, 3:6] @ R.T
+    
+    # Combine results
+    states_inertial = np.concatenate([pos_inertial, vel_inertial], axis=1)
+    
+    return states_inertial
+
+
+# Backward compatibility: Update existing scalar function to use new function
+def elements_to_cartesian(
+    mu: float,
+    a: float,
+    e: float,
+    i: float,
+    Omega: float,
+    omega: float,
+    M: float
+) -> np.ndarray:
+    """
+    Convert orbital elements to Cartesian state vector (scalar version, backward compatible)
+    
+    Note: This function has been updated to call the new vectorized implementation
+          for consistency. New code should use orbital_elements_to_cartesian_batch
+          directly for better performance.
+    """
+    # Wrap call to batch version
+    M_array = np.array([M])
+    states = orbital_elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
+    return states[0]

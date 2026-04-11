@@ -25,6 +25,7 @@ from dataclasses import dataclass
 from mission_sim.core.spacetime.ephemeris import Ephemeris
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.spacetime.generators.base import BaseTrajectoryGenerator
+from mission_sim.utils.math_tools import orbital_elements_to_cartesian_batch
 
 
 @dataclass
@@ -132,6 +133,8 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
         """
         Batch convert orbital elements to Cartesian state vectors (vectorized version).
         
+        Note: This function now delegates to the common math library for consistency.
+        
         Args:
             a: Semi-major axis (m), scalar
             e: Eccentricity, scalar
@@ -151,97 +154,21 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
             - Uses vectorized operations, no Python loops
             - Designed for GPU portability
         """
-        # Validate parameters (similar to scalar version in math_tools.py)
-        if a <= 0:
-            raise ValueError(f"Semi-major axis must be positive, got a={a:.6e} m")
-        
-        if e < 0 or e >= 1:
-            raise ValueError(f"Eccentricity must be 0 ≤ e < 1 for elliptical orbits, got e={e:.6f}")
-        
-        # Additional check to avoid numerical issues
-        if abs(1 - e**2) < 1e-12:
-            raise ValueError(
-                f"Nearly parabolic orbit (1 - e² ≈ 0) may cause numerical issues, got e={e:.6f}"
-            )
-        
-        # Calculate mean motion
-        n = np.sqrt(mu / a**3)
-        
-        # Vectorized solution of Kepler's equation
-        M_wrapped = M_array % (2 * np.pi)
-        
-        # Initial guess: use M as initial value for E (good for small e)
-        E = M_wrapped.copy()
-        
-        # Iteratively solve Kepler's equation: E = M + e * sin(E)
-        for _ in range(10):
-            delta = (E - e * np.sin(E) - M_wrapped) / (1 - e * np.cos(E))
-            E -= delta
-        
-        # Calculate true anomaly
-        sqrt_one_plus_e = np.sqrt(1 + e)
-        sqrt_one_minus_e = np.sqrt(1 - e)
-        nu = 2 * np.arctan2(sqrt_one_plus_e * np.sin(E/2), sqrt_one_minus_e * np.cos(E/2))
-        
-        # Orbital plane coordinates
-        r = a * (1 - e * np.cos(E))
-        x_orb = r * np.cos(nu)
-        y_orb = r * np.sin(nu)
-        
-        # Orbital plane velocity
-        p = a * (1 - e**2)  # Semi-latus rectum
-        if p <= 0:
-            raise ValueError(
-                f"Parameter p = a*(1-e²) must be positive, got p={p:.6e} (a={a:.6e}, e={e:.6f})"
-            )
-        
-        sqrt_mu_over_p = np.sqrt(mu / p)
-        vx_orb = -sqrt_mu_over_p * np.sin(nu)
-        vy_orb = sqrt_mu_over_p * (e + np.cos(nu))
-        
-        # Rotation matrix (same for all points)
-        cos_Omega = np.cos(Omega)
-        sin_Omega = np.sin(Omega)
-        cos_i = np.cos(i)
-        sin_i = np.sin(i)
-        cos_omega = np.cos(omega)
-        sin_omega = np.sin(omega)
-        
-        R = np.array([
-            [cos_Omega * cos_omega - sin_Omega * sin_omega * cos_i,
-             -cos_Omega * sin_omega - sin_Omega * cos_omega * cos_i,
-             sin_Omega * sin_i],
-            [sin_Omega * cos_omega + cos_Omega * sin_omega * cos_i,
-             -sin_Omega * sin_omega + cos_Omega * cos_omega * cos_i,
-             -cos_Omega * sin_i],
-            [sin_omega * sin_i,
-             cos_omega * sin_i,
-             cos_i]
-        ])
-        
-        # Vectorized rotation (batch processing)
-        states_orbital = np.stack([x_orb, y_orb, np.zeros_like(x_orb), 
-                                   vx_orb, vy_orb, np.zeros_like(vx_orb)], axis=1)
-        
-        # Apply rotation matrix
-        pos_inertial = states_orbital[:, 0:3] @ R.T
-        vel_inertial = states_orbital[:, 3:6] @ R.T
-        
-        # Combine results
-        states_inertial = np.concatenate([pos_inertial, vel_inertial], axis=1)
-        
-        return states_inertial
+        # 直接调用通用数学库中的函数
+        return orbital_elements_to_cartesian_batch(
+            a, e, i, Omega, omega, M_array, mu
+        )
     
     def elements_to_cartesian_scalar(self, a, e, i, Omega, omega, M, mu):
         """
-        标量版本的轨道根数转换（用于向后兼容）。
+        标量版本的轨道根数转换（向后兼容）。
         
-        Note:
-            内部调用向量化版本，效率较低。
-            新代码应使用向量化接口。
+        Note: 内部调用向量化版本，效率较低。
+              新代码应使用向量化接口。
         """
+        # 调用通用数学库（通过批量函数）
         M_array = np.array([M])
-        states = self.elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
+        states = orbital_elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
         return states[0]
 
 
