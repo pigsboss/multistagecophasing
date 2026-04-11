@@ -60,7 +60,12 @@ class LEOL1Simulation(TwoBodyBaseSimulation):
 
             use_j2 = self.config.get("use_j2_generator", True)
             if use_j2:
-                generator = J2KeplerianGenerator(mu=self.mu_earth)
+                # Try with mu parameter first, fall back without if it fails
+                try:
+                    generator = J2KeplerianGenerator(mu=self.mu_earth)
+                except TypeError:
+                    # If J2KeplerianGenerator doesn't accept mu parameter
+                    generator = J2KeplerianGenerator()
                 gen_config = {
                     "elements": elements,
                     "dt": dt,

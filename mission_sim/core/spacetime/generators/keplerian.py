@@ -46,15 +46,23 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
     所有计算都向量化，支持批量处理，为GPU移植优化。
     """
     
-    def __init__(self, ephemeris=None, use_high_precision=False):
+    def __init__(self, ephemeris=None, use_high_precision=False, mu=None):
         """初始化生成器
         
+        Args:
+            ephemeris: 高精度星历实例（可选）
+            use_high_precision: 是否使用高精度模式
+            mu: 引力常数（m³/s²），默认为地球引力常数
+            
         Note:
             不进行任何验证，保持最小初始化。
             所有验证由调用者负责。
         """
         super().__init__(ephemeris, use_high_precision)
-        self.mu = 3.986004418e14  # 默认地球引力常数
+        if mu is None:
+            self.mu = 3.986004418e14  # 默认地球引力常数
+        else:
+            self.mu = mu
         
     def generate(self, config: Dict[str, Any]) -> Ephemeris:
         """
