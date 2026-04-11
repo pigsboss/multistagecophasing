@@ -8,6 +8,7 @@ import numpy as np
 # 注意：这里导入的是桩接口，实际实现将在后续完成
 try:
     from mission_sim.core.spacetime.ephemeris.high_precision import HighPrecisionEphemeris
+    from mission_sim.core.spacetime.ids import CoordinateFrame
     HAS_MODULE = True
 except ImportError:
     HAS_MODULE = False
@@ -15,12 +16,12 @@ except ImportError:
     class HighPrecisionEphemeris:
         VALID_BODIES = {'earth', 'moon', 'sun', 'mercury', 'venus', 'mars', 
                        'jupiter', 'saturn', 'uranus', 'neptune'}
-        VALID_FRAMES = {'J2000', 'ICRF', 'ITRF93'}
+        VALID_FRAMES = {'J2000_ECI', 'ICRF', 'ITRF93'}
         
         def __init__(self, kernel_path=None):
             self.kernel_path = kernel_path
         
-        def get_state(self, target_body, epoch, observer_body='earth', frame='J2000'):
+        def get_state(self, target_body, epoch, observer_body='earth', frame='J2000_ECI'):
             if target_body.lower() not in self.VALID_BODIES:
                 raise ValueError(f"Invalid body name: {target_body}")
             if frame.upper() not in self.VALID_FRAMES:
@@ -28,7 +29,8 @@ except ImportError:
             return np.zeros(6)
         
         def get_earth_moon_rotating_state(self, epoch):
-            return np.zeros(6), np.zeros(6)
+            # 返回单一数组，而不是两个数组
+            return np.zeros(6)
 
 
 def test_interface_exists():
@@ -42,8 +44,8 @@ def test_get_state_signature():
     # 创建桩实例（假设有简单实现或使用mock）
     ephem = HighPrecisionEphemeris()
     
-    # 测试基本调用
-    state = ephem.get_state('moon', 0.0, 'earth', 'J2000')
+    # 测试基本调用 - 使用正确的坐标系名
+    state = ephem.get_state('moon', 0.0, 'earth', 'J2000_ECI')
     
     # 验证返回类型和形状
     assert isinstance(state, np.ndarray)
@@ -57,15 +59,14 @@ def test_earth_moon_rotating_state():
     """验证地月旋转系状态获取接口"""
     ephem = HighPrecisionEphemeris()
     
-    earth_state, moon_state = ephem.get_earth_moon_rotating_state(0.0)
+    # 修正：只获取一个返回值
+    rotating_state = ephem.get_earth_moon_rotating_state(0.0)
     
     # 验证返回类型
-    assert isinstance(earth_state, np.ndarray)
-    assert isinstance(moon_state, np.ndarray)
+    assert isinstance(rotating_state, np.ndarray)
     
-    # 验证形状
-    assert earth_state.shape == (6,)
-    assert moon_state.shape == (6,)
+    # 验证形状（应该是6维数组）
+    assert rotating_state.shape == (6,)
 
 
 def test_error_handling():
@@ -76,7 +77,7 @@ def test_error_handling():
     with pytest.raises(ValueError):
         ephem.get_state('invalid_body', 0.0)
     
-    # 测试无效坐标系
+    # 测试无效坐标系 - 使用正确的有效框架名
     with pytest.raises(ValueError):
         ephem.get_state('moon', 0.0, 'earth', 'INVALID_FRAME')
 
