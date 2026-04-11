@@ -46,7 +46,7 @@ mcpc/
 │   │   │   ├── ephemeris/          # Ephemeris Engine: Absolute celestial truths
 │   │   │   └── generators/         # Reference Generators: Halo, Keplerian, etc.
 │   │   │
-│   │   ├── physics/                # 🪐 [Physics] Objective reality and physical laws
+│   │   ├── physics/                # 🪐 [Physics] Spacecraft forces and objective laws
 │   │   │   ├── ids.py              # 📜 Physics Code: Constants, Units, Health Status
 │   │   │   ├── environment.py      # Environment Factory: Gravity and SRP integration
 │   │   │   ├── spacecraft.py       # System Entity: Mass and force integration interface
@@ -75,6 +75,11 @@ mcpc/
 │
 └── tests/                          # 🛡️ Contract-driven unit test suite
 ```
+
+**Architecture Principles:**
+- **Spacetime Domain**: Provides the absolute spacetime foundation, including celestial ephemeris, coordinate frames, and reference orbit generation. Interactions between natural celestial bodies (e.g., Earth orbiting the Sun) are implicitly provided through ephemeris.
+- **Physics Domain**: Responsible for computing all forces acting on the spacecraft (gravitational, solar radiation pressure, atmospheric drag, etc.), using celestial positions provided by the Spacetime domain as input. Does not compute interactions between natural celestial bodies.
+- **Cyber Domain**: Implements spacecraft perception, communication, and control intelligence.
 
 -----
 
