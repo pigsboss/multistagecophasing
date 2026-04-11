@@ -493,6 +493,15 @@ class TestCRTBPOrbitGenerator:
             x_variation = np.max(x_values) - np.min(x_values)
             z_variation = np.max(z_values) - np.min(z_values)
             
+            # Print detailed orbit information for debugging
+            print(f"[DEBUG] Vertical orbit analysis:")
+            print(f"  - X variation: {x_variation:.2e} m")
+            print(f"  - Z variation: {z_variation:.2e} m")
+            print(f"  - Ratio (Z/X): {z_variation/x_variation:.3f}" if x_variation > 0 else "  - X variation is zero")
+            print(f"  - Position array shape: {positions.shape}")
+            print(f"  - X values range: [{np.min(x_values):.2e}, {np.max(x_values):.2e}]")
+            print(f"  - Z values range: [{np.min(z_values):.2e}, {np.max(z_values):.2e}]")
+            
             # 对于垂直轨道，z方向变化应显著
             # 放宽条件：从0.5改为0.2，因为垂直轨道在CRTBP中x方向也有一定运动
             # 同时确保z_variation不为零
@@ -503,13 +512,40 @@ class TestCRTBPOrbitGenerator:
                     f"z_variation={z_variation:.2e} m, x_variation={x_variation:.2e} m, "
                     f"ratio={ratio:.3f}"
                 )
+                print(f"[DEBUG] Test passed: ratio = {ratio:.3f} > 0.2")
             else:
                 # 如果x_variation非常小，确保z_variation是显著的
+                print(f"[DEBUG] X variation is zero or near-zero ({x_variation:.2e}), checking Z variation...")
                 assert z_variation > 1e6, (
                     f"Vertical orbit z-amplitude too small: {z_variation:.2e} m"
                 )
+                print(f"[DEBUG] Test passed: z_variation = {z_variation:.2e} m > 1e6 m")
             
         except Exception as e:
+            # 提供更详细的错误信息
+            error_msg = f"Vertical orbit generation failed: {e}"
+            print(f"[ERROR] {error_msg}")
+            import traceback
+            print("[ERROR] Full traceback:")
+            traceback.print_exc()
+            
+            # 还可以尝试生成器内部调试信息
+            print("\n[DEBUG] Attempting to generate orbit with verbose mode for debugging...")
+            verbose_generator = CRTBPOrbitGenerator(
+                system_type="earth_moon",
+                orbit_type=CRTBPOrbitType.VERTICAL,
+                verbose=True  # 启用详细输出
+            )
+            try:
+                debug_ephemeris = verbose_generator.generate(config)
+                print("[DEBUG] Successfully generated orbit with verbose mode")
+                print(f"  - Times shape: {debug_ephemeris.times.shape}")
+                print(f"  - States shape: {debug_ephemeris.states.shape}")
+                print(f"  - First position: {debug_ephemeris.states[0, :3]}")
+                print(f"  - Last position: {debug_ephemeris.states[-1, :3]}")
+            except Exception as inner_e:
+                print(f"[DEBUG] Even with verbose mode, generation failed: {inner_e}")
+            
             pytest.skip(f"Vertical orbit generation failed: {e}")
             
     def test_generate_lissajous_orbit(self):
@@ -778,3 +814,142 @@ class TestPerformance:
 if __name__ == "__main__":
     # 直接运行测试（用于调试）
     pytest.main([__file__, "-v"])
+    def test_generate_vertical_orbit_with_debug(self):
+        """测试生成垂直轨道（带详细调试信息）"""
+        config = {
+            'orbit_type': 'VERTICAL',
+            'amplitude': 0.02,
+            'lagrange_point': 2,
+            'duration': 4.0 * np.pi,
+            'step_size': 0.05,
+            'max_iterations': 50,  # 确保设置最大迭代次数
+            'tolerance': 1e-10,
+        }
+        
+        print(f"[DEBUG] Test configuration:")
+        for key, value in config.items():
+            print(f"  - {key}: {value}")
+        
+        generator = CRTBPOrbitGenerator(
+            system_type="earth_moon",
+            orbit_type=CRTBPOrbitType.VERTICAL,
+            verbose=True  # 强制启用详细输出
+        )
+        
+        # 打印生成器内部状态
+        print(f"[DEBUG] Generator configuration:")
+        print(f"  - System type: {generator.system_type}")
+        print(f"  - Orbit type: {generator.orbit_type}")
+        print(f"  - mu: {generator.mu}")
+        print(f"  - L1: {generator.L1}")
+        print(f"  - L2: {generator.L2}")
+        print(f"  - Characteristic length: {generator.L}")
+        print(f"  - Characteristic angular velocity: {generator.omega}")
+        
+        try:
+            ephemeris = generator.generate(config)
+            
+            print(f"[DEBUG] Successfully generated ephemeris:")
+            print(f"  - Frame: {ephemeris.frame}")
+            print(f"  - Number of points: {len(ephemeris.times)}")
+            print(f"  - Time range: [{ephemeris.times[0]:.2f}, {ephemeris.times[-1]:.2f}] s")
+            print(f"  - Duration: {ephemeris.times[-1] - ephemeris.times[0]:.2f} s")
+            
+            # 计算并打印轨道特性
+            positions = ephemeris.states[:, 0:3]
+            velocities = ephemeris.states[:, 3:6]
+            
+            print(f"[DEBUG] Orbit characteristics:")
+            print(f"  - Position shape: {positions.shape}")
+            print(f"  - Min position: [{np.min(positions[:, 0]):.2e}, {np.min(positions[:, 1]):.2e}, {np.min(positions[:, 2]):.2e}] m")
+            print(f"  - Max position: [{np.max(positions[:, 0]):.2e}, {np.max(positions[:, 1]):.2e}, {np.max(positions[:, 2]):.2e}] m")
+            print(f"  - Position range X: {np.max(positions[:, 0]) - np.min(positions[:, 0]):.2e} m")
+            print(f"  - Position range Y: {np.max(positions[:, 1]) - np.min(positions[:, 1]):.2e} m")
+            print(f"  - Position range Z: {np.max(positions[:, 2]) - np.min(positions[:, 2]):.2e} m")
+            
+            # 检查轨道是否闭合
+            pos_start = positions[0]
+            pos_end = positions[-1]
+            vel_start = velocities[0]
+            vel_end = velocities[-1]
+            
+            pos_error = np.linalg.norm(pos_end - pos_start)
+            vel_error = np.linalg.norm(vel_end - vel_start)
+            
+            print(f"[DEBUG] Orbit closure check:")
+            print(f"  - Position closure error: {pos_error:.2e} m")
+            print(f"  - Velocity closure error: {vel_error:.2e} m/s")
+            
+            assert isinstance(ephemeris, Ephemeris)
+            
+        except Exception as e:
+            print(f"[ERROR] Detailed error information:")
+            import traceback
+            traceback.print_exc()
+            pytest.fail(f"Vertical orbit generation failed with detailed traceback above")
+    
+    def test_generate_vertical_orbit_robust(self):
+        """鲁棒性测试：尝试多种配置生成垂直轨道"""
+        test_configs = [
+            {
+                'name': 'Small amplitude',
+                'amplitude': 0.01,
+                'lagrange_point': 2,
+                'duration': 2.0 * np.pi,
+                'step_size': 0.1,
+            },
+            {
+                'name': 'Medium amplitude',
+                'amplitude': 0.02,
+                'lagrange_point': 2,
+                'duration': 2.0 * np.pi,
+                'step_size': 0.05,
+            },
+            {
+                'name': 'L1 point',
+                'amplitude': 0.02,
+                'lagrange_point': 1,
+                'duration': 2.0 * np.pi,
+                'step_size': 0.05,
+            },
+            {
+                'name': 'Shorter duration',
+                'amplitude': 0.02,
+                'lagrange_point': 2,
+                'duration': np.pi,  # 更短
+                'step_size': 0.05,
+            },
+        ]
+        
+        for config_template in test_configs:
+            config_name = config_template['name']
+            config = config_template.copy()
+            del config['name']
+            
+            print(f"\n[DEBUG] Testing configuration: {config_name}")
+            print(f"  Config: {config}")
+            
+            generator = CRTBPOrbitGenerator(
+                system_type="earth_moon",
+                orbit_type=CRTBPOrbitType.VERTICAL,
+                verbose=True
+            )
+            
+            try:
+                ephemeris = generator.generate(config)
+                print(f"  ✓ Successfully generated orbit")
+                print(f"    Points: {len(ephemeris.times)}, Duration: {ephemeris.times[-1] - ephemeris.times[0]:.2f} s")
+                
+                # 简单验证
+                positions = ephemeris.states[:, 0:3]
+                z_variation = np.max(positions[:, 2]) - np.min(positions[:, 2])
+                print(f"    Z variation: {z_variation:.2e} m")
+                
+                return  # 只要有一个配置成功就返回
+                
+            except Exception as e:
+                print(f"  ✗ Failed: {e}")
+                continue
+        
+        # 所有配置都失败
+        pytest.fail("All vertical orbit configurations failed")
