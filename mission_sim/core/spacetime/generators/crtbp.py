@@ -397,27 +397,32 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         L_point = self._get_lagrange_point(lagrange_point)
         
-        # 垂直轨道：在平动点上方/下方振荡
-        # 改进的初始猜测：垂直轨道需要适当的初始速度
+        # 改进的初始猜测：基于线性化理论
+        # 垂直轨道在平动点正上方开始，初始速度在y方向
         x0 = L_point
         z0 = amplitude
         
-        # 对于垂直轨道，需要初始y方向速度来维持轨道
-        # 根据线性化理论，垂直振荡频率约为1
-        vy0 = 0.01 + amplitude * 0.1  # 随振幅调整
+        # 根据线性化频率计算初始速度
+        omega_z = self._linear_frequency('z', lagrange_point)
+        # 对于垂直轨道，初始y速度与z振幅相关
+        vy0 = 0.5 * omega_z * amplitude
         
-        # 垂直轨道应有初始x方向速度来帮助闭合
-        vx0 = -amplitude * 0.005
+        # 垂直轨道通常不需要x方向初始速度
+        state0_nd = np.array([x0, 0.0, z0, 0.0, vy0, 0.0])
         
-        state0_nd = np.array([x0, 0.0, z0, vx0, vy0, 0.0])
-        
-        # 垂直轨道使用XZ平面对称（与Halo轨道类似）
+        # 使用Z轴对称性（垂直轨道在z方向振荡，x和y方向运动较小）
+        # 增加最大迭代次数以提高收敛性
+        max_iter = max(config["max_iterations"], 100)
         corrected_state, period = self._differential_correction(
             state0_nd,
-            symmetry=SymmetryType.XZ_PLANE,
-            max_iter=config["max_iterations"],
+            symmetry=SymmetryType.Z_AXIS,  # 改为Z轴对称
+            max_iter=max_iter,
             tol=config["tolerance"]
         )
+        
+        # 验证轨道质量
+        if self.verbose:
+            self._validate_orbit(corrected_state.reshape(1, -1), np.array([0.0]))
         
         return self._integrate_orbit(
             corrected_state,
@@ -691,25 +696,32 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
                 state[4] *= 1.001
             
             elif symmetry == SymmetryType.Z_AXIS:
-                # 垂直轨道
+                # 垂直轨道：积分到z=0平面
                 T_half = self._find_half_period(state, event='z')
                 if T_half is None:
-                    break
+                    # 如果找不到z=0的穿越点，尝试其他方法
+                    T_half = self._estimate_period(state) / 2
                 
                 sol = solve_ivp(self._crtbp_equations, (0, T_half), state,
                               method='DOP853', rtol=1e-12, atol=1e-12)
                 final_state = sol.y[:, -1]
                 
-                error = np.array([final_state[0], final_state[1],
-                                final_state[4], final_state[5]])
+                # 约束：z=0, vx=0, vy=0（垂直轨道在z=0时x和y速度应为0）
+                error = np.array([final_state[2],  # z=0
+                                final_state[3],  # vx=0
+                                final_state[4]]) # vy=0
                 
                 if np.linalg.norm(error) < tol:
                     if self.verbose:
                         print(f"  微分修正收敛于迭代 {iteration+1}")
                     return state, 2 * T_half
                 
-                state[2] *= 0.999
-                state[3] *= 1.001
+                # 改进的修正策略：调整初始状态
+                # 根据误差调整初始z位置和y速度
+                state[2] -= error[0] * 0.1  # 调整z
+                state[4] -= error[2] * 0.1  # 调整vy
+                # 轻微调整x位置以帮助收敛
+                state[0] -= error[1] * 0.01  # 调整x
         
         # 未完全收敛，返回最佳结果
         if self.verbose:
