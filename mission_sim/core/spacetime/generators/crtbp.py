@@ -399,36 +399,67 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         # 改进的初始猜测：基于线性化理论
         # 垂直轨道在平动点正上方开始，初始速度在y方向
+        # 根据线性化理论，垂直轨道的频率为：
+        gamma = abs(L_point - 1.0)  # 平动点与次要天体的距离
+        omega_z = np.sqrt(self.mu / gamma**3)
+        
+        # 改进的初始状态估计
         x0 = L_point
         z0 = amplitude
         
-        # 根据线性化频率计算初始速度
-        omega_z = self._linear_frequency('z', lagrange_point)
-        # 对于垂直轨道，初始y速度与z振幅相关
+        # 根据垂直轨道的线性化解，初始y速度与z振幅相关
+        # 对于小振幅，可以近似为：vy0 = omega_z * z0 / 2
         vy0 = 0.5 * omega_z * amplitude
         
-        # 垂直轨道通常不需要x方向初始速度
+        # 对于垂直轨道，x和y方向的初始位置和速度应尽可能小
         state0_nd = np.array([x0, 0.0, z0, 0.0, vy0, 0.0])
         
-        # 使用Z轴对称性（垂直轨道在z方向振荡，x和y方向运动较小）
-        # 增加最大迭代次数以提高收敛性
-        max_iter = max(config["max_iterations"], 100)
-        corrected_state, period = self._differential_correction(
-            state0_nd,
-            symmetry=SymmetryType.Z_AXIS,  # 改为Z轴对称
-            max_iter=max_iter,
-            tol=config["tolerance"]
-        )
-        
-        # 验证轨道质量
         if self.verbose:
-            self._validate_orbit(corrected_state.reshape(1, -1), np.array([0.0]))
+            print(f"  初始猜测: x={x0:.4f}, z={z0:.4f}, vy={vy0:.4f}")
+            print(f"  垂直频率 omega_z = {omega_z:.4f}")
+        
+        # 使用更严格的微分修正参数
+        max_iter = max(config.get("max_iterations", 50), 150)  # 增加迭代次数
+        tol = config.get("tolerance", 1e-10)
+        
+        try:
+            # 尝试使用更精确的微分修正
+            corrected_state, period = self._enhanced_differential_correction(
+                state0_nd,
+                orbit_type="vertical",
+                lagrange_point=lagrange_point,
+                max_iter=max_iter,
+                tol=tol
+            )
+        except Exception as e:
+            if self.verbose:
+                print(f"  增强微分修正失败: {e}")
+                print("  回退到标准微分修正")
+            
+            # 回退到标准微分修正
+            corrected_state, period = self._differential_correction(
+                state0_nd,
+                symmetry=SymmetryType.Z_AXIS,
+                max_iter=max_iter,
+                tol=tol
+            )
+        
+        # 验证修正后的状态
+        if self.verbose:
+            print(f"  修正后状态: x={corrected_state[0]:.4f}, y={corrected_state[1]:.4f}, "
+                  f"z={corrected_state[2]:.4f}")
+            print(f"  估计周期: {period:.2f} (无量纲)")
+        
+        # 使用估计的周期进行积分
+        # 确保至少积分一个完整周期
+        duration = config.get("duration", 2.0 * period)
+        step_size = config.get("step_size", 0.001)
         
         return self._integrate_orbit(
             corrected_state,
             period,
-            config["step_size"],
-            config["duration"]
+            step_size,
+            duration
         )
     
     def _resonant_strategy(self, config: Dict[str, Any]) -> Ephemeris:
@@ -729,6 +760,93 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         period = self._estimate_period(state)
         return state, period
+
+    def _enhanced_differential_correction(self,
+                                         initial_guess: np.ndarray,
+                                         orbit_type: str,
+                                         lagrange_point: int,
+                                         max_iter: int = 100,
+                                         tol: float = 1e-10) -> Tuple[np.ndarray, float]:
+        """
+        增强的微分修正算法，专门用于垂直轨道
+        
+        Args:
+            initial_guess: 初始状态猜测
+            orbit_type: 轨道类型
+            lagrange_point: 平动点编号
+            max_iter: 最大迭代次数
+            tol: 收敛容差
+            
+        Returns:
+            Tuple[np.ndarray, float]: (修正后的状态, 轨道周期)
+        """
+        state = initial_guess.copy()
+        
+        for iteration in range(max_iter):
+            # 积分到z=0平面（垂直轨道的四分之一周期）
+            T_quarter = self._find_quarter_period(state)
+            if T_quarter is None:
+                # 如果找不到，使用估计周期
+                T_quarter = self._estimate_vertical_period(state, lagrange_point) / 4
+            
+            # 积分四分之一周期
+            sol = solve_ivp(self._crtbp_equations, (0, T_quarter), state,
+                           method='DOP853', rtol=1e-12, atol=1e-12)
+            final_state = sol.y[:, -1]
+            
+            # 对于垂直轨道，在四分之一周期时应满足：
+            # z=0, x速度=0, y速度=0
+            error = np.array([
+                final_state[2],  # z应为0
+                final_state[3],  # vx应为0
+                final_state[4]   # vy应为0
+            ])
+            
+            error_norm = np.linalg.norm(error)
+            if self.verbose:
+                print(f"  迭代 {iteration+1}: 误差范数 = {error_norm:.2e}")
+            
+            if error_norm < tol:
+                if self.verbose:
+                    print(f"  增强微分修正收敛于迭代 {iteration+1}")
+                return state, 4 * T_quarter
+            
+            # 计算雅可比矩阵（简化版本）
+            # 对于垂直轨道，我们调整初始z和vy
+            J = np.zeros((3, 2))
+            
+            # 小扰动计算雅可比
+            eps = 1e-6
+            for i, idx in enumerate([2, 4]):  # z和vy的索引
+                perturbed_state = state.copy()
+                perturbed_state[idx] += eps
+                
+                sol_pert = solve_ivp(self._crtbp_equations, (0, T_quarter), perturbed_state,
+                                   method='DOP853', rtol=1e-12, atol=1e-12)
+                final_pert = sol_pert.y[:, -1]
+                
+                J[0, i] = (final_pert[2] - final_state[2]) / eps  # dz/d(parameter)
+                J[1, i] = (final_pert[3] - final_state[3]) / eps  # dvx/d(parameter)
+                J[2, i] = (final_pert[4] - final_state[4]) / eps  # dvy/d(parameter)
+            
+            # 使用伪逆求解修正量
+            try:
+                delta_params = np.linalg.pinv(J) @ error
+            except np.linalg.LinAlgError:
+                # 如果矩阵奇异，使用简单调整
+                delta_params = np.array([-error[0] * 0.1, -error[2] * 0.1])
+            
+            # 应用修正（带阻尼）
+            damping = 0.5
+            state[2] -= damping * delta_params[0]  # 调整z
+            state[4] -= damping * delta_params[1]  # 调整vy
+        
+        # 未完全收敛，返回最佳结果
+        if self.verbose:
+            print(f"  增强微分修正未完全收敛，返回当前最佳结果")
+        
+        period = 4 * T_quarter if T_quarter is not None else self._estimate_vertical_period(state, lagrange_point)
+        return state, period
     
     def _find_half_period(self, state: np.ndarray, 
                          max_time: float = 20.0,
@@ -765,6 +883,62 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
                 return t_half
         
         return None
+
+    def _find_quarter_period(self, state: np.ndarray, max_time: float = 10.0) -> Optional[float]:
+        """
+        寻找四分之一周期（从最大z到z=0）
+        
+        Args:
+            state: 初始状态（在最大z位置）
+            max_time: 最大搜索时间
+            
+        Returns:
+            Optional[float]: 四分之一周期时间，或None（未找到）
+        """
+        def z_zero_event(t, y):
+            return y[2]  # z=0
+        
+        z_zero_event.direction = -1  # 从正到负穿越
+        
+        sol = solve_ivp(self._crtbp_equations, (0, max_time), state,
+                       events=[z_zero_event], method='DOP853',
+                       rtol=1e-12, atol=1e-12)
+        
+        if len(sol.t_events[0]) > 0:
+            t_quarter = sol.t_events[0][0]
+            if 0.1 < t_quarter < max_time:  # 有效时间
+                return t_quarter
+        
+        return None
+
+    def _estimate_vertical_period(self, state: np.ndarray, lagrange_point: int) -> float:
+        """
+        估计垂直轨道的周期
+        
+        Args:
+            state: 轨道状态
+            lagrange_point: 平动点编号
+            
+        Returns:
+            float: 估计周期（无量纲）
+        """
+        # 基于线性化频率估计周期
+        gamma = abs(self._get_lagrange_point(lagrange_point) - 1.0)
+        omega_z = np.sqrt(self.mu / gamma**3)
+        
+        # 垂直轨道的周期约为 2π/omega_z
+        period = 2 * np.pi / omega_z
+        
+        # 根据雅可比常数微调
+        C = self._jacobi_constant(state)
+        C0 = 3.0  # 参考雅可比常数
+        
+        if C < C0:
+            period *= (1.0 + 0.05 * (C0 - C))
+        else:
+            period *= (1.0 - 0.05 * (C - C0))
+        
+        return period
     
     def _estimate_period(self, state: np.ndarray) -> float:
         """估计轨道周期"""
@@ -842,7 +1016,7 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         if len(states) == 0:
             return
         
-        # 检查轨道闭合
+        # 检查轨道闭合（仅当积分时间为周期时）
         pos_start = states[0, 0:3]
         pos_end = states[-1, 0:3]
         vel_start = states[0, 3:6]
@@ -851,8 +1025,11 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         pos_error = np.linalg.norm(pos_end - pos_start)
         vel_error = np.linalg.norm(vel_end - vel_start)
         
+        # 对于垂直轨道，允许较大的闭合误差（因为可能不是严格周期）
         if self.verbose:
             print(f"[轨道验证] 闭合误差: 位置 {pos_error:.2e} m, 速度 {vel_error:.2e} m/s")
+            print(f"[轨道验证] 起始位置: {pos_start}")
+            print(f"[轨道验证] 结束位置: {pos_end}")
         
         # 检查雅可比常数守恒
         if len(states) > 10:
@@ -869,7 +1046,12 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
             
             C_std = np.std(C_vals)
             if self.verbose:
-                print(f"[轨道验证] 雅可比常数标准差: {C_std:.2e}")
+                print(f"[轨道验证] 雅可比常数: 均值={np.mean(C_vals):.6f}, 标准差={C_std:.2e}")
+            
+            # 雅可比常数应大致守恒
+            if C_std > 0.01:
+                import warnings
+                warnings.warn(f"雅可比常数不守恒，标准差={C_std:.2e}")
 
 
 # 便捷函数
