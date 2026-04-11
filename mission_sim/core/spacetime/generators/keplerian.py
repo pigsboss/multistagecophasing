@@ -1,95 +1,23 @@
 # mission_sim/core/trajectory/generators/keplerian.py
-"""Keplerian orbit generator (two-body analytical solution)"""
-
-import numpy as np
-from mission_sim.core.spacetime.ids import CoordinateFrame
-from mission_sim.core.spacetime.ephemeris import Ephemeris
-from mission_sim.core.spacetime.generators.base import BaseTrajectoryGenerator
-from mission_sim.utils.math_tools import elements_to_cartesian
-
-
-class KeplerianGenerator(BaseTrajectoryGenerator):
-    """
-    Keplerian orbit generator (two-body analytical solution).
-    Generates reference ephemeris using classical Kepler formulas, no perturbations.
-    
-    This is a simplified model for L1-level baseline calibration and ideal nominal
-    orbit generation. It does not integrate with high-precision ephemeris.
-    """
-
-    def __init__(self, mu: float = 3.986004418e14):
-        """
-        Initialize the generator.
-
-        Args:
-            mu: Gravitational parameter of central body (m³/s²), default Earth.
-        """
-        # Note: KeplerianGenerator is a simplified model and does not use
-        # high-precision ephemeris. The ephemeris and use_high_precision parameters
-        # from BaseTrajectoryGenerator are intentionally ignored.
-        self.mu = mu
-
-    def generate(self, config: dict) -> Ephemeris:
-        """
-        Generate ephemeris from orbital elements.
-
-        config must contain:
-            - elements: [a, e, i, Omega, omega, M0] orbital elements
-            - dt: time step (s)
-            - sim_time: simulation duration (s)
-
-        Returns:
-            Ephemeris object (J2000_ECI frame)
-        """
-        elements = config.get("elements")
-        if elements is None or len(elements) != 6:
-            raise ValueError("KeplerianGenerator requires 6 orbital elements 'elements' in config.")
-
-        dt = config.get("dt", 1.0)
-        sim_time = config.get("sim_time", 86400.0)
-        times = np.arange(0, sim_time + dt, dt)
-
-        a, e, i, Omega, omega, M0 = elements
-        n = np.sqrt(self.mu / a**3)
-
-        states = []
-        for t in times:
-            # Mean anomaly
-            M = M0 + n * t
-            # Solve Kepler's equation M = E - e sin(E) (Newton iteration)
-            E = self._kepler_solver(M, e)
-            # True anomaly
-            nu = 2 * np.arctan2(np.sqrt(1 + e) * np.sin(E/2), np.sqrt(1 - e) * np.cos(E/2))
-            # In-plane coordinates
-            r = a * (1 - e * np.cos(E))
-            x_orb = r * np.cos(nu)
-            y_orb = r * np.sin(nu)
-            vx_orb = -np.sqrt(self.mu / (a * (1 - e**2))) * np.sin(nu)
-            vy_orb = np.sqrt(self.mu / (a * (1 - e**2))) * (e + np.cos(nu))
-
-            # Use full six-element conversion function
-            state_eci = elements_to_cartesian(self.mu, a, e, i, Omega, omega, M)
-            states.append(state_eci)
-
-        return Ephemeris(times, np.array(states), CoordinateFrame.J2000_ECI)
-
-    def _kepler_solver(self, M: float, e: float, tol: float = 1e-12) -> float:
-        """Solve Kepler's equation M = E - e sin(E) (Newton iteration)"""
-        E = M if e < 0.8 else np.pi  # Initial guess
-        for _ in range(10):
-            f = E - e * np.sin(E) - M
-            f_prime = 1 - e * np.cos(E)
-            delta = f / f_prime
-            E -= delta
-            if abs(delta) < tol:
-                break
-        return E
 """
 开普勒轨道生成器
 
 基于二体问题假设，根据轨道根数生成开普勒轨道。
 支持椭圆轨道（0 ≤ e < 1），提供高精度数值积分。
+
+**接口规范：**
+1. 调用者负责确保输入参数的有效性
+2. 所有计算都向量化，支持批量处理
+3. 为GPU移植优化，避免Python循环
+
+**输入要求：**
+- a > 0 (半长轴必须为正)
+- 0 ≤ e < 1 (椭圆轨道)
+- i, Ω, ω, M0 在合理范围内（弧度制）
+- dt > 0
+- sim_time > 0
 """
+
 import numpy as np
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
@@ -111,20 +39,25 @@ class KeplerianConfig:
 
 class KeplerianGenerator(BaseTrajectoryGenerator):
     """
-    开普勒轨道生成器
+    开普勒轨道生成器（向量化版本）
     
     根据经典轨道根数生成二体问题轨道。
-    支持椭圆轨道（0 ≤ e < 1），使用高精度数值积分。
+    所有计算都向量化，支持批量处理，为GPU移植优化。
     """
     
     def __init__(self, ephemeris=None, use_high_precision=False):
-        """初始化生成器"""
+        """初始化生成器
+        
+        Note:
+            不进行任何验证，保持最小初始化。
+            所有验证由调用者负责。
+        """
         super().__init__(ephemeris, use_high_precision)
         self.mu = 3.986004418e14  # 默认地球引力常数
         
     def generate(self, config: Dict[str, Any]) -> Ephemeris:
         """
-        根据轨道根数生成开普勒轨道。
+        根据轨道根数生成开普勒轨道（向量化版本）。
         
         Args:
             config: 配置字典，必须包含：
@@ -137,78 +70,133 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
                 
         Returns:
             Ephemeris: 生成的轨道星历
+            
+        Note:
+            - 调用者负责验证输入参数有效性
+            - 使用向量化批量计算，无Python循环
+            - 输出状态数组形状为 (N, 6)，N=时间点数量
         """
-        # 验证配置参数
-        required_keys = ['elements', 'dt', 'sim_time']
-        for key in required_keys:
-            if key not in config:
-                raise ValueError(f"Missing required config key: {key}")
-        
+        # 提取参数（无验证）
         elements = config['elements']
-        if len(elements) != 6:
-            raise ValueError(f"Elements must have 6 values, got {len(elements)}")
-        
-        # 提取参数
         a, e, i, Omega, omega, M0 = elements
         dt = config['dt']
         sim_time = config['sim_time']
         epoch = config.get('epoch', 0.0)
         mu = config.get('mu', self.mu)
         
-        # 验证轨道根数
-        self._validate_elements(a, e, i, Omega, omega, M0, mu)
-        
-        # 生成时间序列
+        # 生成时间序列（向量）
         num_points = int(sim_time / dt) + 1
         times = np.linspace(0, sim_time, num_points) + epoch
         
-        # 生成轨道
-        states = []
-        for t in times:
-            # 计算当前时刻的平近点角
-            n = np.sqrt(mu / a**3)  # 平运动
-            M = M0 + n * t
-            
-            # 转换为笛卡尔坐标
-            state = self.elements_to_cartesian(a, e, i, Omega, omega, M, mu)
-            states.append(state)
+        # 计算平近点角数组（向量化）
+        n = np.sqrt(mu / a**3)
+        M_array = M0 + n * times
         
-        states_array = np.array(states)
+        # 批量转换为笛卡尔坐标（向量化）
+        states_array = self.elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
         
         return Ephemeris(times, states_array, CoordinateFrame.J2000_ECI)
     
-    def elements_to_cartesian(self, a, e, i, Omega, omega, M, mu):
+    def elements_to_cartesian_batch(self, a, e, i, Omega, omega, M_array, mu):
         """
-        将轨道根数转换为笛卡尔状态向量。
+        将轨道根数批量转换为笛卡尔状态向量（向量化版本）。
         
         Args:
-            a: 半长轴 (m)
-            e: 偏心率
-            i: 倾角 (rad)
-            Omega: 升交点赤经 (rad)
-            omega: 近地点幅角 (rad)
-            M: 平近点角 (rad)
-            mu: 引力常数 (m³/s²)
+            a: 半长轴 (m)，标量
+            e: 偏心率，标量
+            i: 倾角 (rad)，标量
+            Omega: 升交点赤经 (rad)，标量
+            omega: 近地点幅角 (rad)，标量
+            M_array: 平近点角数组 (rad)，形状为 (N,)
+            mu: 引力常数 (m³/s²)，标量
             
         Returns:
-            np.ndarray: 笛卡尔状态向量 [x, y, z, vx, vy, vz]
+            np.ndarray: 笛卡尔状态向量数组，形状为 (N, 6)
+            
+        Note:
+            - 使用向量化运算，避免Python循环
+            - 设计为可移植到GPU
+            - 不进行输入验证，调用者负责
         """
-        # 直接使用math_tools中的函数，该函数已经包含完整的验证和M的包装处理
-        from mission_sim.utils.math_tools import elements_to_cartesian as elements_to_cartesian_math
-        return elements_to_cartesian_math(mu, a, e, i, Omega, omega, M)
-    
-    def _validate_elements(self, a, e, i, Omega, omega, M0, mu):
-        """验证轨道根数"""
-        # 只验证引力常数和角度参数的基本范围
-        if mu <= 0:
-            raise ValueError(f"Gravitational parameter must be positive, got mu={mu}")
+        # GPU兼容性提示：以下函数设计为可移植到GPU
+        # 使用纯NumPy操作，无Python循环，无递归
+        # 未来可替换为ROCm/OpenCL内核
         
-        # 验证角度在合理范围内（除平近点角外）
-        # 平近点角M可以是任意实数，因为轨道运动会使其超过[-2π, 2π]范围
-        for name, value in [("i", i), ("Omega", Omega), ("omega", omega)]:
-            if not (-2*np.pi <= value <= 2*np.pi):
-                raise ValueError(f"{name} must be in radians between -2π and 2π, got {value}")
-        # M0可以是任意实数，不需要范围检查
+        # 计算平运动
+        n = np.sqrt(mu / a**3)
+        
+        # 向量化解开普勒方程（使用定点迭代）
+        M_wrapped = M_array % (2 * np.pi)
+        
+        # 初始猜测：使用M作为E的初始值（对小偏心率有效）
+        E = M_wrapped.copy()
+        
+        # 迭代求解开普勒方程 E = M + e * sin(E)
+        # 使用向量化迭代（适合批量计算）
+        for _ in range(10):
+            delta = (E - e * np.sin(E) - M_wrapped) / (1 - e * np.cos(E))
+            E -= delta
+        
+        # 计算真近点角
+        sqrt_one_plus_e = np.sqrt(1 + e)
+        sqrt_one_minus_e = np.sqrt(1 - e)
+        nu = 2 * np.arctan2(sqrt_one_plus_e * np.sin(E/2), sqrt_one_minus_e * np.cos(E/2))
+        
+        # 轨道平面坐标
+        r = a * (1 - e * np.cos(E))
+        x_orb = r * np.cos(nu)
+        y_orb = r * np.sin(nu)
+        
+        # 轨道平面速度
+        p = a * (1 - e**2)  # 半通径
+        sqrt_mu_over_p = np.sqrt(mu / p)
+        vx_orb = -sqrt_mu_over_p * np.sin(nu)
+        vy_orb = sqrt_mu_over_p * (e + np.cos(nu))
+        
+        # 旋转矩阵（对所有点相同）
+        cos_Omega = np.cos(Omega)
+        sin_Omega = np.sin(Omega)
+        cos_i = np.cos(i)
+        sin_i = np.sin(i)
+        cos_omega = np.cos(omega)
+        sin_omega = np.sin(omega)
+        
+        R = np.array([
+            [cos_Omega * cos_omega - sin_Omega * sin_omega * cos_i,
+             -cos_Omega * sin_omega - sin_Omega * cos_omega * cos_i,
+             sin_Omega * sin_i],
+            [sin_Omega * cos_omega + cos_Omega * sin_omega * cos_i,
+             -sin_Omega * sin_omega + cos_Omega * cos_omega * cos_i,
+             -cos_Omega * sin_i],
+            [sin_omega * sin_i,
+             cos_omega * sin_i,
+             cos_i]
+        ])
+        
+        # 向量化旋转（批量处理）
+        states_orbital = np.stack([x_orb, y_orb, np.zeros_like(x_orb), 
+                                   vx_orb, vy_orb, np.zeros_like(vx_orb)], axis=1)
+        
+        # 应用旋转矩阵
+        pos_inertial = states_orbital[:, 0:3] @ R.T
+        vel_inertial = states_orbital[:, 3:6] @ R.T
+        
+        # 组合结果
+        states_inertial = np.concatenate([pos_inertial, vel_inertial], axis=1)
+        
+        return states_inertial
+    
+    def elements_to_cartesian_scalar(self, a, e, i, Omega, omega, M, mu):
+        """
+        标量版本的轨道根数转换（用于向后兼容）。
+        
+        Note:
+            内部调用向量化版本，效率较低。
+            新代码应使用向量化接口。
+        """
+        M_array = np.array([M])
+        states = self.elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
+        return states[0]
 
 
 # 便捷函数
