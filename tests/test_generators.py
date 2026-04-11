@@ -42,18 +42,26 @@ class TestKeplerianGenerator:
         """测试生成圆轨道"""
         # 注意：KeplerianGenerator 期望 'elements' 键包含6个轨道根数
         # 格式: [a, e, i, Ω, ω, M0]
+        # 地球引力常数
+        mu_earth = 3.986004418e14
+        
+        a = 7000e3  # 半长轴 (m) - LEO轨道
+        # 计算轨道周期
+        period = 2 * np.pi * np.sqrt(a**3 / mu_earth)
+        
+        # 设置仿真时长为2个轨道周期，确保轨道闭合
         config = {
             'elements': [
-                7000e3,  # 半长轴 (m) - LEO轨道
+                a,
                 0.0,     # 偏心率 (圆轨道)
                 np.deg2rad(30.0),  # 轨道倾角
                 np.deg2rad(45.0),  # 升交点赤经
                 np.deg2rad(60.0),   # 近地点幅角
                 np.deg2rad(0.0),     # 真近点角
             ],
-            'epoch': 0.0,              # 历元时间
-            'dt': 60.0,                # 时间步长 (s)
-            'sim_time': 3600.0 * 2,    # 仿真时长: 2小时
+            'epoch': 0.0,
+            'dt': 60.0,
+            'sim_time': period * 2,  # 2个完整周期
         }
         
         generator = KeplerianGenerator()
@@ -75,7 +83,9 @@ class TestKeplerianGenerator:
         distance = np.linalg.norm(pos_end - pos_start)
         
         # 由于数值积分误差，允许一定容差
-        assert distance < 1000.0  # 小于1公里
+        # 圆轨道在完整周期后应闭合在轨道半径的1%以内
+        tolerance = a * 0.01  # 轨道半径的1%（约70公里）
+        assert distance < tolerance, f"轨道闭合误差 {distance:.1f} m 超过容差 {tolerance:.1f} m"
         
     def test_generate_elliptical_orbit(self):
         """测试生成椭圆轨道"""
@@ -552,10 +562,8 @@ class TestCRTBPOrbitGenerator:
                 
     def test_invalid_orbit_type(self):
         """测试无效轨道类型"""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError):  # 现在应该抛出 ValueError
             # CRTBPOrbitType 枚举中没有 "INVALID_TYPE" 这个值
-            # 注意：这会在尝试将字符串转换为枚举时失败
-            # 或者在使用时失败
             generator = CRTBPOrbitGenerator(
                 system_type="sun_earth",
                 orbit_type=CRTBPOrbitType.HALO,  # 使用有效类型

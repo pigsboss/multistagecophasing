@@ -260,7 +260,15 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         # 确保 orbit_type 是枚举类型
         if isinstance(merged["orbit_type"], str):
-            merged["orbit_type"] = CRTBPOrbitType[merged["orbit_type"].upper()]
+            try:
+                merged["orbit_type"] = CRTBPOrbitType[merged["orbit_type"].upper()]
+            except KeyError as e:
+                # 根据MCPC编码标准，使用英文错误信息
+                valid_types = [t.name for t in CRTBPOrbitType]
+                raise ValueError(
+                    f"Invalid orbit type: {merged['orbit_type']}. "
+                    f"Valid types are: {valid_types}"
+                ) from e
         
         return merged
     
