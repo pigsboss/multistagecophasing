@@ -398,15 +398,23 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         L_point = self._get_lagrange_point(lagrange_point)
         
         # 垂直轨道：在平动点上方/下方振荡
+        # 改进的初始猜测：垂直轨道需要适当的初始速度
         x0 = L_point
         z0 = amplitude
-        vx0 = self._estimate_initial_velocity(z0, orbit_type="vertical")
         
-        state0_nd = np.array([x0, 0.0, z0, vx0, 0.0, 0.0])
+        # 对于垂直轨道，需要初始y方向速度来维持轨道
+        # 根据线性化理论，垂直振荡频率约为1
+        vy0 = 0.01 + amplitude * 0.1  # 随振幅调整
         
+        # 垂直轨道应有初始x方向速度来帮助闭合
+        vx0 = -amplitude * 0.005
+        
+        state0_nd = np.array([x0, 0.0, z0, vx0, vy0, 0.0])
+        
+        # 垂直轨道使用XZ平面对称（与Halo轨道类似）
         corrected_state, period = self._differential_correction(
             state0_nd,
-            symmetry=SymmetryType.Z_AXIS,
+            symmetry=SymmetryType.XZ_PLANE,
             max_iter=config["max_iterations"],
             tol=config["tolerance"]
         )
@@ -592,7 +600,8 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         elif orbit_type == "vertical":
             # 垂直轨道：z方向振荡
-            return 0.005 * position
+            # 返回y方向速度，而不是x方向
+            return 0.01 + position * 0.1
         
         else:
             return 0.01  # 默认值
