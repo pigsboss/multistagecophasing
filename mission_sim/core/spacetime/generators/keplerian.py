@@ -57,103 +57,149 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
         
     def generate(self, config: Dict[str, Any]) -> Ephemeris:
         """
-        根据轨道根数生成开普勒轨道（向量化版本）。
+        Generate Keplerian orbit based on orbital elements (vectorized version).
         
         Args:
-            config: 配置字典，必须包含：
-                - elements: 轨道根数列表 [a, e, i, Ω, ω, M0]
-                - dt: 输出步长 (s)
-                - sim_time: 仿真时长 (s)
-                可选：
-                - epoch: 历元时间 (s)
-                - mu: 引力常数 (m³/s²)
+            config: Configuration dictionary, must contain:
+                - elements: Orbital elements list [a, e, i, Ω, ω, M0]
+                - dt: Output time step (s)
+                - sim_time: Simulation duration (s)
+                Optional:
+                - epoch: Epoch time (s)
+                - mu: Gravitational parameter (m³/s²)
                 
         Returns:
-            Ephemeris: 生成的轨道星历
+            Ephemeris: Generated orbit ephemeris
+            
+        Raises:
+            ValueError: If required parameters are missing or invalid
             
         Note:
-            - 调用者负责验证输入参数有效性
-            - 使用向量化批量计算，无Python循环
-            - 输出状态数组形状为 (N, 6)，N=时间点数量
+            - Uses vectorized batch computation, no Python loops
+            - Output state array shape is (N, 6), N = number of time points
         """
-        # 提取参数（无验证）
+        # Validate required parameters
+        required_keys = ['elements', 'dt', 'sim_time']
+        for key in required_keys:
+            if key not in config:
+                raise ValueError(f"Missing required parameter: '{key}'")
+        
+        # Extract parameters
         elements = config['elements']
-        a, e, i, Omega, omega, M0 = elements
         dt = config['dt']
         sim_time = config['sim_time']
         epoch = config.get('epoch', 0.0)
         mu = config.get('mu', self.mu)
         
-        # 生成时间序列（向量）
+        # Validate orbital elements
+        if len(elements) != 6:
+            raise ValueError(
+                f"Orbital elements must have exactly 6 values, got {len(elements)}"
+            )
+        
+        # Validate element values
+        a, e, i, Omega, omega, M0 = elements
+        
+        if a <= 0:
+            raise ValueError(f"Semi-major axis must be positive, got a={a:.6e} m")
+        
+        if e < 0 or e >= 1:
+            raise ValueError(
+                f"Eccentricity must be 0 ≤ e < 1 for elliptical orbits, got e={e:.6f}"
+            )
+        
+        # Validate time parameters
+        if dt <= 0:
+            raise ValueError(f"Time step must be positive, got dt={dt:.6e} s")
+        
+        if sim_time < 0:
+            raise ValueError(f"Simulation time must be non-negative, got sim_time={sim_time:.6e} s")
+        
+        # Generate time sequence (vector)
         num_points = int(sim_time / dt) + 1
         times = np.linspace(0, sim_time, num_points) + epoch
         
-        # 计算平近点角数组（向量化）
+        # Calculate mean anomaly array (vectorized)
         n = np.sqrt(mu / a**3)
         M_array = M0 + n * times
         
-        # 批量转换为笛卡尔坐标（向量化）
+        # Batch convert to Cartesian coordinates (vectorized)
         states_array = self.elements_to_cartesian_batch(a, e, i, Omega, omega, M_array, mu)
         
         return Ephemeris(times, states_array, CoordinateFrame.J2000_ECI)
     
     def elements_to_cartesian_batch(self, a, e, i, Omega, omega, M_array, mu):
         """
-        将轨道根数批量转换为笛卡尔状态向量（向量化版本）。
+        Batch convert orbital elements to Cartesian state vectors (vectorized version).
         
         Args:
-            a: 半长轴 (m)，标量
-            e: 偏心率，标量
-            i: 倾角 (rad)，标量
-            Omega: 升交点赤经 (rad)，标量
-            omega: 近地点幅角 (rad)，标量
-            M_array: 平近点角数组 (rad)，形状为 (N,)
-            mu: 引力常数 (m³/s²)，标量
+            a: Semi-major axis (m), scalar
+            e: Eccentricity, scalar
+            i: Inclination (rad), scalar
+            Omega: Right ascension of ascending node (rad), scalar
+            omega: Argument of perigee (rad), scalar
+            M_array: Mean anomaly array (rad), shape (N,)
+            mu: Gravitational parameter (m³/s²), scalar
             
         Returns:
-            np.ndarray: 笛卡尔状态向量数组，形状为 (N, 6)
+            np.ndarray: Cartesian state vector array, shape (N, 6)
+            
+        Raises:
+            ValueError: If orbital parameters are invalid
             
         Note:
-            - 使用向量化运算，避免Python循环
-            - 设计为可移植到GPU
-            - 不进行输入验证，调用者负责
+            - Uses vectorized operations, no Python loops
+            - Designed for GPU portability
         """
-        # GPU兼容性提示：以下函数设计为可移植到GPU
-        # 使用纯NumPy操作，无Python循环，无递归
-        # 未来可替换为ROCm/OpenCL内核
+        # Validate parameters (similar to scalar version in math_tools.py)
+        if a <= 0:
+            raise ValueError(f"Semi-major axis must be positive, got a={a:.6e} m")
         
-        # 计算平运动
+        if e < 0 or e >= 1:
+            raise ValueError(f"Eccentricity must be 0 ≤ e < 1 for elliptical orbits, got e={e:.6f}")
+        
+        # Additional check to avoid numerical issues
+        if abs(1 - e**2) < 1e-12:
+            raise ValueError(
+                f"Nearly parabolic orbit (1 - e² ≈ 0) may cause numerical issues, got e={e:.6f}"
+            )
+        
+        # Calculate mean motion
         n = np.sqrt(mu / a**3)
         
-        # 向量化解开普勒方程（使用定点迭代）
+        # Vectorized solution of Kepler's equation
         M_wrapped = M_array % (2 * np.pi)
         
-        # 初始猜测：使用M作为E的初始值（对小偏心率有效）
+        # Initial guess: use M as initial value for E (good for small e)
         E = M_wrapped.copy()
         
-        # 迭代求解开普勒方程 E = M + e * sin(E)
-        # 使用向量化迭代（适合批量计算）
+        # Iteratively solve Kepler's equation: E = M + e * sin(E)
         for _ in range(10):
             delta = (E - e * np.sin(E) - M_wrapped) / (1 - e * np.cos(E))
             E -= delta
         
-        # 计算真近点角
+        # Calculate true anomaly
         sqrt_one_plus_e = np.sqrt(1 + e)
         sqrt_one_minus_e = np.sqrt(1 - e)
         nu = 2 * np.arctan2(sqrt_one_plus_e * np.sin(E/2), sqrt_one_minus_e * np.cos(E/2))
         
-        # 轨道平面坐标
+        # Orbital plane coordinates
         r = a * (1 - e * np.cos(E))
         x_orb = r * np.cos(nu)
         y_orb = r * np.sin(nu)
         
-        # 轨道平面速度
-        p = a * (1 - e**2)  # 半通径
+        # Orbital plane velocity
+        p = a * (1 - e**2)  # Semi-latus rectum
+        if p <= 0:
+            raise ValueError(
+                f"Parameter p = a*(1-e²) must be positive, got p={p:.6e} (a={a:.6e}, e={e:.6f})"
+            )
+        
         sqrt_mu_over_p = np.sqrt(mu / p)
         vx_orb = -sqrt_mu_over_p * np.sin(nu)
         vy_orb = sqrt_mu_over_p * (e + np.cos(nu))
         
-        # 旋转矩阵（对所有点相同）
+        # Rotation matrix (same for all points)
         cos_Omega = np.cos(Omega)
         sin_Omega = np.sin(Omega)
         cos_i = np.cos(i)
@@ -173,15 +219,15 @@ class KeplerianGenerator(BaseTrajectoryGenerator):
              cos_i]
         ])
         
-        # 向量化旋转（批量处理）
+        # Vectorized rotation (batch processing)
         states_orbital = np.stack([x_orb, y_orb, np.zeros_like(x_orb), 
                                    vx_orb, vy_orb, np.zeros_like(vx_orb)], axis=1)
         
-        # 应用旋转矩阵
+        # Apply rotation matrix
         pos_inertial = states_orbital[:, 0:3] @ R.T
         vel_inertial = states_orbital[:, 3:6] @ R.T
         
-        # 组合结果
+        # Combine results
         states_inertial = np.concatenate([pos_inertial, vel_inertial], axis=1)
         
         return states_inertial
