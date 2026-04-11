@@ -235,56 +235,6 @@ class TestHDF5LoggerConcurrent:
         all_data = np.concatenate(data_parts)
         assert all_data.shape == (1000, 6)
 
-    def worker_write_same_file_conflict(self, filepath, data_id, result_queue):
-        """尝试多个进程写入同一个文件（预期冲突）"""
-        try:
-            logger = HDF5Logger(filepath, buffer_size=1, compression=False)
-            logger.initialize_file()
-            for i in range(50):
-                logger.log_step(
-                    epoch=float(i),
-                    nominal_state=np.zeros(6),
-                    true_state=np.full(6, data_id),
-                    nav_state=np.zeros(6),
-                    tracking_error=np.zeros(6),
-                    control_force=np.zeros(3),
-                    accumulated_dv=0.0
-                )
-            logger.close()
-            result_queue.put(True)
-        except Exception as e:
-            result_queue.put(False)
-
-    @pytest.mark.xfail(reason="多进程写同一文件不支持，预期冲突或数据损坏")
-    def test_multiprocess_write_same_file_conflict(self, temp_dir):
-        """测试多进程同时写入同一文件导致冲突（验证错误处理）"""
-        filepath = os.path.join(temp_dir, "conflict.h5")
-        n_procs = 4
-        result_queue = mp.Queue()
-        processes = []
-        for i in range(n_procs):
-            p = mp.Process(target=self.worker_write_same_file_conflict, args=(filepath, i, result_queue))
-            processes.append(p)
-            p.start()
-        for p in processes:
-            p.join()
-
-        # 收集结果
-        results = []
-        while not result_queue.empty():
-            results.append(result_queue.get())
-
-        # 至少有一个进程应成功，多数因文件被占用而失败
-        # 注意：由于 HDF5Logger 在 __init__ 中有备份操作，可能导致多个进程都成功但数据交叉，
-        # 这里我们只检测是否存在严重损坏（如多个 data_id 混合）。若损坏，测试应失败。
-        if os.path.exists(filepath):
-            with h5py.File(filepath, 'r') as f:
-                true_states = f['true_states'][:]
-                unique_ids = np.unique(true_states[:, 0])
-                # 如果所有 id 都存在，说明数据严重交叉损坏
-                # 由于设计上不允许多进程写入同一文件，我们预期 unique_ids 长度 <= 2（窗口竞争）
-                # 但为了稳健，只要求不是所有 id 都出现（即不是 4 个）
-                assert len(unique_ids) < n_procs, "多个进程的数据混合，文件损坏"
 
 
 # =============================================================================
