@@ -9,15 +9,93 @@ All cross-domain interactions must be based on the structures defined here.
 import numpy as np
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 
 class CoordinateFrame(Enum):
     """Global unified coordinate frame contracts."""
     J2000_ECI = auto()           # J2000 Earth-Centered Inertial / Heliocentric Inertial
     SUN_EARTH_ROTATING = auto()  # Sun-Earth Rotating Frame (CRTBP)
+    EARTH_MOON_ROTATING = auto() # Earth-Moon Rotating Frame (CRTBP)
     LVLH = auto()                # Local Vertical Local Horizontal (Relative Frame)
     VVLH = auto()                # Velocity-Velocity Local Horizontal
+    
+    # 高精度星历支持的坐标系
+    ICRF = auto()                # International Celestial Reference Frame
+    ITRF93 = auto()              # International Terrestrial Reference Frame 1993
+    MOON_PA = auto()             # Moon Principal Axes Frame (from SPICE)
+    IAU_EARTH = auto()           # IAU Earth body-fixed frame
+    IAU_MOON = auto()            # IAU Moon body-fixed frame
+    SUN_EARTH_BARYCENTER = auto()  # Sun-Earth barycenter frame
+    ECLIPJ2000 = auto()          # Ecliptic frame at J2000
+    IAU_SUN = auto()             # IAU Sun body-fixed frame
+    
+    # 特殊坐标系
+    MARS_CENTERED_INERTIAL = auto()  # Mars-centered inertial
+    MARS_FIXED = auto()              # Mars body-fixed frame
+
+
+class CelestialBody(Enum):
+    """标准天体枚举，用于高精度星历查询"""
+    SUN = "sun"
+    EARTH = "earth"
+    MOON = "moon"
+    MERCURY = "mercury"
+    VENUS = "venus"
+    MARS = "mars"
+    JUPITER = "jupiter"
+    SATURN = "saturn"
+    URANUS = "uranus"
+    NEPTUNE = "neptune"
+    
+    # 特殊天体
+    EARTH_MOON_BARYCENTER = "earth_moon_barycenter"
+    SUN_EARTH_BARYCENTER = "sun_earth_barycenter"
+    SOLAR_SYSTEM_BARYCENTER = "solar_system_barycenter"
+    
+    # 拉格朗日点（虚拟天体）
+    EARTH_MOON_L1 = "earth_moon_l1"
+    EARTH_MOON_L2 = "earth_moon_l2"
+    EARTH_MOON_L3 = "earth_moon_l3"
+    EARTH_MOON_L4 = "earth_moon_l4"
+    EARTH_MOON_L5 = "earth_moon_l5"
+    SUN_EARTH_L1 = "sun_earth_l1"
+    SUN_EARTH_L2 = "sun_earth_l2"
+    SUN_EARTH_L3 = "sun_earth_l3"
+    SUN_EARTH_L4 = "sun_earth_l4"
+    SUN_EARTH_L5 = "sun_earth_l5"
+
+
+@dataclass
+class EphemerisConfig:
+    """高精度星历配置"""
+    mode: str = "analytical"          # 模式: analytical, crtbp, numerical, spice
+    spice_kernels_path: Optional[str] = None  # SPICE内核路径
+    mission_type: str = "earth_moon"  # 任务类型
+    use_light_time: bool = True       # 使用光行差修正
+    use_aberration: bool = True       # 使用恒星像差修正
+    max_degree: int = 10              # 球谐函数最大阶数
+    verbose: bool = False             # 详细输出
+
+
+@dataclass
+class HighPrecisionOrbitConfig:
+    """高精度轨道生成配置"""
+    # 基础配置
+    orbit_type: str                    # 轨道类型: keplerian, j2_keplerian, halo, resonant
+    duration: float                    # 轨道持续时间 (秒)
+    step_size: float                   # 输出步长 (秒)
+    
+    # 坐标系配置
+    reference_frame: CoordinateFrame = CoordinateFrame.J2000_ECI
+    central_body: CelestialBody = CelestialBody.EARTH
+    
+    # 精度配置
+    use_high_precision: bool = False   # 是否使用高精度星历
+    ephemeris_config: Optional[EphemerisConfig] = None  # 星历配置
+    
+    # 轨道参数（根据轨道类型变化）
+    orbit_parameters: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
