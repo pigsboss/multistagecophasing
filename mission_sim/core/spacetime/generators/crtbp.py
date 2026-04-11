@@ -442,8 +442,20 @@ class CRTBPOrbitGenerator(BaseTrajectoryGenerator):
         
         # 使用估计的周期进行积分
         # 确保至少积分一个完整周期
+        # 如果周期无效，使用默认值
+        if period is None or period <= 0:
+            period = 2.0 * np.pi  # 默认周期
+            if self.verbose:
+                print(f"  警告：周期无效，使用默认值 {period:.2f}")
+        
         duration = config.get("duration", 2.0 * period)
         step_size = config.get("step_size", 0.001)
+        
+        # 确保duration是正数
+        if duration <= 0:
+            duration = 2.0 * period
+            if self.verbose:
+                print(f"  警告：duration无效，使用 {duration:.2f}")
         
         return self._integrate_orbit(
             corrected_state,
