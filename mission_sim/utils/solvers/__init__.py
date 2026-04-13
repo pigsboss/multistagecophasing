@@ -9,6 +9,8 @@
 """
 from __future__ import annotations
 
+from typing import Dict, List, Any
+
 from .base import (
     # 枚举类型
     SolverStatus,
