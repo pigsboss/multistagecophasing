@@ -146,7 +146,6 @@ class PathIntegralBenchmark:
     @jit(nopython=True, parallel=False)
     def numba_implementation(steps: int = 10000, paths: int = 1000) -> float:
         """Numba实现（串行）"""
-        import numpy as np
         result = 0.0
         for path in range(paths):
             integral = 0.0
@@ -168,7 +167,7 @@ class PathIntegralBenchmark:
                 else:
                     integral += weight * delta * (1.0 - 0.1 * x)
                 
-                x += np.random.random() * 0.1
+                x += random.random() * 0.1
                 if x > 2.0:
                     x = 2.0
                 elif x < -2.0:
@@ -182,7 +181,6 @@ class PathIntegralBenchmark:
     @jit(nopython=True, parallel=True)
     def numba_parallel_implementation(steps: int = 10000, paths: int = 1000) -> float:
         """Numba实现（并行）"""
-        import numpy as np
         result = 0.0
         # 使用prange进行并行化
         for path in prange(paths):
@@ -204,7 +202,7 @@ class PathIntegralBenchmark:
                 else:
                     integral += weight * delta * (1.0 - 0.1 * x)
                 
-                x += np.random.random() * 0.1
+                x += random.random() * 0.1
                 if x > 2.0:
                     x = 2.0
                 elif x < -2.0:
@@ -306,13 +304,12 @@ class MonteCarloBenchmark:
     @jit(nopython=True, parallel=True)
     def numba_parallel_implementation(samples: int = 10000000) -> float:
         """Numba并行实现"""
-        import numpy as np
         inside = 0
         
         # 使用prange并行循环
         for i in prange(samples):
-            x = np.random.random()
-            y = np.random.random()
+            x = random.random()
+            y = random.random()
             if x*x + y*y <= 1.0:
                 inside += 1
         
