@@ -405,13 +405,22 @@ class NBodyBenchmark:
             r = np.sqrt(r2)
             
             # 避免自相互作用和对角线元素
-            np.fill_diagonal(r2, np.inf)
+            n = len(positions)
+            diag_indices = np.diag_indices(n)
+            r2[diag_indices] = np.inf  # 设置对角线为无穷大
             
-            # 计算力的大小
+            # 计算力的大小 (n, n)
             forces = G * masses[:, np.newaxis] * masses[np.newaxis, :] / r2
             
             # 计算加速度 (n, n, 3)
-            accelerations_pair = forces[:, :, np.newaxis] * dx / (r[:, :, np.newaxis] * masses[:, np.newaxis, np.newaxis])
+            # 使用np.where避免对角线上的除零问题
+            # 当r为0时（对角线），加速度应为0
+            with np.errstate(invalid='ignore', divide='ignore'):
+                accelerations_pair = np.where(
+                    r[:, :, np.newaxis] > 0,
+                    forces[:, :, np.newaxis] * dx / (r[:, :, np.newaxis] * masses[:, np.newaxis, np.newaxis]),
+                    0.0
+                )
             
             # 对所有j求和得到每个粒子的总加速度
             accelerations = np.sum(accelerations_pair, axis=1)
