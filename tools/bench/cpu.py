@@ -40,19 +40,41 @@ except ImportError:
 
 @dataclass
 class BenchmarkResult:
-    """基准测试结果"""
+    """Benchmark result data class"""
     task_name: str
     implementation: str
-    execution_time: float  # 秒
-    iterations_per_second: float
+    execution_times: List[float]  # Store all execution times in seconds
+    min_time: float = field(init=False)
+    max_time: float = field(init=False)
+    avg_time: float = field(init=False)
+    median_time: float = field(init=False)
+    std_time: float = field(init=False)
     memory_usage: Optional[float] = None  # MB
     notes: str = ""
+    
+    def __post_init__(self):
+        """Calculate statistics from execution times"""
+        self.min_time = min(self.execution_times)
+        self.max_time = max(self.execution_times)
+        self.avg_time = statistics.mean(self.execution_times)
+        self.median_time = statistics.median(self.execution_times)
+        self.std_time = statistics.stdev(self.execution_times) if len(self.execution_times) > 1 else 0.0
+    
+    @property
+    def iterations_per_second(self) -> float:
+        """Iterations per second based on average time"""
+        return 1.0 / self.avg_time if self.avg_time > 0 else float('inf')
     
     def to_dict(self) -> Dict[str, Any]:
         return {
             "task_name": self.task_name,
             "implementation": self.implementation,
-            "execution_time": self.execution_time,
+            "execution_times": self.execution_times,
+            "min_time": self.min_time,
+            "max_time": self.max_time,
+            "avg_time": self.avg_time,
+            "median_time": self.median_time,
+            "std_time": self.std_time,
             "iterations_per_second": self.iterations_per_second,
             "memory_usage": self.memory_usage,
             "notes": self.notes
@@ -60,7 +82,7 @@ class BenchmarkResult:
 
 
 class CPUBenchmark:
-    """CPU基准测试主类"""
+    """Main CPU benchmark class"""
     
     def __init__(self, warmup_iterations: int = 3, test_iterations: int = 10):
         self.warmup_iterations = warmup_iterations
@@ -70,19 +92,19 @@ class CPUBenchmark:
     def run_benchmark(self, func: Callable, task_name: str, 
                      impl_name: str, **kwargs) -> BenchmarkResult:
         """
-        运行基准测试
+        Run benchmark for a given function
         
         Args:
-            func: 要测试的函数
-            task_name: 任务名称
-            impl_name: 实现名称
-            **kwargs: 传递给函数的参数
+            func: Function to benchmark
+            task_name: Name of the task
+            impl_name: Name of the implementation
+            **kwargs: Arguments passed to the function
         """
-        # 预热运行
+        # Warm-up runs
         for _ in range(self.warmup_iterations):
             func(**kwargs)
         
-        # 正式测试
+        # Actual test runs, collect all execution times
         execution_times = []
         for _ in range(self.test_iterations):
             start_time = time.perf_counter()
@@ -90,16 +112,11 @@ class CPUBenchmark:
             end_time = time.perf_counter()
             execution_times.append(end_time - start_time)
         
-        # 计算统计信息
-        avg_time = statistics.mean(execution_times)
-        std_time = statistics.stdev(execution_times) if len(execution_times) > 1 else 0
-        
         return BenchmarkResult(
             task_name=task_name,
             implementation=impl_name,
-            execution_time=avg_time,
-            iterations_per_second=1.0 / avg_time if avg_time > 0 else float('inf'),
-            notes=f"Standard deviation: {std_time:.6f}s"
+            execution_times=execution_times,
+            notes=f"Based on {self.test_iterations} iterations"
         )
 
 
@@ -522,65 +539,12 @@ class NBodyBenchmark:
 
 
 class BenchmarkReporter:
-    """基准测试结果报告器"""
+    """Benchmark results reporter"""
     
     @staticmethod
-    def print_results(results: List[BenchmarkResult]) -> None:
-        """打印结果到控制台"""
-        print("\n" + "="*80)
-        print("CPU Benchmark Results")
-        print("="*80)
-        
-        # 按任务分组
-        tasks = {}
-        for result in results:
-            if result.task_name not in tasks:
-                tasks[result.task_name] = []
-            tasks[result.task_name].append(result)
-        
-        for task_name, task_results in tasks.items():
-            print(f"\n{task_name}:")
-            print("-" * 60)
-            
-            # 寻找Python内置实现作为基线
-            baseline = None
-            for result in task_results:
-                if result.implementation in ["Pure Python", "Python"]:
-                    baseline = result
-                    break
-            
-            # 如果没有找到基线，则使用最快的作为基准（原逻辑）
-            if baseline is None:
-                baseline = min(task_results, key=lambda x: x.execution_time)
-                baseline_is_python = False
-            else:
-                baseline_is_python = True
-            
-            # 排序：按执行时间从快到慢
-            sorted_results = sorted(task_results, key=lambda x: x.execution_time)
-            
-            for result in sorted_results:
-                if result is baseline:
-                    # 基线标记
-                    if baseline_is_python:
-                        marker = " [Baseline - Pure Python]"
-                    else:
-                        marker = " [Baseline - Fastest]"
-                else:
-                    # 计算相对于基线的加速比
-                    speedup = baseline.execution_time / result.execution_time
-                    marker = f" (Speedup vs baseline: {speedup:.2f}x)"
-                
-                print(f"  {result.implementation:25s} | "
-                      f"Time: {result.execution_time:.4f}s | "
-                      f"Iter/s: {result.iterations_per_second:.2f}{marker}")
-                if result.notes:
-                    print(f"    {result.notes}")
-    
-    @staticmethod
-    def save_results(results: List[BenchmarkResult], filename: str = "cpu_benchmark_results.json") -> None:
-        """保存结果到JSON文件"""
-        data = {
+    def print_results(results: List[BenchmarkResult], output_file: Optional[str] = None) -> None:
+        """Print results to console or save to file"""
+        output_data = {
             "benchmark_results": [r.to_dict() for r in results],
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "system_info": {
@@ -589,117 +553,261 @@ class BenchmarkReporter:
             }
         }
         
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        
-        print(f"\nResults saved to: {filename}")
+        if output_file:
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, indent=2, ensure_ascii=False)
+            print(f"\nResults saved to: {output_file}")
+        else:
+            # Print to console
+            print("\n" + "="*80)
+            print("CPU Benchmark Results")
+            print("="*80)
+            
+            # Group by task
+            tasks = {}
+            for result in results:
+                if result.task_name not in tasks:
+                    tasks[result.task_name] = []
+                tasks[result.task_name].append(result)
+            
+            for task_name, task_results in tasks.items():
+                print(f"\n{task_name}:")
+                print("-" * 60)
+                
+                # Find Python implementation as baseline
+                baseline = None
+                for result in task_results:
+                    if result.implementation in ["Pure Python", "Python"]:
+                        baseline = result
+                        break
+                
+                # If no baseline found, use the fastest as baseline
+                if baseline is None:
+                    baseline = min(task_results, key=lambda x: x.avg_time)
+                    baseline_is_python = False
+                else:
+                    baseline_is_python = True
+                
+                # Sort by average execution time from fastest to slowest
+                sorted_results = sorted(task_results, key=lambda x: x.avg_time)
+                
+                for result in sorted_results:
+                    if result is baseline:
+                        # Baseline marker
+                        if baseline_is_python:
+                            marker = " [Baseline - Pure Python]"
+                        else:
+                            marker = " [Baseline - Fastest]"
+                    else:
+                        # Calculate speedup relative to baseline
+                        speedup = baseline.avg_time / result.avg_time
+                        marker = f" (Speedup vs baseline: {speedup:.2f}x)"
+                    
+                    print(f"  {result.implementation:25s}")
+                    print(f"    Time: {result.avg_time:.4f}s (min:{result.min_time:.4f}s, "
+                          f"max:{result.max_time:.4f}s, med:{result.median_time:.4f}s)")
+                    print(f"    Iter/s: {result.iterations_per_second:.2f}{marker}")
+                    if result.std_time > 0:
+                        print(f"    Std dev: {result.std_time:.6f}s")
+                    if result.notes:
+                        print(f"    {result.notes}")
+    
+    @staticmethod
+    def save_results(results: List[BenchmarkResult], filename: str = "cpu_benchmark_results.json") -> None:
+        """Save results to JSON file (backward compatibility)"""
+        BenchmarkReporter.print_results(results, filename)
 
 
 def main():
-    """主函数"""
-    print("Starting CPU benchmark...")
+    """Main function"""
+    import argparse
     
-    # 创建基准测试器
-    benchmark = CPUBenchmark(warmup_iterations=2, test_iterations=5)
+    parser = argparse.ArgumentParser(
+        description="CPU performance benchmark tool",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --size (5000,500)                     # Set same scale for all tests
+  %(prog)s --size-path (5000,500) --size-mc 1000000 --size-nbody (200,20)
+  %(prog)s --repeats 10 --output results.json    # Run 10 repeats and save to JSON
+  %(prog)s --help                                # Show this help message
+  
+Scale parameters:
+  --size (m,n):        Set uniform scale for all tests
+  --size-path (m,n):   Path integral test, m=steps, n=paths
+  --size-mc m:         Monte Carlo test, m=samples
+  --size-nbody (m,n):  N-body test, m=bodies, n=steps
+        """
+    )
+    
+    parser.add_argument(
+        "--size", type=str,
+        help="Set uniform scale for all tests, format (m,n)"
+    )
+    
+    parser.add_argument(
+        "--size-path", type=str,
+        help="Set path integral test scale, format (m,n) where m=steps, n=paths"
+    )
+    
+    parser.add_argument(
+        "--size-mc", type=str,
+        help="Set Monte Carlo test scale, m=samples"
+    )
+    
+    parser.add_argument(
+        "--size-nbody", type=str,
+        help="Set N-body test scale, format (m,n) where m=bodies, n=steps"
+    )
+    
+    parser.add_argument(
+        "--repeats", type=int, default=5,
+        help="Number of repeats for each test (default: 5)"
+    )
+    
+    parser.add_argument(
+        "--output", type=str,
+        help="Path to output JSON file, if not specified print to console"
+    )
+    
+    args = parser.parse_args()
+    
+    # Parse scale parameters
+    def parse_tuple(s: str) -> Tuple[int, int]:
+        """Parse (m,n) format string to integer tuple"""
+        s = s.strip()
+        if s.startswith('(') and s.endswith(')'):
+            s = s[1:-1]
+        parts = s.split(',')
+        if len(parts) != 2:
+            raise ValueError(f"Invalid tuple format: {s}")
+        return (int(parts[0].strip()), int(parts[1].strip()))
+    
+    def parse_int(s: str) -> int:
+        """Parse integer"""
+        return int(s.strip())
+    
+    # Determine test scales
+    if args.size:
+        # Uniform scale
+        base_m, base_n = parse_tuple(args.size)
+        path_steps, path_paths = base_m, base_n
+        mc_samples = base_m
+        nbody_bodies, nbody_steps = base_m, base_n
+    else:
+        # Individual settings or defaults
+        path_steps, path_paths = (5000, 500) if not args.size_path else parse_tuple(args.size_path)
+        mc_samples = 1000000 if not args.size_mc else parse_int(args.size_mc)
+        nbody_bodies, nbody_steps = (200, 20) if not args.size_nbody else parse_tuple(args.size_nbody)
+    
+    print("Starting CPU benchmark...")
+    print(f"Configuration:")
+    print(f"  Path Integral: steps={path_steps}, paths={path_paths}")
+    print(f"  Monte Carlo: samples={mc_samples}")
+    print(f"  N-Body: bodies={nbody_bodies}, steps={nbody_steps}")
+    print(f"  Repeats: {args.repeats}")
+    
+    # Create benchmark instance
+    benchmark = CPUBenchmark(warmup_iterations=2, test_iterations=args.repeats)
     
     all_results = []
     
-    # 测试1: 路径积分问题
+    # Test 1: Path Integral
     print("\n1. Testing complex branching and loops (Path Integral)...")
     
     path_integral = PathIntegralBenchmark()
     
-    # 纯Python实现
+    # Pure Python implementation
     result = benchmark.run_benchmark(
         path_integral.python_implementation,
         task_name="Path Integral",
         impl_name="Pure Python",
-        steps=5000,
-        paths=500
+        steps=path_steps,
+        paths=path_paths
     )
     all_results.append(result)
     
-    # NumPy/SciPy实现
+    # NumPy/SciPy implementation
     if NUMPY_AVAILABLE and SCIPY_AVAILABLE:
         result = benchmark.run_benchmark(
             path_integral.numpy_scipy_implementation,
             task_name="Path Integral",
             impl_name="NumPy/SciPy",
-            steps=5000,
-            paths=500
+            steps=path_steps,
+            paths=path_paths
         )
         all_results.append(result)
     
-    # Numba串行实现
+    # Numba serial implementation
     if NUMBA_AVAILABLE:
         result = benchmark.run_benchmark(
             path_integral.numba_implementation,
             task_name="Path Integral",
             impl_name="Numba (Serial)",
-            steps=5000,
-            paths=500
+            steps=path_steps,
+            paths=path_paths
         )
         all_results.append(result)
         
-        # Numba并行实现
+        # Numba parallel implementation
         result = benchmark.run_benchmark(
             path_integral.numba_parallel_implementation,
             task_name="Path Integral",
             impl_name="Numba (Parallel)",
-            steps=5000,
-            paths=500
+            steps=path_steps,
+            paths=path_paths
         )
         all_results.append(result)
     
-    # 测试2: 蒙特卡洛模拟
+    # Test 2: Monte Carlo simulation
     print("\n2. Testing large-scale vector operations (Monte Carlo)...")
     
     monte_carlo = MonteCarloBenchmark()
     
-    # 纯Python实现
+    # Pure Python implementation
     result = benchmark.run_benchmark(
         monte_carlo.python_implementation,
         task_name="Monte Carlo",
         impl_name="Pure Python",
-        samples=1000000
+        samples=mc_samples
     )
     all_results.append(result)
     
-    # NumPy实现
+    # NumPy implementation
     if NUMPY_AVAILABLE:
         result = benchmark.run_benchmark(
             monte_carlo.numpy_implementation,
             task_name="Monte Carlo",
             impl_name="NumPy",
-            samples=1000000
+            samples=mc_samples
         )
         all_results.append(result)
     
-    # Numba实现
+    # Numba implementation
     if NUMBA_AVAILABLE and NUMPY_AVAILABLE:
         result = benchmark.run_benchmark(
             monte_carlo.numba_implementation,
             task_name="Monte Carlo",
             impl_name="Numba",
-            samples=1000000
+            samples=mc_samples
         )
         all_results.append(result)
         
-        # Numba并行实现
+        # Numba parallel implementation
         result = benchmark.run_benchmark(
             monte_carlo.numba_parallel_implementation,
             task_name="Monte Carlo",
             impl_name="Numba (Parallel)",
-            samples=1000000
+            samples=mc_samples
         )
         all_results.append(result)
     
-    # 测试3: N体动力学
+    # Test 3: N-body dynamics
     print("\n3. Testing large-scale data and synchronization (N-Body)...")
     
-    nbody = NBodyBenchmark(num_bodies=200, steps=20)
+    nbody = NBodyBenchmark(num_bodies=nbody_bodies, steps=nbody_steps)
     
-    # 纯Python实现
+    # Pure Python implementation
     result = benchmark.run_benchmark(
         nbody.python_implementation,
         task_name="N-Body",
@@ -707,7 +815,7 @@ def main():
     )
     all_results.append(result)
     
-    # NumPy实现
+    # NumPy implementation
     if NUMPY_AVAILABLE:
         result = benchmark.run_benchmark(
             nbody.numpy_implementation,
@@ -716,7 +824,7 @@ def main():
         )
         all_results.append(result)
     
-    # Numba实现
+    # Numba implementation
     if NUMBA_AVAILABLE and NUMPY_AVAILABLE:
         result = benchmark.run_benchmark(
             nbody.numba_implementation,
@@ -725,7 +833,7 @@ def main():
         )
         all_results.append(result)
         
-        # Numba并行实现
+        # Numba parallel implementation
         result = benchmark.run_benchmark(
             nbody.numba_parallel_implementation,
             task_name="N-Body",
@@ -733,13 +841,10 @@ def main():
         )
         all_results.append(result)
     
-    # 输出结果
-    BenchmarkReporter.print_results(all_results)
+    # Output results
+    BenchmarkReporter.print_results(all_results, output_file=args.output)
     
-    # 保存结果
-    BenchmarkReporter.save_results(all_results)
-    
-    # 输出系统信息
+    # Output system information
     print("\n" + "="*80)
     print("System Information:")
     print(f"  Python version: {sys.version.split()[0]}")
@@ -749,7 +854,7 @@ def main():
         import numpy as np
         print(f"  NumPy version: {np.__version__}")
         
-        # 检测BLAS后端
+        # Detect BLAS backend
         try:
             import numpy.distutils.system_info as sysinfo
             blas_info = sysinfo.get_info('blas_opt')
