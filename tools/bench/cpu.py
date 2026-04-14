@@ -121,17 +121,17 @@ class CPUBenchmark:
 
 
 class PathIntegralBenchmark:
-    """路径积分问题的基准测试"""
+    """Trajectory integral benchmark (for aerospace trajectory optimization)"""
     
     @staticmethod
     def python_implementation(steps: int = 10000, paths: int = 1000) -> float:
-        """纯Python实现"""
+        """Pure Python implementation - trajectory integral computation"""
         result = 0.0
-        for path in range(paths):
+        for traj in range(paths):  # 语义上理解为trajectories
             integral = 0.0
             x = 0.0
             for step in range(steps):
-                # 模拟路径积分中的复杂分支逻辑
+                # Simulate complex branching logic in trajectory integration
                 if x < -1.0:
                     weight = 0.1
                 elif x < 0.0:
@@ -141,14 +141,14 @@ class PathIntegralBenchmark:
                 else:
                     weight = 0.2
                 
-                # 更新积分值（包含复杂条件判断）
+                # Update integral value (with complex condition checking)
                 delta = 1.0 / steps
                 if step % 2 == 0:
                     integral += weight * delta * (1.0 + 0.1 * x)
                 else:
                     integral += weight * delta * (1.0 - 0.1 * x)
                 
-                # 更新路径（带边界检查）
+                # Update trajectory (with boundary checking)
                 x += random.random() * 0.1
                 if x > 2.0:
                     x = 2.0
@@ -628,13 +628,13 @@ def main():
         epilog="""
 Examples:
   %(prog)s --size (5000,500)                     # Set same scale for all tests
-  %(prog)s --size-path (5000,500) --size-mc 1000000 --size-nbody (200,20)
+  %(prog)s --size-traj (5000,500) --size-mc 1000000 --size-nbody (200,20)
   %(prog)s --repeats 10 --output results.json    # Run 10 repeats and save to JSON
   %(prog)s --help                                # Show this help message
   
 Scale parameters:
   --size (m,n):        Set uniform scale for all tests
-  --size-path (m,n):   Path integral test, m=steps, n=paths
+  --size-traj (m,n):   Trajectory integral test, m=steps, n=trajectories
   --size-mc m:         Monte Carlo test, m=samples
   --size-nbody (m,n):  N-body test, m=bodies, n=steps
         """
@@ -646,8 +646,8 @@ Scale parameters:
     )
     
     parser.add_argument(
-        "--size-path", type=str,
-        help="Set path integral test scale, format (m,n) where m=steps, n=paths"
+        "--size-traj", type=str,
+        help="Set trajectory integral test scale, format (m,n) where m=steps, n=trajectories"
     )
     
     parser.add_argument(
@@ -691,18 +691,20 @@ Scale parameters:
     if args.size:
         # Uniform scale
         base_m, base_n = parse_tuple(args.size)
-        path_steps, path_paths = base_m, base_n
+        traj_steps, traj_trajectories = base_m, base_n  # 修改：path → traj
         mc_samples = base_m
         nbody_bodies, nbody_steps = base_m, base_n
     else:
         # Individual settings or defaults
-        path_steps, path_paths = (5000, 500) if not args.size_path else parse_tuple(args.size_path)
+        # 修改：path → traj
+        traj_steps, traj_trajectories = (5000, 500) if not args.size_traj else parse_tuple(args.size_traj)
         mc_samples = 1000000 if not args.size_mc else parse_int(args.size_mc)
         nbody_bodies, nbody_steps = (200, 20) if not args.size_nbody else parse_tuple(args.size_nbody)
     
     print("Starting CPU benchmark...")
     print(f"Configuration:")
-    print(f"  Path Integral: steps={path_steps}, paths={path_paths}")
+    # 修改：Path Integral → Trajectory Integral
+    print(f"  Trajectory Integral: steps={traj_steps}, trajectories={traj_trajectories}")
     print(f"  Monte Carlo: samples={mc_samples}")
     print(f"  N-Body: bodies={nbody_bodies}, steps={nbody_steps}")
     print(f"  Repeats: {args.repeats}")
@@ -712,18 +714,18 @@ Scale parameters:
     
     all_results = []
     
-    # Test 1: Path Integral
-    print("\n1. Testing complex branching and loops (Path Integral)...")
+    # Test 1: Trajectory Integral (原 Path Integral)
+    print("\n1. Testing complex branching and loops (Trajectory Integral)...")
     
     path_integral = PathIntegralBenchmark()
     
     # Pure Python implementation
     result = benchmark.run_benchmark(
         path_integral.python_implementation,
-        task_name="Path Integral",
+        task_name="Trajectory Integral",  # 修改：Path Integral → Trajectory Integral
         impl_name="Pure Python",
-        steps=path_steps,
-        paths=path_paths
+        steps=traj_steps,
+        paths=traj_trajectories  # 修改：使用traj_trajectories
     )
     all_results.append(result)
     
@@ -731,10 +733,10 @@ Scale parameters:
     if NUMPY_AVAILABLE and SCIPY_AVAILABLE:
         result = benchmark.run_benchmark(
             path_integral.numpy_scipy_implementation,
-            task_name="Path Integral",
+            task_name="Trajectory Integral",  # 修改：Path Integral → Trajectory Integral
             impl_name="NumPy/SciPy",
-            steps=path_steps,
-            paths=path_paths
+            steps=traj_steps,
+            paths=traj_trajectories  # 修改：使用traj_trajectories
         )
         all_results.append(result)
     
@@ -742,20 +744,20 @@ Scale parameters:
     if NUMBA_AVAILABLE:
         result = benchmark.run_benchmark(
             path_integral.numba_implementation,
-            task_name="Path Integral",
+            task_name="Trajectory Integral",  # 修改：Path Integral → Trajectory Integral
             impl_name="Numba (Serial)",
-            steps=path_steps,
-            paths=path_paths
+            steps=traj_steps,
+            paths=traj_trajectories  # 修改：使用traj_trajectories
         )
         all_results.append(result)
         
         # Numba parallel implementation
         result = benchmark.run_benchmark(
             path_integral.numba_parallel_implementation,
-            task_name="Path Integral",
+            task_name="Trajectory Integral",  # 修改：Path Integral → Trajectory Integral
             impl_name="Numba (Parallel)",
-            steps=path_steps,
-            paths=path_paths
+            steps=traj_steps,
+            paths=traj_trajectories  # 修改：使用traj_trajectories
         )
         all_results.append(result)
     
