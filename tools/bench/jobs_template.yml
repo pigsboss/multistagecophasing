@@ -1,0 +1,92 @@
+# 批量基准测试任务描述文件
+settings:
+  sleep_interval: 1.0  # 两次测试之间的等待时间（秒）
+  output_dir: "batch_results"  # 结果输出目录
+  unified_output: "unified_results.json"  # 统一结果文件名
+  plots_dir: "plots"  # 图表输出目录
+
+plot_groups:
+  # 轨迹积分测试：固定轨迹数，变化步数
+  - name: "Trajectory Integral (Varying Steps)"
+    task: "Trajectory Integral"
+    x_parameter: "steps"
+    x_label: "Number of Steps"
+    y_parameter: "avg_time"
+    y_label: "Average Time (s)"
+    scale_type: "trajectory"
+    fixed_params:
+      trajectories: 500
+    varied_params:
+      steps: [1000, 2000, 5000, 10000, 20000]
+
+  # 轨迹积分测试：固定步数，变化轨迹数
+  - name: "Trajectory Integral (Varying Trajectories)"
+    task: "Trajectory Integral"
+    x_parameter: "trajectories"
+    x_label: "Number of Trajectories"
+    y_parameter: "iterations_per_second"
+    y_label: "Iterations per Second"
+    scale_type: "trajectory"
+    fixed_params:
+      steps: 5000
+    varied_params:
+      trajectories: [100, 200, 500, 1000, 2000]
+
+  # 蒙特卡洛测试：变化样本数
+  - name: "Monte Carlo (Varying Samples)"
+    task: "Monte Carlo"
+    x_parameter: "samples"
+    x_label: "Number of Samples"
+    y_parameter: "avg_time"
+    y_label: "Average Time (s)"
+    scale_type: "monte_carlo"
+    varied_params:
+      samples: [100000, 500000, 1000000, 5000000, 10000000]
+
+  # N体问题测试：固定步数，变化质点数量
+  - name: "N-Body (Varying Bodies)"
+    task: "N-Body"
+    x_parameter: "bodies"
+    x_label: "Number of Bodies"
+    y_parameter: "avg_time"
+    y_label: "Average Time (s)"
+    scale_type: "nbody"
+    fixed_params:
+      steps: 20
+    varied_params:
+      bodies: [100, 200, 500, 1000, 2000]
+
+  # N体问题测试：固定质点数，变化步数
+  - name: "N-Body (Varying Steps)"
+    task: "N-Body"
+    x_parameter: "steps"
+    x_label: "Number of Steps"
+    y_parameter: "avg_time"
+    y_label: "Average Time (s)"
+    scale_type: "nbody"
+    fixed_params:
+      bodies: 500
+    varied_params:
+      steps: [10, 20, 50, 100, 200]
+
+jobs:
+  # 轨迹积分基准测试任务
+  - name: "traj_benchmark"
+    tool: "cpu.py"
+    base_args: ["--repeats", "3"]
+    scale_type: "trajectory"  # 用于分组
+    task: "Trajectory Integral"
+
+  # 蒙特卡洛基准测试任务
+  - name: "mc_benchmark"
+    tool: "cpu.py"
+    base_args: ["--repeats", "3"]
+    scale_type: "monte_carlo"
+    task: "Monte Carlo"
+
+  # N体问题基准测试任务
+  - name: "nbody_benchmark"
+    tool: "cpu.py"
+    base_args: ["--repeats", "3"]
+    scale_type: "nbody"
+    task: "N-Body"
