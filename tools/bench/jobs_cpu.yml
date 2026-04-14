@@ -1,0 +1,161 @@
+# CPU基准测试任务描述文件
+# 运行三种测试：轨迹积分、蒙特卡洛、N体问题，并绘制不同规模的性能曲线
+
+settings:
+  sleep_interval: 0.5  # 两次测试之间的等待时间（秒）
+  output_dir: "cpu_benchmark_results"  # 结果输出目录
+  unified_output: "unified_cpu_results.json"  # 统一结果文件名
+  plots_dir: "cpu_plots"  # 图表输出目录
+
+plot_groups:
+  # ========== 轨迹积分测试 ==========
+  # 轨迹积分测试：固定轨迹数，变化步数
+  - name: "Trajectory Integral - Varying Steps"
+    task: "Trajectory Integral"
+    x_parameter: "steps"
+    x_label: "Number of Steps"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "trajectory"
+    fixed_params:
+      trajectories: 500
+    varied_params:
+      steps: [1000, 2000, 5000, 10000, 15000]
+
+  # 轨迹积分测试：固定步数，变化轨迹数
+  - name: "Trajectory Integral - Varying Trajectories"
+    task: "Trajectory Integral"
+    x_parameter: "trajectories"
+    x_label: "Number of Trajectories"
+    y_parameter: "iterations_per_second"
+    y_label: "Iterations per Second"
+    scale_type: "trajectory"
+    fixed_params:
+      steps: 5000
+    varied_params:
+      trajectories: [100, 250, 500, 750, 1000]
+
+  # ========== 蒙特卡洛测试 ==========
+  # 蒙特卡洛测试：变化样本数
+  - name: "Monte Carlo - Varying Samples"
+    task: "Monte Carlo"
+    x_parameter: "samples"
+    x_label: "Number of Samples"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "monte_carlo"
+    varied_params:
+      samples: [100000, 500000, 1000000, 5000000, 10000000]
+
+  # 蒙特卡洛测试：变化样本数（显示每秒迭代次数）
+  - name: "Monte Carlo - Iterations per Second"
+    task: "Monte Carlo"
+    x_parameter: "samples"
+    x_label: "Number of Samples"
+    y_parameter: "iterations_per_second"
+    y_label: "Iterations per Second"
+    scale_type: "monte_carlo"
+    varied_params:
+      samples: [100000, 500000, 1000000, 5000000, 10000000]
+
+  # ========== N体问题测试 ==========
+  # N体问题测试：固定步数，变化质点数量
+  - name: "N-Body - Varying Number of Bodies"
+    task: "N-Body"
+    x_parameter: "bodies"
+    x_label: "Number of Bodies"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "nbody"
+    fixed_params:
+      steps: 20
+    varied_params:
+      bodies: [50, 100, 200, 500, 1000]
+
+  # N体问题测试：固定质点数，变化步数
+  - name: "N-Body - Varying Number of Steps"
+    task: "N-Body"
+    x_parameter: "steps"
+    x_label: "Number of Steps"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "nbody"
+    fixed_params:
+      bodies: 500
+    varied_params:
+      steps: [10, 20, 30, 50, 100]
+
+  # ========== 对比测试：不同实现方式的性能对比 ==========
+  # 使用中等规模参数，比较不同实现方式的性能
+  - name: "Implementation Comparison - Trajectory Integral"
+    task: "Trajectory Integral"
+    x_parameter: "implementation"
+    x_label: "Implementation"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "trajectory"
+    fixed_params:
+      steps: 5000
+      trajectories: 500
+    varied_params:
+      # 这个参数将被忽略，因为x_parameter是implementation
+      # 但我们需要一个参数来生成任务，使用固定的参数值
+      dummy: [1]
+
+  - name: "Implementation Comparison - Monte Carlo"
+    task: "Monte Carlo"
+    x_parameter: "implementation"
+    x_label: "Implementation"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "monte_carlo"
+    fixed_params:
+      samples: 1000000
+    varied_params:
+      dummy: [1]
+
+  - name: "Implementation Comparison - N-Body"
+    task: "N-Body"
+    x_parameter: "implementation"
+    x_label: "Implementation"
+    y_parameter: "avg_time"
+    y_label: "Average Execution Time (s)"
+    scale_type: "nbody"
+    fixed_params:
+      bodies: 500
+      steps: 20
+    varied_params:
+      dummy: [1]
+
+jobs:
+  # ========== 轨迹积分测试任务 ==========
+  # 运行所有轨迹积分测试实现
+  - name: "traj_benchmark"
+    tool: "cpu.py"
+    base_args: ["--test", "traj", "--repeats", "3"]
+    scale_type: "trajectory"
+    task: "Trajectory Integral"
+
+  # ========== 蒙特卡洛测试任务 ==========
+  # 运行所有蒙特卡洛测试实现
+  - name: "mc_benchmark"
+    tool: "cpu.py"
+    base_args: ["--test", "mc", "--repeats", "3"]
+    scale_type: "monte_carlo"
+    task: "Monte Carlo"
+
+  # ========== N体问题测试任务 ==========
+  # 运行所有N体问题测试实现
+  - name: "nbody_benchmark"
+    tool: "cpu.py"
+    base_args: ["--test", "nbody", "--repeats", "3"]
+    scale_type: "nbody"
+    task: "N-Body"
+
+  # ========== 完整测试任务（可选） ==========
+  # 如果需要运行所有测试，可以启用这个任务
+  # - name: "full_benchmark"
+  #   tool: "cpu.py"
+  #   base_args: ["--repeats", "3"]
+  #   scale_type: "all"
+  #   task: "All Tests"
