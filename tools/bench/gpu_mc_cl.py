@@ -488,14 +488,17 @@ class GPUMonteCarloBenchmark:
         execution_times = []
         batch_inside_totals = []  # Store inside counts for validation
         
+        # Create a zero array for resetting the counter
+        zero_counter_np = np.zeros(1, dtype=np.uint64)
+        
         for i in range(test_iterations):
             total_inside = 0
             start = time.perf_counter()
             
             # Execute multiple batches
             for batch_idx in range(num_batches):
-                # Reset global counter to zero for each batch
-                cl.enqueue_copy(self.queue, global_counter_buf, global_counter_np)
+                # Reset global counter to zero for each batch using zero_counter_np
+                cl.enqueue_copy(self.queue, global_counter_buf, zero_counter_np)
                 
                 SEED_STRIDE = 100000
                 seed = np.uint32(12345 + i * num_batches * SEED_STRIDE + batch_idx * SEED_STRIDE)
