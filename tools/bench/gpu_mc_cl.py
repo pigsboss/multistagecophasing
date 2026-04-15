@@ -83,24 +83,33 @@ class GPUMonteCarloBenchmark:
     PRECISION_CONFIG = {
         'fp32': {
             'ctype': 'float',
+            'vec_type': 'float4',
             'suffix': 'f',
             'np_dtype': np.float32,
             'one': '1.0f',
-            'ext_pragma': ''
+            'ext_pragma': '',
+            'accum_ctype': 'float',
+            'vec_size': 4
         },
         'fp64': {
             'ctype': 'double',
+            'vec_type': 'double4',
             'suffix': '',
             'np_dtype': np.float64,
             'one': '1.0',
-            'ext_pragma': '#pragma OPENCL EXTENSION cl_khr_fp64 : enable'
+            'ext_pragma': '#pragma OPENCL EXTENSION cl_khr_fp64 : enable',
+            'accum_ctype': 'double',
+            'vec_size': 4
         },
         'fp16': {
             'ctype': 'half',
+            'vec_type': 'half4',
             'suffix': 'h',
             'np_dtype': np.float16,
             'one': '1.0h',
-            'ext_pragma': '#pragma OPENCL EXTENSION cl_khr_fp16 : enable'
+            'ext_pragma': '#pragma OPENCL EXTENSION cl_khr_fp16 : enable',
+            'accum_ctype': 'float',  # Mixed precision: use fp32 for accumulation
+            'vec_size': 4
         }
     }
     
@@ -129,11 +138,19 @@ class GPUMonteCarloBenchmark:
         self.context = cl.Context([self.device])
         self.queue = cl.CommandQueue(self.context, properties=cl.command_queue_properties.PROFILING_ENABLE)
         
+        # Query device properties for optimization (from SKILL.opencl.md)
+        self.max_wg_size = self.device.max_work_group_size
+        self.preferred_wg_size = getattr(self.device, 'preferred_work_group_size_multiple', 64)
+        self.local_mem_size = self.device.local_mem_size
+        self.compute_units = self.device.max_compute_units
+        
         print(f"Using device: {self.device.name}")
         print(f"Device vendor: {self.device.vendor}")
         print(f"OpenCL version: {self.device.version}")
-        print(f"Max compute units: {self.device.max_compute_units}")
-        print(f"Max work group size: {self.device.max_work_group_size}")
+        print(f"Max compute units: {self.compute_units}")
+        print(f"Max work group size: {self.max_wg_size}")
+        print(f"Preferred work group size multiple: {self.preferred_wg_size}")
+        print(f"Local memory size: {self.local_mem_size / 1024:.1f} KB")
     
     def check_precision_support(self, precision: str) -> bool:
         """Check if device supports specific floating point precision"""
@@ -148,92 +165,190 @@ class GPUMonteCarloBenchmark:
         return False
     
     def generate_kernel_source(self, precision: str) -> str:
-        """Generate OpenCL kernel for Monte Carlo Pi estimation"""
+        """Generate optimized OpenCL kernel using techniques from SKILL.opencl.md"""
         config = self.PRECISION_CONFIG[precision]
         ctype = config['ctype']
+        vec_type = config['vec_type']
         suffix = config['suffix']
         one = config['one']
         ext_pragma = config['ext_pragma']
+        accum_ctype = config['accum_ctype']
         
         kernel = f'''
         {ext_pragma}
         
-        // Linear Congruential Generator
-        inline uint lcg(uint *state) {{
-            *state = (*state) * 1103515245u + 12345u;
-            return *state;
+        // 64-bit atomic add with proper fallback (from SKILL.opencl.md)
+        #if defined(cl_khr_int64_base_atomics)
+            #define ATOMIC_ADD_ULONG(ptr, val) atom_add(ptr, val)
+        #else
+            // Fallback implementation using compare-and-swap
+            inline void atomic_add_ulong_fallback(global ulong *ptr, ulong val) {{
+                union {{
+                    ulong u64;
+                    uint2 u32;
+                }} old, new_val, read_back;
+                
+                do {{
+                    old.u64 = *ptr;
+                    new_val.u64 = old.u64 + val;
+                    read_back.u32 = atom_cmpxchg((global uint2*)ptr, old.u32, new_val.u32);
+                }} while (read_back.u32.x != old.u32.x || read_back.u32.y != old.u32.y);
+            }}
+            #define ATOMIC_ADD_ULONG(ptr, val) atomic_add_ulong_fallback(ptr, val)
+        #endif
+        
+        // Optimized Philox4x32 RNG (from SKILL.opencl.md best practices)
+        inline uint4 philox4x32_round(uint4 ctr, uint4 key) {{
+            const uint M0 = 0xD2511F53u;
+            const uint M1 = 0xCD9E8D57u;
+            
+            uint hi0 = mul_hi(M0, ctr.x);
+            uint hi1 = mul_hi(M1, ctr.z);
+            
+            return (uint4)(
+                hi1 ^ ctr.y ^ key.x,
+                M1 * ctr.z,
+                hi0 ^ ctr.w ^ key.y,
+                M0 * ctr.x
+            );
         }}
         
-        inline {ctype} random_{precision}(uint *state) {{
-            uint val = lcg(state) & 0x7fffffffu;
-            return ({ctype})val / ({ctype})0x7fffffffu;
+        inline uint4 philox4x32(uint4 ctr, uint4 key) {{
+            // 10 rounds for good statistical quality
+            #pragma unroll 5
+            for (int i = 0; i < 5; i++) {{
+                ctr = philox4x32_round(ctr, key);
+                key.xy += (uint2)(0x9E3779B9u, 0xBB67AE85u);
+                key.zw += (uint2)(0x9E3779B9u, 0xBB67AE85u);
+                ctr = philox4x32_round(ctr, key);
+                key.xy += (uint2)(0x9E3779B9u, 0xBB67AE85u);
+                key.zw += (uint2)(0x9E3779B9u, 0xBB67AE85u);
+            }}
+            return ctr;
         }}
         
-        inline uint wang_hash(uint seed) {{
-            seed = (seed ^ 61) ^ (seed >> 16);
-            seed *= 9;
-            seed = seed ^ (seed >> 4);
-            seed *= 0x27d4eb2d;
-            seed = seed ^ (seed >> 15);
-            return seed;
+        // Convert to [0,1) with proper masking (coalesced access pattern)
+        inline {vec_type} uint4_to_float4(uint4 u) {{
+            const uint MASK = 0x3FFFFFFFu;  // 30 bits for better precision
+            const {ctype} SCALE = 1.0{suffix} / ({ctype})(1u << 30);
+            
+            u &= MASK;
+            return ({vec_type})(
+                ({ctype})u.x * SCALE,
+                ({ctype})u.y * SCALE,
+                ({ctype})u.z * SCALE,
+                ({ctype})u.w * SCALE
+            );
         }}
         
+        // Main Monte Carlo kernel with coalesced memory access
         kernel void monte_carlo_pi(
             const ulong samples_per_item,
-            const uint total_items,
             const uint base_seed,
-            global ulong *partial_counts,
-            local ulong *local_counts
+            global ulong *global_counter,
+            local ulong *local_counter
         ) {{
             uint gid = get_global_id(0);
             uint lid = get_local_id(0);
-            uint group_size = get_local_size(0);
+            uint wg_size = get_local_size(0);
             
-            ulong local_count = 0;
+            // Coalesced memory access pattern: consecutive global IDs access consecutive memory
+            uint4 key = (uint4)(
+                base_seed + gid * 4,
+                base_seed + gid * 4 + 1,
+                base_seed + gid * 4 + 2,
+                base_seed + gid * 4 + 3
+            );
             
-            // Each work-item processes samples_per_item random points
-            uint rng_state = wang_hash(base_seed + gid);
+            // Initialize counter with proper distribution
+            uint4 counter = (uint4)(
+                gid,
+                (gid >> 16) | (gid << 16),  // Spread bits for better distribution
+                0,
+                0
+            );
             
+            {accum_ctype} local_count = 0{suffix};
+            
+            // Vectorized processing with loop unrolling
             for (ulong i = 0; i < samples_per_item; i++) {{
-                {ctype} x = random_{precision}(&rng_state);
-                {ctype} y = random_{precision}(&rng_state);
+                counter.z = (uint)(i & 0xFFFFFFFFu);
+                counter.w = (uint)(i >> 32);
                 
-                {ctype} dist = x * x + y * y;
-                if (dist <= {one}) {{
-                    local_count++;
-                }}
+                // Generate x coordinates
+                uint4 rand_x = philox4x32(counter, key);
+                {vec_type} x = uint4_to_float4(rand_x);
+                
+                // Generate y coordinates with different key
+                uint4 key_y = key + (uint4)(0xB5AD4ECEu, 0x0F1DBCB3u, 0x876D1B3u, 0xE12047C5u);
+                uint4 rand_y = philox4x32(counter, key_y);
+                {vec_type} y = uint4_to_float4(rand_y);
+                
+                // Vectorized distance calculation
+                {vec_type} dist = x * x + y * y;
+                
+                // Branchless counting (from SKILL.opencl.md optimization)
+                local_count += ({accum_ctype})(dist.x <= {one}) * 1{suffix};
+                local_count += ({accum_ctype})(dist.y <= {one}) * 1{suffix};
+                local_count += ({accum_ctype})(dist.z <= {one}) * 1{suffix};
+                local_count += ({accum_ctype})(dist.w <= {one}) * 1{suffix};
             }}
             
-            // Store in local memory for reduction
-            local_counts[lid] = local_count;
+            // Local reduction using tree pattern (optimized for GPU)
+            local_counter[lid] = (ulong)local_count;
             barrier(CLK_LOCAL_MEM_FENCE);
             
-            // Parallel reduction in local memory
-            for (uint stride = group_size / 2; stride > 0; stride /= 2) {{
+            // Tree reduction with power-of-two stride
+            for (uint stride = wg_size >> 1; stride > 0; stride >>= 1) {{
                 if (lid < stride) {{
-                    local_counts[lid] += local_counts[lid + stride];
+                    local_counter[lid] += local_counter[lid + stride];
                 }}
                 barrier(CLK_LOCAL_MEM_FENCE);
             }}
             
-            // Write result for this work-group
+            // Atomic update to global memory (single operation per work-group)
             if (lid == 0) {{
-                partial_counts[get_group_id(0)] = local_counts[0];
+                ATOMIC_ADD_ULONG(global_counter, local_counter[0]);
             }}
         }}
         '''
         return kernel
     
     def build_program(self, precision: str):
-        """Build OpenCL program for specific precision"""
+        """Build OpenCL program with optimization flags from SKILL.opencl.md"""
         source = self.generate_kernel_source(precision)
         program = cl.Program(self.context, source)
         
+        # Build options optimized for different device types (from SKILL.opencl.md)
+        build_options = [
+            '-cl-fast-relaxed-math',
+            '-cl-mad-enable',
+            '-cl-no-signed-zeros',
+            '-cl-unsafe-math-optimizations',
+            f'-DWORK_GROUP_SIZE={self.preferred_wg_size}',
+            f'-DMAX_WORK_GROUP_SIZE={self.max_wg_size}'
+        ]
+        
+        # Add device-specific optimizations
+        device_type = self.device.type
+        if device_type == cl.device_type.GPU:
+            build_options.append('-cl-std=CL1.2')
+        elif device_type == cl.device_type.CPU:
+            build_options.append('-cl-opt-disable')  # Better for CPU debugging
+        
         try:
-            program.build(options=['-cl-fast-relaxed-math'])
+            program.build(options=' '.join(build_options))
         except cl.RuntimeError as e:
             build_log = program.get_build_info(self.device, cl.program_build_info.LOG)
-            raise RuntimeError(f"OpenCL build error: {e}\nBuild log:\n{build_log}")
+            # Check for specific errors
+            if 'cl_khr_int64_base_atomics' in build_log and precision == 'fp64':
+                print("Warning: 64-bit atomics not fully supported, using fallback")
+                # Rebuild without 64-bit atomics dependency
+                build_options.append('-DNO_64BIT_ATOMICS')
+                program = cl.Program(self.context, source)
+                program.build(options=' '.join(build_options))
+            else:
+                raise RuntimeError(f"OpenCL build error: {e}\nBuild log:\n{build_log}")
         
         return program
     
@@ -270,23 +385,83 @@ class GPUMonteCarloBenchmark:
         program = self.build_program(precision)
         kernel = program.monte_carlo_pi
         
-        # Determine work size (fixed per batch to control memory)
-        max_wg_size = min(256, self.device.max_work_group_size)
-        preferred_wi = self.device.max_compute_units * 64
-        # Limit work items to ensure samples_per_item is reasonable
-        num_work_items = min(preferred_wi, max(1024, samples_per_batch // 1000))
-        num_work_items = ((num_work_items + max_wg_size - 1) // max_wg_size) * max_wg_size
+        # Optimize work group configuration (from SKILL.opencl.md best practices)
+        # First, build the program to get kernel info
+        program = self.build_program(precision)
+        kernel = program.monte_carlo_pi
         
-        samples_per_item = (samples_per_batch + num_work_items - 1) // num_work_items
-        adjusted_batch_samples = samples_per_item * num_work_items
+        # Optimize work group size
+        try:
+            # Get preferred work group size multiple
+            preferred_multiple = self.preferred_wg_size
+            
+            # Query kernel-specific work group info
+            compile_wg_size = kernel.get_work_group_info(
+                cl.kernel_work_group_info.WORK_GROUP_SIZE,
+                self.device
+            )
+            
+            # Use local memory size to determine optimal size
+            local_mem_required = np.dtype(np.uint64).itemsize * compile_wg_size
+            if local_mem_required > self.local_mem_size:
+                # Reduce work group size to fit in local memory
+                compile_wg_size = self.local_mem_size // np.dtype(np.uint64).itemsize
+            
+            # Round to preferred multiple for better performance
+            optimal_size = (compile_wg_size // preferred_multiple) * preferred_multiple
+            optimal_size = max(optimal_size, preferred_multiple)
+            optimal_size = min(optimal_size, self.max_wg_size)
+            
+            # Ensure it's a power of two for efficient reduction
+            optimal_size = 1 << (int(np.log2(optimal_size)))
+            local_size = optimal_size
+        except Exception as e:
+            print(f"Warning: Could not query work group info: {e}")
+            # Fallback to device preferred size
+            local_size = min(256, self.preferred_wg_size)
+        
+        # Calculate optimal global size based on compute units and occupancy
+        # Aim for 2-4 work-groups per compute unit for good occupancy
+        target_work_groups = self.compute_units * 4
+        min_global_items = target_work_groups * local_size
+        
+        # Ensure each work-item processes enough samples for good efficiency
+        # Target 1024-4096 samples per work-item for good arithmetic intensity
+        target_samples_per_item = 2048
+        estimated_items = max(min_global_items, samples_per_batch // target_samples_per_item)
+        
+        # Round up to nearest multiple of local_size for proper work-group distribution
+        num_work_items = ((estimated_items + local_size - 1) // local_size) * local_size
+        
+        # Vectorized processing: each iteration processes 4 samples
+        vec_size = 4
+        samples_per_vec_iter = (samples_per_batch + num_work_items * vec_size - 1) // (num_work_items * vec_size)
+        
+        # Adjust to ensure total samples is multiple of vector size
+        adjusted_batch_samples = samples_per_vec_iter * num_work_items * vec_size
         
         global_size = num_work_items
-        local_size = max_wg_size
-        num_groups = global_size // local_size
         
-        # Prepare buffers (reused across batches)
-        partial_counts_np = np.zeros(num_groups, dtype=np.uint64)
-        partial_counts_buf = cl.Buffer(self.context, cl.mem_flags.WRITE_ONLY, partial_counts_np.nbytes)
+        # Validate memory requirements
+        required_local_mem = np.dtype(np.uint64).itemsize * local_size
+        if required_local_mem > self.local_mem_size:
+            print(f"Warning: Local memory requirement ({required_local_mem} bytes) "
+                  f"exceeds device capacity ({self.local_mem_size} bytes)")
+            # Reduce local size to fit
+            local_size = self.local_mem_size // np.dtype(np.uint64).itemsize
+            local_size = (local_size // self.preferred_wg_size) * self.preferred_wg_size
+            local_size = max(local_size, self.preferred_wg_size)
+        
+        # Prepare atomic counter buffer (single ulong)
+        counter_np = np.zeros(1, dtype=np.uint64)
+        counter_buf = cl.Buffer(self.context, 
+                               cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
+                               hostbuf=counter_np)
+        
+        # Local memory for reduction
+        local_mem_size = np.dtype(np.uint64).itemsize * local_size
+        # Add padding for better memory alignment (from SKILL.opencl.md)
+        local_mem_size = ((local_mem_size + 63) // 64) * 64
         
         # Warm-up runs (single batch for warmup)
         for i in range(warmup_iterations):
