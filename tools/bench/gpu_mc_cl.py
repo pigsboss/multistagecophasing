@@ -268,7 +268,7 @@ class GPUMonteCarloBenchmark:
                 0
             );
             
-            {accum_ctype} local_count = 0{suffix};
+            {accum_ctype} local_count = 0.0{suffix};
             
             // Vectorized processing with loop unrolling
             for (ulong i = 0; i < samples_per_item; i++) {{
@@ -288,10 +288,10 @@ class GPUMonteCarloBenchmark:
                 {vec_type} dist = x * x + y * y;
                 
                 // Branchless counting (from SKILL.opencl.md optimization)
-                local_count += ({accum_ctype})(dist.x <= {one}) * 1{suffix};
-                local_count += ({accum_ctype})(dist.y <= {one}) * 1{suffix};
-                local_count += ({accum_ctype})(dist.z <= {one}) * 1{suffix};
-                local_count += ({accum_ctype})(dist.w <= {one}) * 1{suffix};
+                local_count += ({accum_ctype})(dist.x <= {one}) * {one};
+                local_count += ({accum_ctype})(dist.y <= {one}) * {one};
+                local_count += ({accum_ctype})(dist.z <= {one}) * {one};
+                local_count += ({accum_ctype})(dist.w <= {one}) * {one};
             }}
             
             // Local reduction using tree pattern (optimized for GPU)
