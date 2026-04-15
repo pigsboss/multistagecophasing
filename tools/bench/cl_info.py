@@ -117,12 +117,39 @@ def get_opencl_info() -> Dict[str, Any]:
                 platform_info['devices'] = []
                 
                 for j, device in enumerate(devices):
+                    # 修复：将设备类型转换为可读的字符串
+                    device_type_str = "Unknown"
+                    if device.type == cl.device_type.CPU:
+                        device_type_str = "CPU"
+                    elif device.type == cl.device_type.GPU:
+                        device_type_str = "GPU"
+                    elif device.type == cl.device_type.ACCELERATOR:
+                        device_type_str = "Accelerator"
+                    elif device.type == cl.device_type.DEFAULT:
+                        device_type_str = "Default"
+                    elif device.type == cl.device_type.ALL:
+                        device_type_str = "All"
+                    else:
+                        # 处理组合类型
+                        type_flags = []
+                        if device.type & cl.device_type.CPU:
+                            type_flags.append("CPU")
+                        if device.type & cl.device_type.GPU:
+                            type_flags.append("GPU")
+                        if device.type & cl.device_type.ACCELERATOR:
+                            type_flags.append("Accelerator")
+                        if device.type & cl.device_type.DEFAULT:
+                            type_flags.append("Default")
+                        if type_flags:
+                            device_type_str = " | ".join(type_flags)
+                    
                     device_info = {
                         'index': j,
                         'name': device.name.strip(),
                         'vendor': device.vendor.strip(),
                         'version': device.version.strip(),
-                        'type': str(device.type).split('.')[-1],
+                        'type': device_type_str,  # 使用可读的字符串
+                        'type_code': int(device.type),  # 保留原始类型代码
                         'max_compute_units': device.max_compute_units,
                         'max_work_group_size': device.max_work_group_size,
                         'max_work_item_sizes': device.max_work_item_sizes,
@@ -393,17 +420,39 @@ def benchmark_host_device_bandwidth(context_info: Dict) -> Dict[str, Any]:
             
             host_data = np.random.randn(element_count).astype(np.float32)
             
-            # Measure transfer to device
-            start = time.perf_counter()
-            dev_buffer = cl_array.to_device(queue, host_data)
-            queue.finish()
-            to_device_time = time.perf_counter() - start
-            
-            # Measure transfer from device
-            start = time.perf_counter()
-            host_result = dev_buffer.get()
-            queue.finish()
-            from_device_time = time.perf_counter() - start
+            # 对小数据量进行多次测试取平均值
+            if size_bytes == 1024:
+                repeat_count = 100  # 对小数据量重复多次
+                to_device_times = []
+                from_device_times = []
+                
+                for _ in range(repeat_count):
+                    # Measure transfer to device
+                    start = time.perf_counter()
+                    dev_buffer = cl_array.to_device(queue, host_data)
+                    queue.finish()
+                    to_device_times.append(time.perf_counter() - start)
+                    
+                    # Measure transfer from device
+                    start = time.perf_counter()
+                    host_result = dev_buffer.get()
+                    queue.finish()
+                    from_device_times.append(time.perf_counter() - start)
+                
+                to_device_time = np.median(to_device_times)  # 使用中位数减少异常值影响
+                from_device_time = np.median(from_device_times)
+            else:
+                # Measure transfer to device
+                start = time.perf_counter()
+                dev_buffer = cl_array.to_device(queue, host_data)
+                queue.finish()
+                to_device_time = time.perf_counter() - start
+                
+                # Measure transfer from device
+                start = time.perf_counter()
+                host_result = dev_buffer.get()
+                queue.finish()
+                from_device_time = time.perf_counter() - start
             
             # Verify data integrity
             assert np.allclose(host_data, host_result, rtol=1e-5), "Data transfer corrupted"
@@ -440,24 +489,25 @@ def benchmark_device_memory(context_info: Dict) -> Dict[str, Any]:
         # Test sizes
         sizes_bytes = [1024, 1024*1024, 4*1024*1024]  # 1KB, 1MB, 4MB
         
-        for size_bytes in sizes_bytes:
-            # Create kernel for memory bandwidth test
-            element_count = size_bytes // 4  # float32
-            
-            # Kernel that reads and writes to global memory
-            kernel_code = """
-            __kernel void memory_bandwidth(__global float* output, __global const float* input, 
-                                          const int size, const float scale) {
-                int idx = get_global_id(0);
-                if (idx < size) {
-                    // Multiple memory operations
-                    float val = input[idx];
-                    output[idx] = val * scale + 1.0f / (val + 1.0f);
-                }
+        # 修复：将内核代码定义移到循环外部
+        kernel_code = """
+        __kernel void memory_bandwidth(__global float* output, __global const float* input, 
+                                      const int size, const float scale) {
+            int idx = get_global_id(0);
+            if (idx < size) {
+                // Multiple memory operations
+                float val = input[idx];
+                output[idx] = val * scale + 1.0f / (val + 1.0f);
             }
-            """
-            
-            program = cl.Program(context, kernel_code).build()
+        }
+        """
+        
+        # 修复：编译程序一次，然后重复使用
+        program = cl.Program(context, kernel_code).build()
+        kernel = cl.Kernel(program, 'memory_bandwidth')  # 获取内核实例
+        
+        for size_bytes in sizes_bytes:
+            element_count = size_bytes // 4  # float32
             
             # Create buffers
             host_input = np.random.randn(element_count).astype(np.float32)
@@ -473,9 +523,10 @@ def benchmark_device_memory(context_info: Dict) -> Dict[str, Any]:
             
             start = time.perf_counter()
             for _ in range(iterations):
-                program.memory_bandwidth(queue, (element_count,), None, 
-                                       output_buffer, input_buffer, 
-                                       np.int32(element_count), np.float32(2.0))
+                # 修复：使用已获取的内核实例
+                kernel(queue, (element_count,), None, 
+                       output_buffer, input_buffer, 
+                       np.int32(element_count), np.float32(2.0))
                 queue.finish()
             kernel_time = time.perf_counter() - start
             
@@ -619,6 +670,11 @@ def print_summary(system_info: Dict, packages: Dict,
 
 def main():
     """Main function to run all checks and benchmarks."""
+    # 设置环境变量以控制编译器输出
+    import os
+    if 'PYOPENCL_COMPILER_OUTPUT' not in os.environ:
+        os.environ['PYOPENCL_COMPILER_OUTPUT'] = '0'  # 默认为0，不显示编译器输出
+    
     print_section("OpenCL Environment Detection and Performance Benchmark")
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
@@ -707,9 +763,16 @@ def main():
                         print("    Host-Device Bandwidth:")
                         for key, bw_info in bw_results.items():
                             if key.startswith('transfer_'):
-                                size_mb = bw_info['size_bytes'] / (1024*1024)
+                                size_bytes = bw_info['size_bytes']
+                                # 根据大小选择合适的单位
+                                if size_bytes < 1024:
+                                    size_str = f"{size_bytes} B"
+                                elif size_bytes < 1024 * 1024:
+                                    size_str = f"{size_bytes / 1024:.2f} KB"
+                                else:
+                                    size_str = f"{size_bytes / (1024 * 1024):.2f} MB"
                                 avg_bw = bw_info['average_bandwidth_mb_s']
-                                print(f"      {size_mb:.1f} MB: {avg_bw:.2f} MB/s")
+                                print(f"      {size_str}: {avg_bw:.2f} MB/s")
                     
                     # Memory results
                     mem_results = benchmark_result.get('device_memory', {})
@@ -717,9 +780,15 @@ def main():
                         print("    Device Memory Bandwidth:")
                         for key, mem_info in mem_results.items():
                             if key.startswith('memory_'):
-                                size_mb = mem_info['size_bytes'] / (1024*1024)
+                                size_bytes = mem_info['size_bytes']
+                                if size_bytes < 1024:
+                                    size_str = f"{size_bytes} B"
+                                elif size_bytes < 1024 * 1024:
+                                    size_str = f"{size_bytes / 1024:.2f} KB"
+                                else:
+                                    size_str = f"{size_bytes / (1024 * 1024):.2f} MB"
                                 bandwidth = mem_info['memory_bandwidth_gb_s']
-                                print(f"      {size_mb:.1f} MB: {bandwidth:.2f} GB/s")
+                                print(f"      {size_str}: {bandwidth:.2f} GB/s")
                 else:
                     print(f"  Benchmark failed: {benchmark_result.get('error', 'Unknown error')}")
     
