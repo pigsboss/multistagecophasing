@@ -70,20 +70,47 @@ class NumPyDiagnostics:
         )
     
     def detect_blas_lapack(self):
-        """检测BLAS/LAPACK实现"""
+        """Detect BLAS/LAPACK implementation"""
+        blas_info = {}
+        lapack_info = {}
+        
+        # Method 1: NumPy < 2.0 (numpy.distutils)
         try:
             from numpy.distutils.system_info import get_info
-            
-            # 获取BLAS信息
             blas_info = get_info('blas_opt') or {}
-            self.config.blas_info = self._sanitize_dict(blas_info)
-            
-            # 获取LAPACK信息
             lapack_info = get_info('lapack_opt') or {}
-            self.config.lapack_info = self._sanitize_dict(lapack_info)
+        except ImportError:
+            # Method 2: NumPy 2.0+ using __config__ module
+            try:
+                import numpy as np
+                config = getattr(np, '__config__', None)
+                if config:
+                    if hasattr(config, 'get_info'):
+                        blas_info = config.get_info('blas') or {}
+                        lapack_info = config.get_info('lapack') or {}
+                    elif hasattr(config, 'build_info'):
+                        build_info = config.build_info
+                        blas_info = build_info.get('blas', {})
+                        lapack_info = build_info.get('lapack', {})
+            except Exception:
+                pass
             
-        except Exception as e:
-            print(f"Warning: Could not get BLAS/LAPACK info: {e}")
+            # Method 3: Try scipy as fallback
+            if not blas_info:
+                try:
+                    import scipy.linalg.blas as slb
+                    func = slb.get_blas_funcs('gemm')
+                    blas_info = {'libraries': [f'scipy-{func.typecode}'], 'source': 'scipy'}
+                    lapack_info = {'source': 'scipy'}
+                except ImportError:
+                    pass
+        
+        self.config.blas_info = self._sanitize_dict(blas_info)
+        self.config.lapack_info = self._sanitize_dict(lapack_info)
+        
+        if not blas_info and not lapack_info:
+            print("Warning: Could not detect BLAS/LAPACK implementation. "
+                  "Install scipy for better detection on NumPy 2.0+.")
     
     def _sanitize_dict(self, d: Dict[str, Any]) -> Dict[str, Any]:
         """清理字典，确保可序列化"""
