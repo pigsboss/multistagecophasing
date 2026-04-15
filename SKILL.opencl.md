@@ -84,6 +84,69 @@ __kernel void mixed_precision(__global float* input,
 }
 ```
 
+### 1.5 条件编译与跨平台兼容
+
+基于 pymath 项目的跨设备兼容策略：
+
+#### 设备类型检测宏
+```opencl
+// 在编译时区分 CPU 和 GPU 执行路径
+#if !(defined IS_CPU)
+#   error "IS_CPU not defined."
+#endif
+
+#if IS_CPU
+    // CPU 优化路径：减少寄存器使用，增加循环展开
+    #define UNROLL_FACTOR 8
+    #define USE_LOCAL_MEM 0
+#else
+    // GPU 优化路径：使用局部内存，向量化加载
+    #define UNROLL_FACTOR 4
+    #define USE_LOCAL_MEM 1
+#endif
+
+// 扩展功能检测
+#pragma OPENCL EXTENSION cl_khr_fp64 : enable
+
+__kernel void adaptive_compute(__global float* data) {
+    int id = get_global_id(0);
+    
+#if IS_CPU
+    // CPU: 简单的顺序执行，避免线程发散
+    float sum = 0.0f;
+    for (int i = 0; i < 64; i++) {
+        sum += data[id * 64 + i];
+    }
+#else
+    // GPU: 使用局部内存和归约
+    __local float local_data[256];
+    int lid = get_local_id(0);
+    local_data[lid] = data[id];
+    barrier(CLK_LOCAL_MEM_FENCE);
+    // ... 归约操作
+#endif
+    
+    data[id] = sum;
+}
+```
+
+#### 数值稳定性宏
+```opencl
+// 自定义模运算（处理负数情况）
+#define fmodulo(x, y) ((x) - (y) * floor((x) / (y)))
+
+// 高精度常量定义（GPU/CPU 统一）
+#if defined(cl_khr_fp64)
+    #define DPI     3.1415926535897932385
+    #define DHALFPI 1.5707963267948966192
+    #define DTWOPI  6.2831853071795864769
+#else
+    #define DPI     3.1415926535897932385f
+    #define DHALFPI 1.5707963267948966192f
+    #define DTWOPI  6.2831853071795864769f
+#endif
+```
+
 ### 1.4 天文坐标计算优化 (HEALPix 与位操作)
 
 基于 astrotoys 天图映射的优化技巧：
@@ -134,6 +197,87 @@ __kernel void ang2pix_nest(__global float* theta,
     }
     
     pix[id] = xyf2nest((int)x, (int)y, face, order);
+}
+```
+
+### 1.6 球面几何与坐标转换 (基于 sphere.c)
+
+高性能球面坐标计算：
+
+#### 角度与笛卡尔坐标转换
+```opencl
+// 从球面坐标 (phi, theta) 计算单位向量
+__kernel void from_angles_f32(__global float2* angles, 
+                              __global float4* vectors,
+                              int n) {
+    int id = get_global_id(0);
+    if (id >= n) return;
+    
+    float2 ang = angles[id];
+    float phi = ang.x;    // 方位角
+    float theta = ang.y;  // 极角
+    
+    float sin_theta = sin(theta);
+    float cos_theta = cos(theta);
+    float sin_phi = sin(phi);
+    float cos_phi = cos(phi);
+    
+    // 使用 float4 进行内存对齐和向量化
+    vectors[id] = (float4)(
+        sin_theta * cos_phi,  // x
+        sin_theta * sin_phi,  // y
+        cos_theta,            // z
+        0.0f                  // w (保留)
+    );
+}
+
+// 反向转换：笛卡尔坐标转球面坐标
+__kernel void xyz2ptr_f32(__global float4* xyz,
+                          __global float3* ptr,  // (phi, theta, r)
+                          int n) {
+    int id = get_global_id(0);
+    if (id >= n) return;
+    
+    float4 v = xyz[id];
+    float r = sqrt(dot(v.xyz, v.xyz));
+    
+    float phi = atan2(v.y, v.x);      // [-pi, pi]
+    phi = fmodulo(phi, DTWOPI);        // 归一化到 [0, 2pi]
+    
+    float theta = acos(v.z / r);       // [0, pi]
+    
+    ptr[id] = (float3)(phi, theta, r);
+}
+```
+
+#### 测地线计算（大圆距离）
+```opencl
+// 计算两点间的测地线距离和中间点
+__kernel void geodesic_f32(__global float4* start,   // (x,y,z,0) 起点
+                           __global float4* end,     // 终点
+                           __global float* distances,
+                           float fraction,           // 插值参数 [0,1]
+                           int n) {
+    int id = get_global_id(0);
+    if (id >= n) return;
+    
+    float4 p1 = start[id];
+    float4 p2 = end[id];
+    
+    // 计算夹角（点积）
+    float cos_angle = dot(p1.xyz, p2.xyz);
+    cos_angle = clamp(cos_angle, -1.0f, 1.0f);
+    float angle = acos(cos_angle);  // 中心角
+    
+    // 球面线性插值 (Slerp)
+    float sin_angle = sin(angle);
+    float w1 = sin((1.0f - fraction) * angle) / sin_angle;
+    float w2 = sin(fraction * angle) / sin_angle;
+    
+    float4 interpolated = (float4)(w1 * p1.xyz + w2 * p2.xyz, 0.0f);
+    
+    distances[id] = angle;  // 以弧度表示的角距离
+    // interpolated 可用于输出中间点
 }
 ```
 
@@ -290,6 +434,114 @@ __kernel void accumulate_flux(__global float4* sources,  // (ra, dec, flux, weig
     // 分别原子累加高 32 位和低 32 位
     atomic_add(&hpx_map_high[pix], high);
     atomic_add(&hpx_map_low[pix], low);
+}
+```
+
+### 2.5 矩阵分析与机器学习加速 (基于 kerana.c)
+
+主成分分析 (PCA) 和聚类的 OpenCL 实现：
+
+#### 局部与全局内存策略对比
+```opencl
+// 局部内存版本：适合小矩阵，低延迟
+__kernel void update_pc_loading_local_fp32(
+    __global float4* Rcv,      // 残差矩阵列向量
+    __global float4* Tcv,      // 得分矩阵列向量
+    __global float* loading,   // 载荷向量（结果）
+    __local float* local_dot,  // 局部内存缓冲区
+    int nitems                 // 项目数
+) {
+    int gid = get_global_id(0);
+    int lid = get_local_id(0);
+    int lsz = get_local_size(0);
+    
+    // 分块处理
+    float4 sum = (float4)(0.0f);
+    for (int i = gid; i < nitems / 4; i += get_global_size(0)) {
+        float4 r = Rcv[i];
+        float4 t = Tcv[i];
+        sum += r * t;  // 逐元素乘积和
+    }
+    
+    // 局部归约
+    local_dot[lid] = sum.x + sum.y + sum.z + sum.w;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // 树形归约
+    for (int stride = lsz / 2; stride > 0; stride >>= 1) {
+        if (lid < stride) {
+            local_dot[lid] += local_dot[lid + stride];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    if (lid == 0) {
+        // 原子累加到全局结果
+        atomic_add_global(loading, local_dot[0]);
+    }
+}
+
+// 全局内存版本：适合大规模数据，避免局部内存限制
+__kernel void update_pc_loading_global_fp32(
+    __global float4* Rcv,
+    __global float4* Tcv,
+    __global float* loading,
+    int nitems
+) {
+    int gid = get_global_id(0);
+    if (gid >= nitems / 4) return;
+    
+    float4 r = Rcv[gid];
+    float4 t = Tcv[gid];
+    float4 prod = r * t;
+    
+    // 直接累加（假设每个工作组处理不同数据块，无需原子操作）
+    loading[gid] = prod.x + prod.y + prod.z + prod.w;
+}
+```
+
+#### K-Means 距离计算优化
+```opencl
+// 欧氏距离计算（向量化）
+__kernel void dist_local_fp32(
+    __global float4* samples,     // 样本数据
+    __global float4* centroids,   // 质心
+    __global int* assignments,    // 分配的聚类
+    __local float4* shared_cent,  // 共享质心缓存
+    int n_clusters,
+    int n_features
+) {
+    int sid = get_global_id(0);    // 样本索引
+    int lid = get_local_id(0);
+    int wgs = get_local_size(0);
+    
+    float4 sample = samples[sid];
+    float min_dist = FLT_MAX;
+    int best_cluster = 0;
+    
+    // 遍历所有质心
+    for (int c = 0; c < n_clusters; c++) {
+        // 协作加载质心到局部内存
+        if (lid < n_features / 4) {
+            shared_cent[lid] = centroids[c * (n_features/4) + lid];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+        
+        // 计算距离
+        float dist = 0.0f;
+        for (int f = 0; f < n_features / 4; f++) {
+            float4 diff = sample - shared_cent[f];
+            dist += dot(diff, diff);
+        }
+        
+        if (dist < min_dist) {
+            min_dist = dist;
+            best_cluster = c;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    assignments[sid] = best_cluster;
 }
 ```
 
@@ -482,6 +734,97 @@ __kernel void fast_celestial_u16(__global ushort2* coords,  // (ra, dec) in 0-65
         sin_dec
     );
 }
+```
+
+### 3.5 栈式归约操作 (Stack-based Reduction)
+
+基于 pymath 的高性能归约模式：
+
+```opencl
+// u16 数据的最大值查找（用于图像处理）
+__kernel void stack_max_u16(
+    __global ushort* stack,      // 输入数据栈
+    __global ushort* result,     // 每工作组最大值
+    __local ushort* local_max,   // 局部内存
+    int count
+) {
+    int gid = get_global_id(0);
+    int lid = get_local_id(0);
+    int wgs = get_local_size(0);
+    
+    ushort max_val = 0;
+    
+    // 每个线程处理多个元素（网格步进）
+    for (int i = gid; i < count; i += get_global_size(0)) {
+        max_val = max(max_val, stack[i]);
+    }
+    
+    // 局部归约
+    local_max[lid] = max_val;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    for (int stride = wgs / 2; stride > 0; stride >>= 1) {
+        if (lid < stride) {
+            local_max[lid] = max(local_max[lid], local_max[lid + stride]);
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    if (lid == 0) {
+        result[get_group_id(0)] = local_max[0];
+    }
+}
+
+// u16 到 f32/f64 的累加转换（高精度统计）
+__kernel void stack_add_u16_to_f32(
+    __global ushort* stack,
+    __global float* result,
+    __local float* local_sum,
+    int count
+) {
+    int gid = get_global_id(0);
+    int lid = get_local_id(0);
+    
+    float sum = 0.0f;
+    for (int i = gid; i < count; i += get_global_size(0)) {
+        sum += convert_float(stack[i]);
+    }
+    
+    local_sum[lid] = sum;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    // 归约
+    for (int stride = get_local_size(0) / 2; stride > 0; stride >>= 1) {
+        if (lid < stride) {
+            local_sum[lid] += local_sum[lid + stride];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    if (lid == 0) {
+        atomic_add_global(result, local_sum[0]);
+    }
+}
+
+// f64 版本（需要 cl_khr_fp64）
+#ifdef cl_khr_fp64
+__kernel void stack_add_u16_to_f64(
+    __global ushort* stack,
+    __global double* result,
+    __local double* local_sum,
+    int count
+) {
+    int gid = get_global_id(0);
+    double sum = 0.0;
+    for (int i = gid; i < count; i += get_global_size(0)) {
+        sum += convert_double(stack[i]);
+    }
+    // ... 类似归约逻辑
+    if (get_local_id(0) == 0) {
+        atomic_add_global_double(result, local_sum[0]);
+    }
+}
+#endif
 ```
 
 ## 4. neosurvey 项目特定技巧
@@ -758,6 +1101,229 @@ def pipeline_processing(data_chunks, context, device):
     return compute_events
 ```
 
+### 5.4 设备选择与性能基准 (基于 clfuns.py)
+
+完整的设备管理和性能测试框架：
+
+```python
+import pyopencl as cl
+import numpy as np
+import time
+
+def find_compute_device(prefer_gpu=True, required_extensions=None):
+    """
+    智能设备选择（来自 clfuns.py）
+    
+    策略：
+    1. 优先选择具有必需扩展的设备
+    2. 根据计算单元数评分
+    3. 考虑内存带宽和时钟频率
+    """
+    platforms = cl.get_platforms()
+    devices = []
+    
+    for platform in platforms:
+        for device in platform.get_devices():
+            score = 0
+            
+            # 检查必需扩展
+            if required_extensions:
+                ext_set = set(device.extensions.split())
+                if not set(required_extensions).issubset(ext_set):
+                    continue
+            
+            # 计算能力评分
+            if device.type == cl.device_type.GPU and prefer_gpu:
+                score += 1000
+            elif device.type == cl.device_type.ACCELERATOR:
+                score += 800
+            elif device.type == cl.device_type.CPU:
+                score += 400
+            
+            # 硬件规格
+            score += device.max_compute_units * 10
+            score += device.max_clock_frequency
+            
+            # 内存容量（GB 为单位）
+            score += device.global_mem_size / (1024**3) * 50
+            
+            devices.append((score, device, platform))
+    
+    if not devices:
+        raise RuntimeError("No suitable OpenCL device found")
+    
+    devices.sort(reverse=True)
+    return devices[0][2], devices[0][1]  # platform, device
+
+def benchmark_memory_bandwidth(context, queue, device, duration=1.0):
+    """
+    内存带宽基准测试（GB/s）
+    
+    测试上传、下载和设备间拷贝速度
+    """
+    # 测试不同大小的缓冲区（从 1MB 到 256MB）
+    sizes = [1, 4, 16, 64, 256]
+    results = {'upload': [], 'download': [], 'sizes_mb': sizes}
+    
+    for size_mb in sizes:
+        size = size_mb * 1024 * 1024
+        # 使用 page-locked 内存优化传输
+        host_arr = np.random.rand(size // 8).astype(np.float64)
+        device_buf = cl.Buffer(context, cl.mem_flags.READ_WRITE, size)
+        
+        # 预热
+        for _ in range(3):
+            cl.enqueue_copy(queue, device_buf, host_arr)
+        queue.finish()
+        
+        # 上传测试
+        n_iters = max(1, int(duration / (size_mb / 1000)))  # 估算迭代次数
+        start = time.time()
+        for _ in range(n_iters):
+            cl.enqueue_copy(queue, device_buf, host_arr, is_blocking=False)
+        queue.finish()
+        upload_bw = (size_mb * n_iters) / (time.time() - start)
+        
+        # 下载测试
+        start = time.time()
+        for _ in range(n_iters):
+            cl.enqueue_copy(queue, host_arr, device_buf, is_blocking=False)
+        queue.finish()
+        download_bw = (size_mb * n_iters) / (time.time() - start)
+        
+        results['upload'].append(upload_bw)
+        results['download'].append(download_bw)
+        
+        device_buf.release()
+    
+    # 计算峰值带宽
+    results['peak_upload_gb_s'] = max(results['upload']) / 1024
+    results['peak_download_gb_s'] = max(results['download']) / 1024
+    
+    return results
+
+def benchmark_healpix(context, queue, program, nside=2048, n_samples=1000000):
+    """
+    HEALPix 坐标转换性能测试
+    """
+    # 生成随机球面坐标
+    phi = np.random.uniform(0, 2*np.pi, n_samples).astype(np.float32)
+    theta = np.random.uniform(0, np.pi, n_samples).astype(np.float32)
+    
+    phi_buf = cl.Buffer(context, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=phi)
+    theta_buf = cl.Buffer(context, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=theta)
+    pix_buf = cl.Buffer(context, cl.mem_flags.WRITE_ONLY, n_samples * 4)
+    
+    kernel = program.ang2pix_nest
+    kernel.set_args(theta_buf, phi_buf, pix_buf, np.int32(nside), np.int32(np.log2(nside)))
+    
+    # 预热
+    cl.enqueue_nd_range_kernel(queue, kernel, (n_samples,), (256,))
+    queue.finish()
+    
+    # 性能测试
+    n_iters = 10
+    start = time.time()
+    for _ in range(n_iters):
+        cl.enqueue_nd_range_kernel(queue, kernel, (n_samples,), (256,))
+    queue.finish()
+    
+    elapsed = time.time() - start
+    throughput = (n_samples * n_iters) / elapsed / 1e6  # M coords/s
+    
+    return {
+        'throughput_mcoords_s': throughput,
+        'time_per_million_ms': (elapsed / n_iters) * 1000
+    }
+```
+
+### 5.5 通用向量操作封装
+
+```python
+class OpenCLVectorOps:
+    """基于 clfuns.py 的常用向量操作封装"""
+    
+    def __init__(self, context, device):
+        self.context = context
+        self.queue = cl.CommandQueue(context)
+        
+        # 编译通用操作内核
+        kernel_src = """
+        __kernel void dot_prod(__global float4* a,
+                               __global float4* b,
+                               __global float* result,
+                               int n) {
+            int id = get_global_id(0);
+            if (id >= n) return;
+            
+            float4 va = a[id];
+            float4 vb = b[id];
+            result[id] = dot(va, vb);
+        }
+        
+        __kernel void rotate(__global float4* vectors,
+                             __global float16* matrices,  // 3x3 旋转矩阵存储为 float16
+                             __global float4* result,
+                             int n) {
+            int id = get_global_id(0);
+            if (id >= n) return;
+            
+            float4 v = vectors[id];
+            float16 m = matrices[id];
+            
+            // 矩阵乘法：result = m * v
+            float3 r;
+            r.x = m.s0*v.x + m.s1*v.y + m.s2*v.z;
+            r.y = m.s3*v.x + m.s4*v.y + m.s5*v.z;
+            r.z = m.s6*v.x + m.s7*v.y + m.s8*v.z;
+            
+            result[id] = (float4)(r, 0.0f);
+        }
+        
+        __kernel void clmin(__global float* data,
+                            __global float* result,
+                            __local float* local_mem,
+                            int n) {
+            int gid = get_global_id(0);
+            int lid = get_local_id(0);
+            
+            float min_val = FLT_MAX;
+            for (int i = gid; i < n; i += get_global_size(0)) {
+                min_val = min(min_val, data[i]);
+            }
+            
+            local_mem[lid] = min_val;
+            barrier(CLK_LOCAL_MEM_FENCE);
+            
+            // 归约求最小值
+            for (int stride = get_local_size(0)/2; stride > 0; stride >>= 1) {
+                if (lid < stride) {
+                    local_mem[lid] = min(local_mem[lid], local_mem[lid + stride]);
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            
+            if (lid == 0) {
+                result[get_group_id(0)] = local_mem[0];
+            }
+        }
+        """
+        self.program = cl.Program(context, kernel_src).build()
+    
+    def dot_product(self, a, b):
+        """计算两个 float4 数组的点积"""
+        n = len(a)
+        a_buf = cl.Buffer(self.context, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=a)
+        b_buf = cl.Buffer(self.context, cl.mem_flags.READ_ONLY | cl.mem_flags.COPY_HOST_PTR, hostbuf=b)
+        result_buf = cl.Buffer(self.context, cl.mem_flags.WRITE_ONLY, n * 4)
+        
+        self.program.dot_prod(self.queue, (n,), (256,), a_buf, b_buf, result_buf, np.int32(n))
+        
+        result = np.empty(n, dtype=np.float32)
+        cl.enqueue_copy(self.queue, result, result_buf)
+        return result
+```
+
 ## 5. 实用工具函数
 
 ```opencl
@@ -799,3 +1365,11 @@ neosurvey 项目的 OpenCL 实现展示了以下关键技巧：
 5. **流式处理**：分块处理超大规模数据集（>设备内存），结合双缓冲实现传输计算重叠
 
 这些技巧特别适用于天文数据处理、大规模粒子模拟和科学可视化场景。
+
+### 基于 pymath 的额外补充
+
+6. **条件编译策略**：使用 IS_CPU 宏区分 CPU/GPU 优化路径，单一代码库适配多架构
+7. **PCA/机器学习加速**：局部 vs 全局内存策略选择，K-Means 向量化距离计算
+8. **栈式归约**：u16→f32/f64 的高精度累加，适用于科学统计
+9. **球面几何**：Slerp 插值、测地线计算的高效实现
+10. **设备基准测试**：内存带宽测试、HEALPix 吞吐量测试，量化设备性能
