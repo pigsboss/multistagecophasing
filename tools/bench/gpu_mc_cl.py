@@ -452,25 +452,36 @@ class GPUMonteCarloBenchmark:
             local_size = (local_size // self.preferred_wg_size) * self.preferred_wg_size
             local_size = max(local_size, self.preferred_wg_size)
         
-        # Prepare atomic counter buffer (single ulong)
-        counter_np = np.zeros(1, dtype=np.uint64)
-        counter_buf = cl.Buffer(self.context, 
-                               cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
-                               hostbuf=counter_np)
+        # Prepare buffers
+        # For the kernel, we need a global counter and partial counts
+        # The kernel signature expects: samples_per_item, base_seed, global_counter, local_counter
+        # So we need to adjust our approach
+        
+        # Create a buffer for the global counter
+        global_counter_np = np.zeros(1, dtype=np.uint64)
+        global_counter_buf = cl.Buffer(self.context, 
+                                      cl.mem_flags.READ_WRITE | cl.mem_flags.COPY_HOST_PTR,
+                                      hostbuf=global_counter_np)
         
         # Local memory for reduction
         local_mem_size = np.dtype(np.uint64).itemsize * local_size
         # Add padding for better memory alignment (from SKILL.opencl.md)
         local_mem_size = ((local_mem_size + 63) // 64) * 64
         
+        # Calculate samples per item for the kernel
+        # The kernel processes 4 samples per iteration, and we have samples_per_vec_iter iterations
+        samples_per_item = samples_per_vec_iter
+        
         # Warm-up runs (single batch for warmup)
         for i in range(warmup_iterations):
-            # 修复：增加 batch 间 seed 间隔，避免序列重叠
+            # Reset global counter to zero
+            cl.enqueue_copy(self.queue, global_counter_buf, global_counter_np)
+            
             seed = np.uint32(10000 + i * 100000)
             kernel(self.queue, (global_size,), (local_size,),
-                   np.uint64(samples_per_item), np.uint32(num_work_items), 
-                   seed, partial_counts_buf,
-                   cl.LocalMemory(np.dtype(np.uint64).itemsize * local_size))
+                   np.uint64(samples_per_item), seed, 
+                   global_counter_buf,
+                   cl.LocalMemory(local_mem_size))
             self.queue.finish()
         
         # Test runs with batched execution
@@ -483,20 +494,22 @@ class GPUMonteCarloBenchmark:
             
             # Execute multiple batches
             for batch_idx in range(num_batches):
-                # 修复：确保不同 batch 的 seed 空间分离，间隔 > max_work_items
+                # Reset global counter to zero for each batch
+                cl.enqueue_copy(self.queue, global_counter_buf, global_counter_np)
+                
                 SEED_STRIDE = 100000
                 seed = np.uint32(12345 + i * num_batches * SEED_STRIDE + batch_idx * SEED_STRIDE)
                 
                 event = kernel(self.queue, (global_size,), (local_size,),
-                              np.uint64(samples_per_item), np.uint32(num_work_items),
-                              seed, partial_counts_buf,
-                              cl.LocalMemory(np.dtype(np.uint64).itemsize * local_size))
+                              np.uint64(samples_per_item), seed,
+                              global_counter_buf,
+                              cl.LocalMemory(local_mem_size))
                 event.wait()
                 
-                # Read and accumulate results
-                cl.enqueue_copy(self.queue, partial_counts_np, partial_counts_buf)
+                # Read the global counter
+                cl.enqueue_copy(self.queue, global_counter_np, global_counter_buf)
                 self.queue.finish()
-                total_inside += np.sum(partial_counts_np)
+                total_inside += global_counter_np[0]
             
             end = time.perf_counter()
             execution_times.append(end - start)
