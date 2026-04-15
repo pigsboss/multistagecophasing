@@ -224,6 +224,44 @@ def create_context_for_device(platform_idx: int, device_idx: int) -> Any:
         print(f"Error creating context: {e}")
         return None
 
+def get_compiler_options(device) -> str:
+    """Get compiler options based on device vendor and capabilities."""
+    vendor = device.vendor.lower()
+    options = []
+    
+    # 根据供应商添加特定选项
+    if 'intel' in vendor:
+        # Intel 编译器：抑制信息性消息，但保留错误
+        options.extend([
+            '-w',  # 禁用所有警告
+            '-cl-no-signed-zeros',  # 允许优化忽略符号零
+            '-cl-mad-enable',  # 允许乘加优化
+        ])
+    elif 'amd' in vendor or 'advanced micro devices' in vendor:
+        # AMD 编译器选项
+        options.extend([
+            '-Werror',  # 将警告视为错误
+            '-cl-fast-relaxed-math',  # 快速宽松数学
+        ])
+    elif 'nvidia' in vendor:
+        # NVIDIA 编译器选项
+        options.extend([
+            '-w',  # 禁用所有警告
+            '-cl-nv-verbose',  # 详细输出（但被-w抑制）
+        ])
+    else:
+        # 通用选项
+        options.append('-w')
+    
+    # 添加架构优化选项
+    try:
+        if hasattr(device, 'address_bits') and device.address_bits == 64:
+            options.append('-DCL_DEVICE_ADDRESS_BITS=64')
+    except:
+        pass
+    
+    return ' '.join(options)
+
 def benchmark_fp_operations(context_info: Dict) -> Dict[str, Any]:
     """Benchmark floating-point operations for different precisions."""
     benchmarks = {}
@@ -258,7 +296,14 @@ def benchmark_fp_operations(context_info: Dict) -> Dict[str, Any]:
         }
         """
         
-        program = cl.Program(context, kernel_code).build()
+        # 使用智能编译器选项
+        build_options = get_compiler_options(device)
+        
+        # 临时禁用编译器警告以构建程序
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=cl.CompilerWarning)
+            program = cl.Program(context, kernel_code).build(options=build_options)
         
         # Transfer data to device
         start = time.perf_counter()
@@ -303,7 +348,13 @@ def benchmark_fp_operations(context_info: Dict) -> Dict[str, Any]:
             """
             
             try:
-                program_fp64 = cl.Program(context, kernel_code_fp64).build()
+                # 使用智能编译器选项
+                build_options_fp64 = get_compiler_options(device)
+                # 临时禁用编译器警告以构建程序
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.filterwarnings('ignore', category=cl.CompilerWarning)
+                    program_fp64 = cl.Program(context, kernel_code_fp64).build(options=build_options_fp64)
                 
                 start = time.perf_counter()
                 a_dev_fp64 = cl_array.to_device(queue, host_data_fp64)
@@ -355,7 +406,13 @@ def benchmark_fp_operations(context_info: Dict) -> Dict[str, Any]:
             """
             
             try:
-                program_fp16 = cl.Program(context, kernel_code_fp16).build()
+                # 使用智能编译器选项
+                build_options_fp16 = get_compiler_options(device)
+                # 临时禁用编译器警告以构建程序
+                import warnings
+                with warnings.catch_warnings():
+                    warnings.filterwarnings('ignore', category=cl.CompilerWarning)
+                    program_fp16 = cl.Program(context, kernel_code_fp16).build(options=build_options_fp16)
                 
                 # Convert to appropriate format for OpenCL
                 # PyOpenCL might need special handling for half precision
@@ -489,7 +546,6 @@ def benchmark_device_memory(context_info: Dict) -> Dict[str, Any]:
         # Test sizes
         sizes_bytes = [1024, 1024*1024, 4*1024*1024]  # 1KB, 1MB, 4MB
         
-        # 修复：将内核代码定义移到循环外部
         kernel_code = """
         __kernel void memory_bandwidth(__global float* output, __global const float* input, 
                                       const int size, const float scale) {
@@ -502,9 +558,15 @@ def benchmark_device_memory(context_info: Dict) -> Dict[str, Any]:
         }
         """
         
-        # 修复：编译程序一次，然后重复使用
-        program = cl.Program(context, kernel_code).build()
-        kernel = cl.Kernel(program, 'memory_bandwidth')  # 获取内核实例
+        # 使用智能编译器选项
+        build_options = get_compiler_options(device)
+        
+        # 临时禁用编译器警告以构建程序
+        import warnings
+        with warnings.catch_warnings():
+            warnings.filterwarnings('ignore', category=cl.CompilerWarning)
+            program = cl.Program(context, kernel_code).build(options=build_options)
+            kernel = cl.Kernel(program, 'memory_bandwidth')  # 获取内核实例
         
         for size_bytes in sizes_bytes:
             element_count = size_bytes // 4  # float32
@@ -672,8 +734,32 @@ def main():
     """Main function to run all checks and benchmarks."""
     # 设置环境变量以控制编译器输出
     import os
+    import warnings
+    
+    # 设置默认值
     if 'PYOPENCL_COMPILER_OUTPUT' not in os.environ:
         os.environ['PYOPENCL_COMPILER_OUTPUT'] = '0'  # 默认为0，不显示编译器输出
+    
+    # 尝试导入 pyopencl 并设置警告过滤器
+    try:
+        import pyopencl as cl
+        
+        # 根据环境变量设置过滤级别
+        compiler_output_level = os.environ.get('PYOPENCL_COMPILER_OUTPUT', '0')
+        if compiler_output_level == '0':
+            # 完全抑制编译器警告
+            warnings.filterwarnings('ignore', category=cl.CompilerWarning)
+        elif compiler_output_level == '1':
+            # 显示编译器警告，但抑制缓存相关的警告
+            warnings.filterwarnings('ignore', 
+                                   message='Built kernel retrieved from cache')
+            warnings.filterwarnings('ignore',
+                                   message='From-binary build succeeded, but resulted in non-empty logs')
+        else:
+            # 级别2或更高：显示所有警告
+            pass
+    except ImportError:
+        pass  # PyOpenCL 未安装，继续执行
     
     print_section("OpenCL Environment Detection and Performance Benchmark")
     print(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
