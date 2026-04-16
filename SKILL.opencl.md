@@ -1324,6 +1324,506 @@ class OpenCLVectorOps:
         return result
 ```
 
+## 6. 化整为零：大规模 N体仿真的持久化计算策略
+
+基于 neosurvey 项目的实战经验，以下技巧可在 GPU 上进行长期 N体仿真而无需频繁主机-设备数据传输。
+
+### 6.1 设备端状态持久化架构
+
+```opencl
+// 持久化仿真内核 - 支持长时间运行，仅返回统计信息
+__kernel void persistent_nbody_simulation(
+    __global float4* positions,      // 输入：当前位置
+    __global float4* velocities,     // 输入：当前速度
+    __global float* masses,          // 输入：质量（只读）
+    __global float4* final_pos,      // 输出：最终位置（可选的快照）
+    __global float* statistics,      // 输出：[总能量, 角动量, 最大速度, 最小距离]
+    float dt,                        // 时间步长
+    int total_steps,                 // 总步数
+    int steps_per_kernel,            // 每内核调用步数
+    int return_snapshot              // 是否返回快照（0=否, 1=是）
+) {
+    int gid = get_global_id(0);
+    int n = get_global_size(0);
+    
+    // 局部内存用于分块计算
+    __local float4 shared_pos[TILE_SIZE];
+    __local float shared_mass[TILE_SIZE];
+    
+    // 私有累加器用于能量和角动量统计
+    float kinetic_energy = 0.0f;
+    float3 angular_momentum = (float3)(0.0f);
+    float max_velocity2 = 0.0f;
+    float min_distance2 = 1e10f;
+    
+    float4 pos_i = positions[gid];
+    float4 vel_i = velocities[gid];
+    float mass_i = masses[gid];
+    
+    // 主仿真循环
+    for (int step = 0; step < total_steps; step += steps_per_kernel) {
+        int steps_this_chunk = min(steps_per_kernel, total_steps - step);
+        
+        for (int s = 0; s < steps_this_chunk; s++) {
+            float3 acceleration = (float3)(0.0f);
+            
+            // 分块计算加速度
+            for (int tile = 0; tile < (n + TILE_SIZE - 1) / TILE_SIZE; tile++) {
+                int j = tile * TILE_SIZE + get_local_id(0);
+                
+                // 加载块到局部内存
+                if (j < n) {
+                    shared_pos[get_local_id(0)] = positions[j];
+                    shared_mass[get_local_id(0)] = masses[j];
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+                
+                // 计算与块内粒子的相互作用
+                for (int k = 0; k < TILE_SIZE; k++) {
+                    int global_k = tile * TILE_SIZE + k;
+                    if (global_k < n && global_k != gid) {
+                        float4 pos_j = shared_pos[k];
+                        float mass_j = shared_mass[k];
+                        
+                        float3 r = pos_j.xyz - pos_i.xyz;
+                        float r2 = dot(r, r) + 1e-6f;
+                        float inv_r = rsqrt(r2);
+                        float inv_r3 = inv_r * inv_r * inv_r;
+                        
+                        acceleration += mass_j * inv_r3 * r;
+                        
+                        // 更新最小距离统计
+                        min_distance2 = min(min_distance2, r2);
+                    }
+                }
+                barrier(CLK_LOCAL_MEM_FENCE);
+            }
+            
+            // 更新速度和位置
+            vel_i.xyz += 6.67430e-11f * acceleration * dt;
+            pos_i.xyz += vel_i.xyz * dt;
+            
+            // 计算当前步骤的能量和角动量
+            float v2 = dot(vel_i.xyz, vel_i.xyz);
+            kinetic_energy += 0.5f * mass_i * v2;
+            angular_momentum += mass_i * cross(pos_i.xyz, vel_i.xyz);
+            max_velocity2 = max(max_velocity2, v2);
+        }
+        
+        // 可选：将中间状态写回全局内存（用于检查点）
+        if ((step + steps_this_chunk) % CHECKPOINT_INTERVAL == 0) {
+            positions[gid] = pos_i;
+            velocities[gid] = vel_i;
+        }
+    }
+    
+    // 写回最终状态（如果需要快照）
+    if (return_snapshot) {
+        final_pos[gid] = pos_i;
+    }
+    
+    // 将统计信息原子累加到全局内存
+    atomic_add(&statistics[0], kinetic_energy);
+    atomic_add(&statistics[1], angular_momentum.x);
+    atomic_add(&statistics[2], angular_momentum.y);
+    atomic_add(&statistics[3], angular_momentum.z);
+    
+    // 使用原子操作更新最大值和最小值
+    atomic_max_float(&statistics[4], sqrt(max_velocity2));
+    atomic_min_float(&statistics[5], sqrt(min_distance2));
+}
+```
+
+### 6.2 主机端调度与状态管理
+
+```python
+class PersistentNBodySimulator:
+    """
+    持久化N体仿真管理器 - 基于neosurvey/simulator.py的Engine类设计
+    特性：
+    1. 设备端状态持久化，减少主机-设备数据传输
+    2. 仅传输必要的统计信息
+    3. 支持检查点（checkpoint）和恢复
+    4. 自适应步长控制
+    """
+    
+    def __init__(self, context, device, num_bodies, dtype=np.float32):
+        self.context = context
+        self.queue = cl.CommandQueue(context)
+        self.num_bodies = num_bodies
+        self.dtype = dtype
+        
+        # 设备端缓冲区 - 持久化存储
+        mf = cl.mem_flags
+        self.positions_buf = cl.Buffer(context, mf.READ_WRITE, 
+                                        num_bodies * 4 * dtype().itemsize)
+        self.velocities_buf = cl.Buffer(context, mf.READ_WRITE, 
+                                         num_bodies * 4 * dtype().itemsize)
+        self.masses_buf = cl.Buffer(context, mf.READ_ONLY, 
+                                     num_bodies * dtype().itemsize)
+        
+        # 统计信息缓冲区（6个浮点数：能量+角动量+最大速度+最小距离）
+        self.stats_buf = cl.Buffer(context, mf.READ_WRITE, 6 * dtype().itemsize)
+        
+        # 编译内核
+        self.program = self._build_kernel()
+        self.kernel = self.program.persistent_nbody_simulation
+        
+        # 仿真状态
+        self.current_step = 0
+        self.total_energy_history = []
+        self.angular_momentum_history = []
+    
+    def _build_kernel(self):
+        """构建持久化仿真内核"""
+        kernel_source = open('persistent_nbody.cl', 'r').read()
+        
+        # 根据精度调整编译选项
+        options = []
+        if self.dtype == np.float64:
+            options.append('-DUSE_DOUBLE')
+            options.append('-cl-fast-relaxed-math')
+        
+        return cl.Program(self.context, kernel_source).build(options=' '.join(options))
+    
+    def initialize(self, positions, velocities, masses):
+        """初始化仿真状态"""
+        # 传输初始条件（仅一次）
+        cl.enqueue_copy(self.queue, self.positions_buf, positions)
+        cl.enqueue_copy(self.queue, self.velocities_buf, velocities)
+        cl.enqueue_copy(self.queue, self.masses_buf, masses)
+        
+        # 初始化统计缓冲区
+        stats_init = np.zeros(6, dtype=self.dtype)
+        cl.enqueue_copy(self.queue, self.stats_buf, stats_init)
+        
+        self.current_step = 0
+    
+    def evolve(self, steps, dt=0.01, steps_per_chunk=100, collect_stats=True):
+        """
+        执行多步仿真，可控制块大小以平衡延迟和吞吐量
+        
+        参数：
+            steps: 总步数
+            dt: 时间步长
+            steps_per_chunk: 每次内核调用的步数（影响GPU占用和响应性）
+            collect_stats: 是否收集统计信息
+        """
+        stats_interval = max(1, steps // 100)  # 每1%收集一次统计
+        
+        for step_start in range(0, steps, steps_per_chunk):
+            chunk_steps = min(steps_per_chunk, steps - step_start)
+            
+            # 执行内核
+            self.kernel(self.queue, (self.num_bodies,), (256,),
+                        self.positions_buf, self.velocities_buf, self.masses_buf,
+                        None,  # 不返回快照
+                        self.stats_buf if collect_stats else None,
+                        self.dtype(dt),
+                        np.int32(chunk_steps),
+                        np.int32(steps_per_chunk),
+                        np.int32(0))  # 不返回快照
+            
+            self.current_step += chunk_steps
+            
+            # 定期收集统计信息（可选）
+            if collect_stats and (step_start // stats_interval != 
+                                  (step_start + chunk_steps) // stats_interval):
+                self._collect_statistics()
+    
+    def _collect_statistics(self):
+        """收集设备端统计信息"""
+        stats = np.empty(6, dtype=self.dtype)
+        cl.enqueue_copy(self.queue, stats, self.stats_buf)
+        
+        # 重置统计缓冲区以便继续累加
+        cl.enqueue_copy(self.queue, self.stats_buf, np.zeros(6, dtype=self.dtype))
+        
+        # 记录历史
+        self.total_energy_history.append(stats[0])
+        self.angular_momentum_history.append(stats[1:4])
+        
+        return {
+            'total_energy': float(stats[0]),
+            'angular_momentum': stats[1:4].tolist(),
+            'max_velocity': float(stats[4]),
+            'min_distance': float(stats[5]),
+            'step': self.current_step
+        }
+    
+    def get_snapshot(self):
+        """获取当前状态快照（可选，按需调用）"""
+        positions = np.empty((self.num_bodies, 4), dtype=self.dtype)
+        cl.enqueue_copy(self.queue, positions, self.positions_buf)
+        
+        velocities = np.empty((self.num_bodies, 4), dtype=self.dtype)
+        cl.enqueue_copy(self.queue, velocities, self.velocities_buf)
+        
+        return positions, velocities
+    
+    def save_checkpoint(self, filename):
+        """保存检查点（仅当需要时传输数据）"""
+        import pickle
+        snapshot = self.get_snapshot()
+        
+        checkpoint = {
+            'positions': snapshot[0],
+            'velocities': snapshot[1],
+            'current_step': self.current_step,
+            'energy_history': self.total_energy_history,
+            'angular_momentum_history': self.angular_momentum_history
+        }
+        
+        with open(filename, 'wb') as f:
+            pickle.dump(checkpoint, f)
+    
+    def load_checkpoint(self, filename):
+        """从检查点恢复"""
+        import pickle
+        with open(filename, 'rb') as f:
+            checkpoint = pickle.load(f)
+        
+        # 恢复状态到设备
+        cl.enqueue_copy(self.queue, self.positions_buf, checkpoint['positions'])
+        cl.enqueue_copy(self.queue, self.velocities_buf, checkpoint['velocities'])
+        
+        # 恢复仿真状态
+        self.current_step = checkpoint['current_step']
+        self.total_energy_history = checkpoint['energy_history']
+        self.angular_momentum_history = checkpoint['angular_momentum_history']
+```
+
+### 6.3 基于 Socket 的远程监控接口
+
+```python
+class SimulationMonitor:
+    """
+    仿真监控器 - 基于 wisdom_collector.py 的 Socket 服务器设计
+    允许远程监控仿真进度而无需中断 GPU 计算
+    """
+    
+    def __init__(self, simulator, host='localhost', port=8888):
+        self.simulator = simulator
+        self.host = host
+        self.port = port
+        self.running = False
+        
+    def start_monitoring(self):
+        """启动监控服务器（在独立线程中）"""
+        import socket
+        import threading
+        import json
+        
+        def monitor_thread():
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            server.bind((self.host, self.port))
+            server.listen(5)
+            server.settimeout(1.0)
+            
+            self.running = True
+            print(f"Monitoring server started on {self.host}:{self.port}")
+            
+            while self.running:
+                try:
+                    client, addr = server.accept()
+                    self._handle_client(client)
+                except socket.timeout:
+                    continue
+                except Exception as e:
+                    if self.running:
+                        print(f"Monitor error: {e}")
+            
+            server.close()
+        
+        thread = threading.Thread(target=monitor_thread, daemon=True)
+        thread.start()
+    
+    def _handle_client(self, client):
+        """处理客户端请求"""
+        import json
+        
+        try:
+            # 接收命令
+            data = client.recv(1024).decode('utf-8').strip()
+            
+            if data == 'STATUS':
+                # 返回当前统计信息（不中断仿真）
+                stats = self.simulator._collect_statistics()
+                response = json.dumps({
+                    'step': self.simulator.current_step,
+                    'statistics': stats,
+                    'running': True
+                })
+                client.send(response.encode('utf-8'))
+            
+            elif data == 'SNAPSHOT':
+                # 请求快照（会中断仿真进行数据传输）
+                positions, velocities = self.simulator.get_snapshot()
+                
+                # 仅传输摘要信息（避免传输大量数据）
+                response = json.dumps({
+                    'positions_mean': positions.mean(axis=0).tolist(),
+                    'positions_std': positions.std(axis=0).tolist(),
+                    'velocities_mean': velocities.mean(axis=0).tolist(),
+                    'step': self.simulator.current_step
+                })
+                client.send(response.encode('utf-8'))
+            
+            elif data.startswith('CONTROL:'):
+                # 控制命令，如暂停、修改参数等
+                cmd = data[8:]
+                if cmd == 'PAUSE':
+                    # 实现暂停逻辑
+                    pass
+                response = json.dumps({'status': 'ACK', 'command': cmd})
+                client.send(response.encode('utf-8'))
+            
+        except Exception as e:
+            error_response = json.dumps({'error': str(e)})
+            client.send(error_response.encode('utf-8'))
+        finally:
+            client.close()
+```
+
+### 6.4 自适应精度与内存管理
+
+```python
+class AdaptivePrecisionSimulator:
+    """
+    自适应精度仿真器 - 基于 cl_kernels_f32.cl 和 cl_kernels_f64.cl 的双精度策略
+    根据仿真需求动态切换精度
+    """
+    
+    def __init__(self, context, device):
+        self.context = context
+        self.device = device
+        
+        # 编译多个精度版本的内核
+        self.programs = {
+            'fp32': self._build_program('float', 'cl_kernels_f32.cl'),
+            'fp64': self._build_program('double', 'cl_kernels_f64.cl')
+        }
+        
+        # 当前精度模式
+        self.current_precision = 'fp32'
+        
+        # 精度切换阈值
+        self.precision_thresholds = {
+            'close_encounters': 1e-3,  # 近距离相遇时切换为高精度
+            'energy_drift': 1e-4,      # 能量漂移阈值
+            'velocity_high': 0.1       # 高速物体阈值
+        }
+    
+    def _build_program(self, ctype, kernel_file):
+        """构建指定精度的内核程序"""
+        # 读取内核文件并替换精度类型
+        with open(kernel_file, 'r') as f:
+            source = f.read()
+        
+        # 根据精度调整类型定义
+        if ctype == 'double':
+            source = source.replace('float', 'double')
+            source = '#pragma OPENCL EXTENSION cl_khr_fp64 : enable\n' + source
+        
+        return cl.Program(self.context, source).build()
+    
+    def monitor_and_adjust(self, statistics):
+        """
+        监控仿真状态并自适应调整精度
+        基于 neosurvey 项目的演化事件检测逻辑
+        """
+        # 检测近距离相遇
+        min_distance = statistics['min_distance']
+        if min_distance < self.precision_thresholds['close_encounters']:
+            if self.current_precision != 'fp64':
+                print(f"Close encounter detected: {min_distance:.2e}, switching to fp64")
+                self._switch_precision('fp64')
+        
+        # 检测能量漂移
+        energy_history = self.simulator.total_energy_history
+        if len(energy_history) > 10:
+            energy_drift = abs((energy_history[-1] - energy_history[0]) / energy_history[0])
+            if energy_drift > self.precision_thresholds['energy_drift']:
+                if self.current_precision != 'fp64':
+                    print(f"Energy drift detected: {energy_drift:.2e}, switching to fp64")
+                    self._switch_precision('fp64')
+        
+        # 检测高速物体
+        max_velocity = statistics['max_velocity']
+        if max_velocity > self.precision_thresholds['velocity_high']:
+            if self.current_precision != 'fp64':
+                print(f"High velocity detected: {max_velocity:.2e}, switching to fp64")
+                self._switch_precision('fp64')
+        
+        # 如果条件稳定，切回单精度以提高性能
+        stable_conditions = (
+            min_distance > 2 * self.precision_thresholds['close_encounters'] and
+            max_velocity < 0.5 * self.precision_thresholds['velocity_high']
+        )
+        if stable_conditions and self.current_precision == 'fp64':
+            print("Conditions stabilized, switching back to fp32")
+            self._switch_precision('fp32')
+    
+    def _switch_precision(self, new_precision):
+        """切换仿真精度（需要传输当前状态）"""
+        if new_precision == self.current_precision:
+            return
+        
+        # 获取当前状态快照
+        positions, velocities = self.simulator.get_snapshot()
+        
+        # 转换精度
+        if new_precision == 'fp64':
+            positions = positions.astype(np.float64)
+            velocities = velocities.astype(np.float64)
+        else:
+            positions = positions.astype(np.float32)
+            velocities = velocities.astype(np.float32)
+        
+        # 重新初始化仿真器
+        self.simulator.dtype = positions.dtype
+        self.simulator.program = self.programs[new_precision]
+        self.simulator.kernel = self.simulator.program.persistent_nbody_simulation
+        
+        # 重新传输数据
+        cl.enqueue_copy(self.simulator.queue, self.simulator.positions_buf, positions)
+        cl.enqueue_copy(self.simulator.queue, self.simulator.velocities_buf, velocities)
+        
+        self.current_precision = new_precision
+```
+
+### 6.5 性能优化建议
+
+基于 neosurvey 项目的经验总结：
+
+1. **数据驻留策略**：
+   - 将质量数组标记为 `READ_ONLY` 以便驱动优化
+   - 使用 `CL_MEM_ALLOC_HOST_PTR` 创建主机可访问的缓冲区，减少传输开销
+   - 对于只输出统计信息的内核，使用 `CL_MEM_HOST_NO_ACCESS` 标志
+
+2. **内核调度优化**：
+   ```python
+   # 使用多个命令队列实现计算与传输重叠
+   compute_queue = cl.CommandQueue(context, properties=cl.command_queue_properties.PROFILING_ENABLE)
+   transfer_queue = cl.CommandQueue(context)
+   
+   # 计算与统计信息传输重叠
+   compute_event = kernel(compute_queue, ...)
+   stats_event = cl.enqueue_copy(transfer_queue, host_stats, device_stats, wait_for=[compute_event])
+   ```
+
+3. **内存访问模式**：
+   - 将位置和速度存储为 `float4/double4` 以实现内存对齐和向量化加载
+   - 使用结构体数组（AoS）而非数组结构（SoA）以提高缓存局部性
+   - 对于大规模仿真（>10^6 粒子），使用分层分块策略
+
+4. **容错与恢复**：
+   - 定期将检查点保存到 NVMe SSD
+   - 实现看门狗定时器检测 GPU 挂起
+   - 支持从任意检查点恢复，包括精度模式
+
+这些技巧使得 neosurvey 项目能够在单个 GPU 上仿真数百万粒子数天而无需主机干预，仅通过轻量级的统计信息监控仿真进度。
+
 ## 5. 实用工具函数
 
 ```opencl
@@ -1351,6 +1851,9 @@ neosurvey 项目的 OpenCL 实现展示了以下关键技巧：
 2. **内存层次利用**：有效使用全局、局部和私有内存
 3. **硬件适配**：针对 GPU 和 CPU 的不同优化策略
 4. **领域特定优化**：针对天文数据处理的定制化内核设计
+5. **持久化计算**：设备端状态持久化，减少主机-设备数据传输
+6. **远程监控**：基于 Socket 的轻量级监控接口
+7. **自适应精度**：根据仿真状态动态切换计算精度
 
 这些技巧为高性能科学计算提供了宝贵的实践经验。
 
@@ -1363,13 +1866,17 @@ neosurvey 项目的 OpenCL 实现展示了以下关键技巧：
 3. **多精度分级**：u8/u16/u32/f32 多版本内核，适应不同数据精度和吞吐需求
 4. **设备自适应**：基于计算单元数、内存大小、扩展支持自动选择最优设备
 5. **流式处理**：分块处理超大规模数据集（>设备内存），结合双缓冲实现传输计算重叠
+6. **持久化仿真**：大规模 N体仿真的设备端状态持久化策略
+7. **远程监控**：不中断 GPU 计算的轻量级监控接口
 
 这些技巧特别适用于天文数据处理、大规模粒子模拟和科学可视化场景。
 
 ### 基于 pymath 的额外补充
 
-6. **条件编译策略**：使用 IS_CPU 宏区分 CPU/GPU 优化路径，单一代码库适配多架构
-7. **PCA/机器学习加速**：局部 vs 全局内存策略选择，K-Means 向量化距离计算
-8. **栈式归约**：u16→f32/f64 的高精度累加，适用于科学统计
-9. **球面几何**：Slerp 插值、测地线计算的高效实现
-10. **设备基准测试**：内存带宽测试、HEALPix 吞吐量测试，量化设备性能
+8. **条件编译策略**：使用 IS_CPU 宏区分 CPU/GPU 优化路径，单一代码库适配多架构
+9. **PCA/机器学习加速**：局部 vs 全局内存策略选择，K-Means 向量化距离计算
+10. **栈式归约**：u16→f32/f64 的高精度累加，适用于科学统计
+11. **球面几何**：Slerp 插值、测地线计算的高效实现
+12. **设备基准测试**：内存带宽测试、HEALPix 吞吐量测试，量化设备性能
+13. **自适应精度切换**：基于仿真事件动态调整计算精度
+14. **检查点恢复**：支持长时间仿真的容错与恢复机制
