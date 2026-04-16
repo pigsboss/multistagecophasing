@@ -753,12 +753,30 @@ Examples:
     # Validation against reference
     if results:
         print("\n" + "="*80)
-        print("Validating against Python reference (100,000 samples)...")
+        print("Validation Report")
+        print("="*80)
+        
+        # Compute Python reference and its own error vs math.pi
         ref_pi = GPUMonteCarloBenchmark.python_reference(samples=100000)
-        print(f"  Reference Pi: {ref_pi:.8f}")
+        ref_error = abs(ref_pi - np.pi)
+        
+        print(f"Python MC Reference (100K samples): {ref_pi:.8f}")
+        print(f"  └─ Error vs math.pi: {ref_error:.2e} (statistical uncertainty)")
+        print()
+        
+        # Compare GPU results against both references
         for result in results:
-            err = abs(result.result_value - np.pi)
-            print(f"  {result.precision.upper()} error vs math.pi: {err:.2e}")
+            gpu_vs_math = abs(result.result_value - np.pi)
+            gpu_vs_python = abs(result.result_value - ref_pi)
+            
+            print(f"{result.precision.upper()} GPU Results:")
+            print(f"  Value: {result.result_value:.8f}")
+            print(f"  ├─ Deviation vs math.pi:   {gpu_vs_math:.2e} (absolute accuracy)")
+            print(f"  └─ Deviation vs Python MC: {gpu_vs_python:.2e} (algorithm consistency)")
+            
+            # Sanity check: GPU vs Python should be small if both are correct
+            if gpu_vs_python > 0.01 and result.total_samples > 1000000:
+                print(f"  ⚠️  Warning: Large deviation from Python reference suggests bug!")
         print("="*80)
 
 
