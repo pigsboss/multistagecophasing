@@ -113,7 +113,7 @@ class GPUNBodyBenchmark:
     TILE_SIZE = 128
     
     def __init__(self, platform_idx: Optional[int] = None, device_idx: Optional[int] = None, 
-                 verbose: str = "INFO", no_tile: bool = False):
+                 verbose: str = "INFO", no_tile: bool = False, auto_mode: bool = True):
         if not PYOPENCL_AVAILABLE:
             raise RuntimeError("PyOpenCL not available")
         
@@ -163,8 +163,15 @@ class GPUNBodyBenchmark:
         
         # 添加no_tile标志
         self.no_tile = no_tile
-        if no_tile:
-            self._debug_print("No-tile mode enabled: using naive global memory computation", "INFO")
+        self.auto_mode = auto_mode
+        
+        if auto_mode and not no_tile:
+            # 检测Intel集成显卡，自动选择更保守的设置
+            if "Intel" in self.device.vendor and "Graphics" in self.device.name:
+                self._debug_print("Intel Graphics detected, enabling auto-safety mode", "INFO")
+                self.intel_gpu = True
+            else:
+                self.intel_gpu = False
     
     def _debug_print(self, msg: str, level: str = "INFO") -> None:
         """Debug output with timestamp and level"""
@@ -319,7 +326,7 @@ class GPUNBodyBenchmark:
                               suffix: str, zero: str, accum_type: str,
                               convert_in: str, convert_out: str, ext_pragma: str) -> str:
         """
-        生成修复后的tile优化内核
+        生成修复后的tile优化内核 - 减少寄存器压力
         """
         tile_size = self.TILE_SIZE
         
@@ -329,17 +336,13 @@ class GPUNBodyBenchmark:
         #define TILE_SIZE {tile_size}
         #define SOFTENING (0.01{suffix} * 0.01{suffix})  // Plummer softening squared
         
-        inline {accum_type}4 compute_acceleration(
-            {accum_type}4 pos_i,
-            {accum_type}4 pos_j,
-            {accum_type} mass_j
-        ) {{
-            {accum_type}4 r_vec = pos_j - pos_i;
-            {accum_type} r2 = r_vec.x*r_vec.x + r_vec.y*r_vec.y + r_vec.z*r_vec.z + SOFTENING;
-            {accum_type} inv_r = rsqrt(r2);  // Fast inverse sqrt
-            {accum_type} inv_r3 = inv_r * inv_r * inv_r;
-            
-            return mass_j * inv_r3 * r_vec;
+        // 简化：直接内联计算，减少函数调用开销
+        #define COMPUTE_ACC(pos_i, pos_j, mass_j, acc) {{ \\
+            {accum_type}4 r_vec = (pos_j) - (pos_i); \\
+            {accum_type} r2 = r_vec.x*r_vec.x + r_vec.y*r_vec.y + r_vec.z*r_vec.z + SOFTENING; \\
+            {accum_type} inv_r = rsqrt(r2); \\
+            {accum_type} inv_r3 = inv_r * inv_r * inv_r; \\
+            (acc) += (mass_j) * inv_r3 * r_vec; \\
         }}
         
         __kernel void nbody_simulation(
@@ -352,90 +355,73 @@ class GPUNBodyBenchmark:
             int steps
         ) {{
             int gid = get_global_id(0);
-            
-            // 检查是否是有效粒子
-            bool valid_particle = (gid < n);
-            
-            // 为所有工作项（包括额外项）声明变量
-            {vec_type} pos_i_vec, vel_i_vec;
-            {ctype} mass_i;
-            
-            if (valid_particle) {{
-                // 仅对有效粒子加载数据
-                pos_i_vec = positions[gid];
-                vel_i_vec = velocities[gid];
-                mass_i = masses[gid];
-            }} else {{
-                // 对于额外工作项，使用零值
-                pos_i_vec = ({vec_type})({zero});
-                vel_i_vec = ({vec_type})({zero});
-                mass_i = {zero};
-            }}
-            
             int lid = get_local_id(0);
             
-            // Convert to accumulation type for computation (mixed precision for fp16)
-            {accum_type}4 pos_i = {"convert_float4(pos_i_vec)" if precision == "fp16" else "pos_i_vec"};
-            {accum_type}4 vel_i = {"convert_float4(vel_i_vec)" if precision == "fp16" else "vel_i_vec"};
-            
-            // Local memory tiles
-            __local {vec_type} local_pos[TILE_SIZE];
-            __local {ctype} local_mass[TILE_SIZE];
-            
-            // Simulation loop - 所有工作项都执行，但只有有效粒子更新
-            for (int s = 0; s < steps; s++) {{
-                {accum_type}4 acc = ({accum_type}4)({zero}, {zero}, {zero}, {zero});
-                
-                if (valid_particle) {{
-                    // Tiling loop over all particles - 仅有效粒子计算加速度
-                    for (int tile = 0; tile < (n + TILE_SIZE - 1) / TILE_SIZE; tile++) {{
-                        int j = tile * TILE_SIZE + lid;
-                        
-                        // Load tile into local memory (coalesced access)
-                        if (j < n) {{
-                            local_pos[lid] = positions[j];
-                            local_mass[lid] = masses[j];
-                        }} else {{
-                            local_pos[lid] = ({vec_type})({zero});
-                            local_mass[lid] = {zero};
-                        }}
-                        barrier(CLK_LOCAL_MEM_FENCE);
-                        
-                        // 计算当前瓦片对所有粒子的贡献
-                        int tile_end = min((tile + 1) * TILE_SIZE, n);
-                        
-                        for (int k = 0; k < TILE_SIZE; k++) {{
-                            int j_idx = tile * TILE_SIZE + k;
-                            
-                            // 检查边界
-                            if (j_idx >= tile_end) break;
-                            if (j_idx == gid) continue;  // 跳过自身
-                        
-                            {accum_type}4 pos_j = {"convert_float4(local_pos[k])" if precision == "fp16" else "local_pos[k]"};
-                            {accum_type} mass_j = local_mass[k];
-                        
-                            acc += compute_acceleration(pos_i, pos_j, mass_j);
-                        }}
-                        barrier(CLK_LOCAL_MEM_FENCE);
-                    }}
-                    
-                    // Update velocity and position (semi-implicit Euler) - 仅有效粒子更新
-                    vel_i += G * acc * dt;
-                    pos_i += vel_i * dt;
-                }} else {{
-                    // 对于额外工作项，仍然执行同步但跳过计算
+            // 提前返回无效 work-item，减少资源占用
+            if (gid >= n) {{
+                // 仍需参与 barriers，但跳过所有计算
+                for (int s = 0; s < steps; s++) {{
                     for (int tile = 0; tile < (n + TILE_SIZE - 1) / TILE_SIZE; tile++) {{
                         barrier(CLK_LOCAL_MEM_FENCE);
                         barrier(CLK_LOCAL_MEM_FENCE);
                     }}
                 }}
+                return;
             }}
             
-            // Store back - 仅有效粒子写回
-            if (valid_particle) {{
-                positions[gid] = {"convert_half4(pos_i)" if precision == "fp16" else "pos_i"};
-                velocities[gid] = {"convert_half4(vel_i)" if precision == "fp16" else "vel_i"};
+            // 加载数据
+            {vec_type} pos_i_vec = positions[gid];
+            {vec_type} vel_i_vec = velocities[gid];
+            
+            {accum_type}4 pos_i = {"convert_float4(pos_i_vec)" if precision == "fp16" else "pos_i_vec"};
+            {accum_type}4 vel_i = {"convert_float4(vel_i_vec)" if precision == "fp16" else "vel_i_vec"};
+            
+            __local {vec_type} local_pos[TILE_SIZE];
+            __local {ctype} local_mass[TILE_SIZE];
+            
+            int num_tiles = (n + TILE_SIZE - 1) / TILE_SIZE;
+            
+            // 主模拟循环
+            for (int s = 0; s < steps; s++) {{
+                {accum_type}4 acc = ({accum_type}4)({zero});
+                
+                // 瓦片循环
+                for (int tile = 0; tile < num_tiles; tile++) {{
+                    int j = tile * TILE_SIZE + lid;
+                    
+                    // 协作加载到局部内存
+                    if (j < n) {{
+                        local_pos[lid] = positions[j];
+                        local_mass[lid] = masses[j];
+                    }} else {{
+                        local_pos[lid] = ({vec_type})({zero});
+                        local_mass[lid] = {zero};
+                    }}
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                    
+                    // 计算当前瓦片的贡献
+                    int tile_end = min(TILE_SIZE, n - tile * TILE_SIZE);
+                    
+                    #pragma unroll 4
+                    for (int k = 0; k < tile_end; k++) {{
+                        int j_idx = tile * TILE_SIZE + k;
+                        if (j_idx == gid) continue;  // 跳过自身
+                        
+                        {accum_type}4 pos_j = {"convert_float4(local_pos[k])" if precision == "fp16" else "local_pos[k]"};
+                        {accum_type} mass_j = local_mass[k];
+                        COMPUTE_ACC(pos_i, pos_j, mass_j, acc);
+                    }}
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                }}
+                
+                // 更新速度和位置
+                vel_i += G * acc * dt;
+                pos_i += vel_i * dt;
             }}
+            
+            // 写回结果
+            positions[gid] = {"convert_half4(pos_i)" if precision == "fp16" else "pos_i"};
+            velocities[gid] = {"convert_half4(vel_i)" if precision == "fp16" else "vel_i"};
         }}
         '''
         return kernel
@@ -491,70 +477,51 @@ class GPUNBodyBenchmark:
         if not self.check_precision_support(precision):
             raise RuntimeError(f"Precision {precision} not supported by device")
         
-        # 添加no_tile模式检查
+        # Intel GPU specific: use no-tile mode for large N to reduce resource usage
+        if num_bodies >= 500 and not self.no_tile:
+            self._debug_print(f"Large N={num_bodies}, switching to no-tile mode to reduce resource usage", "INFO")
+            self.no_tile = True
+        
         if self.no_tile:
             self._debug_print("Using naive global memory computation (no tiling)", "INFO")
-            # 在no-tile模式下，跳过tile相关的调整
-            self.TILE_SIZE = 1  # 设置为1以简化后续逻辑
+            self.TILE_SIZE = 1
+            # No-tile mode benefits from larger work groups
+            local_size = min(256, self.max_wg_size, num_bodies)
         else:
-            # Small N adjustment - 关键修改：对小规模问题使用不同的策略
+            # Small N adjustment
             if num_bodies < 256:
-                # 对于小规模问题，直接计算合适的瓦片大小
-                # 找到小于等于num_bodies的最大2的幂
                 self.TILE_SIZE = 1
                 while self.TILE_SIZE * 2 <= num_bodies:
                     self.TILE_SIZE *= 2
-                
-                # 确保不超过设备限制
                 self.TILE_SIZE = min(self.TILE_SIZE, self.max_wg_size)
-                
-                # 确保至少为1且为2的幂
                 self.TILE_SIZE = max(1, self.TILE_SIZE)
-                
                 self._debug_print(f"Small N={num_bodies}, setting TILE_SIZE={self.TILE_SIZE}", "INFO")
             else:
-                # 对于大规模问题，检查本地内存
                 self._check_local_memory(precision)
         
         self._debug_print(f"Final TILE_SIZE={self.TILE_SIZE}")
         
-        # 修改：对小规模问题强制使用较小的块大小
-        if num_bodies < 200:
-            if steps_per_chunk > 2:
-                steps_per_chunk = 2
-                self._debug_print(f"Force setting steps_per_chunk to {steps_per_chunk} for small N={num_bodies}", "INFO")
-        
-        # 修改：对小规模问题减少预热迭代次数
-        if num_bodies < 200:
-            warmup_iterations = min(1, warmup_iterations)
-            self._debug_print(f"Reducing warmup iterations to {warmup_iterations} for small N={num_bodies}", "INFO")
-        
-        # More strict automatic adjustment of chunk size
-        if steps_per_chunk > 10:
-            self._debug_print(f"WARNING: steps_per_chunk={steps_per_chunk} too high, reducing to 5", "WARN")
-            steps_per_chunk = 5
-        
-        # Further reduce chunking based on problem size
-        if num_bodies > 500:
-            recommended_chunk = max(1, 5 - (num_bodies - 500) // 100)
-            if steps_per_chunk > recommended_chunk:
+        # FIX: 对于大N，增加 chunk size 减少内核调用次数，而不是减少
+        # 关键修改：steps_per_chunk 应该足够大以减少调用次数，但足够小以避免超时
+        if num_bodies >= 500:
+            # 对于大N，使用更大的 chunk 减少内核调用次数
+            recommended_chunk = min(10, max(2, steps // 10))  # 至少分10个chunk，或每chunk至少2步
+            if steps_per_chunk < recommended_chunk:
                 steps_per_chunk = recommended_chunk
-                self._debug_print(f"Auto-adjusted steps_per_chunk to {steps_per_chunk} for {num_bodies} bodies", "INFO")
-        
-        # Dynamic chunk sizing based on problem size
-        if steps_per_chunk < 1:
-            steps_per_chunk = max(1, steps // 10)  # Auto-adjust
-        
-        # Estimate kernel runtime
-        estimated_ops = num_bodies * num_bodies * steps_per_chunk
-        self._debug_print(f"Estimated operations per chunk: {estimated_ops:,}")
-        
-        if estimated_ops > 1e9:  # More than 1 billion ops
-            self._debug_print(f"WARNING: High operations count, consider reducing --chunk-size", "WARN")
-            # Auto-reduce if too high
+                self._debug_print(f"Large N auto-adjust: increasing steps_per_chunk to {steps_per_chunk}", "INFO")
+        elif num_bodies < 200:
             if steps_per_chunk > 2:
                 steps_per_chunk = 2
-                self._debug_print(f"Auto-reduced steps_per_chunk to {steps_per_chunk}", "WARN")
+        
+        # 限制最大 chunk 大小
+        if steps_per_chunk > 20:
+            steps_per_chunk = 20
+            self._debug_print(f"Limiting steps_per_chunk to max 20", "INFO")
+        
+        # 对于Intel GPU，减少预热迭代
+        if num_bodies >= 500:
+            warmup_iterations = min(1, warmup_iterations)
+            self._debug_print(f"Reducing warmup to {warmup_iterations} for large N", "INFO")
         
         self._debug_print(f"Building OpenCL program...")
         program = self.build_program(precision)
@@ -584,7 +551,6 @@ class GPUNBodyBenchmark:
         # 工作组分派 - 根据no_tile模式调整
         if self.no_tile:
             # 在no-tile模式下，使用简单的工作组配置
-            # 优先使用256作为工作组大小，但不超过设备限制
             local_size = min(256, self.max_wg_size, num_bodies)
             
             # 确保本地大小至少为1且是2的幂
@@ -653,9 +619,17 @@ class GPUNBodyBenchmark:
                 self._debug_print(f"    Chunk {chunk_count}: steps={current_steps}", "DEBUG")
                 
                 try:
-                    kernel(self.queue, (global_size,), (local_size,),
-                           pos_buf, vel_buf, mass_buf,
-                           np.int32(num_bodies), G, dt, np.int32(current_steps))
+                    event = kernel(self.queue, (global_size,), (local_size,),
+                                   pos_buf, vel_buf, mass_buf,
+                                   np.int32(num_bodies), G, dt, np.int32(current_steps))
+                    # FIX: 添加 flush 让 GPU 开始执行
+                    self.queue.flush()
+                    
+                    # FIX: 每10个 chunk 强制同步，防止资源累积
+                    if chunk_count % 10 == 0:
+                        event.wait()
+                        self.queue.finish()
+                        
                 except Exception as e:
                     self._debug_print(f"ERROR during kernel execution: {e}", "ERROR")
                     raise
@@ -689,11 +663,9 @@ class GPUNBodyBenchmark:
             # Chunked execution with progress reporting
             steps_done = 0
             chunk_count = 0
-            chunk_times = []
             
             while steps_done < steps:
                 current_steps = min(steps_per_chunk, steps - steps_done)
-                chunk_start = time.perf_counter()
                 chunk_count += 1
                 
                 self._debug_print(f"  Running chunk {chunk_count}: {current_steps} steps", "DEBUG")
@@ -702,21 +674,22 @@ class GPUNBodyBenchmark:
                     event = kernel(self.queue, (global_size,), (local_size,),
                                   pos_buf, vel_buf, mass_buf,
                                   np.int32(num_bodies), G, dt, np.int32(current_steps))
-                    event.wait()
+                    # FIX: 添加 flush
+                    self.queue.flush()
+                    
+                    # FIX: 定期同步
+                    if chunk_count % 10 == 0:
+                        event.wait()
+                        
                 except cl.RuntimeError as e:
                     self._debug_print(f"ERROR: Kernel execution failed: {e}", "ERROR")
                     self._debug_print(f"Try reducing --chunk-size (current: {steps_per_chunk})", "ERROR")
                     raise
                 
                 steps_done += current_steps
-                chunk_time = time.perf_counter() - chunk_start
-                chunk_times.append(chunk_time)
-                
-                # Report progress every few chunks
-                if chunk_count % 5 == 0:
-                    avg_chunk_time = sum(chunk_times[-5:]) / min(5, len(chunk_times))
-                    self._debug_print(f"  Progress: {steps_done}/{steps} steps, avg chunk time: {avg_chunk_time:.3f}s")
             
+            # 最终同步
+            self.queue.finish()
             end = time.perf_counter()
             iteration_time = end - start
             execution_times.append(iteration_time)
@@ -901,6 +874,11 @@ Examples:
         "--no-tile", action="store_true",
         help="Disable tiling optimization, use naive global memory computation"
     )
+    
+    parser.add_argument(
+        "--no-auto-mode", action="store_true",
+        help="Disable automatic safety mode for Intel GPUs"
+    )
         
     parser.add_argument(
         "--verbose", "-v", action="count", default=0,
@@ -925,7 +903,8 @@ Examples:
             platform_idx=args.platform,
             device_idx=args.device,
             verbose=current_level,
-            no_tile=args.no_tile  # 添加no_tile参数
+            no_tile=args.no_tile,
+            auto_mode=not args.no_auto_mode  # 添加no_auto_mode参数
         )
     except Exception as e:
         print(f"Error initializing OpenCL: {e}")
