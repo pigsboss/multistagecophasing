@@ -286,9 +286,10 @@ class GPUNBodyBenchmark:
     
     def run_benchmark(self, precision: str = 'fp32', num_bodies: int = 1000, 
                      steps: int = 100, dt: float = 0.01,
-                     warmup_iterations: int = 3, test_iterations: int = 10) -> BenchmarkResult:
+                     warmup_iterations: int = 3, test_iterations: int = 10,
+                     steps_per_chunk: int = 10) -> BenchmarkResult:
         """
-        Run GPU N-body benchmark
+        Run GPU N-body benchmark with chunked execution to prevent system hangs
         
         Args:
             precision: 'fp16', 'fp32', or 'fp64'
@@ -297,9 +298,19 @@ class GPUNBodyBenchmark:
             dt: Time step
             warmup_iterations: Number of warmup runs
             test_iterations: Number of timed test runs
+            steps_per_chunk: Steps per kernel launch (prevents hangs)
         """
         if not self.check_precision_support(precision):
             raise RuntimeError(f"Precision {precision} not supported by device")
+        
+        if steps_per_chunk < 1:
+            steps_per_chunk = steps
+        
+        # Warn if chunk size is too large
+        estimated_time_per_chunk = (num_bodies * steps_per_chunk) / 1e6  # Rough estimate
+        if estimated_time_per_chunk > 0.5:  # More than 0.5 seconds per chunk
+            print(f"Warning: steps_per_chunk={steps_per_chunk} may cause long kernel execution.")
+            print("  Reduce --chunk-size if system becomes unresponsive.")
         
         program = self.build_program(precision)
         kernel = program.nbody_simulation
@@ -331,11 +342,15 @@ class GPUNBodyBenchmark:
         G = np_dtype(6.67430e-11)  # Gravitational constant
         dt = np_dtype(dt)
         
-        # Warm-up runs
+        # Warm-up runs (using chunked execution as well)
         for _ in range(warmup_iterations):
-            kernel(self.queue, (global_size,), (local_size,),
-                   pos_buf, vel_buf, mass_buf,
-                   np.int32(num_bodies), G, dt, np.int32(steps))
+            steps_done = 0
+            while steps_done < steps:
+                current_steps = min(steps_per_chunk, steps - steps_done)
+                kernel(self.queue, (global_size,), (local_size,),
+                       pos_buf, vel_buf, mass_buf,
+                       np.int32(num_bodies), G, dt, np.int32(current_steps))
+                steps_done += current_steps
             self.queue.finish()
         
         # Reset to initial conditions for actual test
@@ -352,7 +367,7 @@ class GPUNBodyBenchmark:
         # Test runs
         execution_times = []
         
-        for _ in range(test_iterations):
+        for iteration in range(test_iterations):
             # Reset state
             np.random.seed(42)
             pos_init = np.random.randn(num_bodies, 4).astype(np_dtype)
@@ -365,12 +380,25 @@ class GPUNBodyBenchmark:
             self.queue.finish()
             
             start = time.perf_counter()
-            event = kernel(self.queue, (global_size,), (local_size,),
-                          pos_buf, vel_buf, mass_buf,
-                          np.int32(num_bodies), G, dt, np.int32(steps))
-            event.wait()
-            end = time.perf_counter()
             
+            # Chunked execution to prevent hangs
+            steps_done = 0
+            while steps_done < steps:
+                current_steps = min(steps_per_chunk, steps - steps_done)
+                
+                event = kernel(self.queue, (global_size,), (local_size,),
+                              pos_buf, vel_buf, mass_buf,
+                              np.int32(num_bodies), G, dt, np.int32(current_steps))
+                event.wait()
+                
+                steps_done += current_steps
+                if test_iterations == 1:  # Only show progress for single test iteration
+                    print(f"\r  Progress: {steps_done}/{steps} steps", end="")
+            
+            if test_iterations == 1:
+                print()  # New line after progress
+            
+            end = time.perf_counter()
             execution_times.append(end - start)
         
         # Read final state for validation (optional)
@@ -391,8 +419,8 @@ class GPUNBodyBenchmark:
             implementation=f"OpenCL {self.device.name}",
             precision=precision,
             execution_times=execution_times,
-            notes=f"Bodies={num_bodies}, Steps={steps}, dt={dt}, TileSize={self.TILE_SIZE}, "
-                  f"WorkGroup={local_size}, GlobalSize={global_size}",
+            notes=f"Bodies={num_bodies}, Steps={steps}, dt={dt}, "
+                  f"TileSize={self.TILE_SIZE}, StepsPerChunk={steps_per_chunk}",
             final_energy=final_energy,
             memory_usage=mem_usage
         )
@@ -517,6 +545,11 @@ Examples:
     )
     
     parser.add_argument(
+        "--chunk-size", type=int, default=10,
+        help="Steps per kernel launch (smaller values prevent hangs, default: 10)"
+    )
+    
+    parser.add_argument(
         "--output", type=str,
         help="Output JSON file path"
     )
@@ -570,7 +603,8 @@ Examples:
                 steps=args.steps,
                 dt=args.dt,
                 warmup_iterations=args.warmup,
-                test_iterations=args.repeats
+                test_iterations=args.repeats,
+                steps_per_chunk=args.chunk_size
             )
             results.append(result)
             print(f"  Average time: {result.avg_time:.4f}s")
