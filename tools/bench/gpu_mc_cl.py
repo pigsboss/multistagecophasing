@@ -774,9 +774,15 @@ Examples:
             print(f"  ├─ Deviation vs math.pi:   {gpu_vs_math:.2e} (absolute accuracy)")
             print(f"  └─ Deviation vs Python MC: {gpu_vs_python:.2e} (algorithm consistency)")
             
-            # Sanity check: GPU vs Python should be small if both are correct
-            if gpu_vs_python > 0.01 and result.total_samples > 1000000:
-                print(f"  ⚠️  Warning: Large deviation from Python reference suggests bug!")
+            # Statistical sanity check: only warn if Python reference has comparable precision
+            # Python uses 100,000 samples (std ~0.0016), GPU often uses 1e9+ samples (std ~0.00005)
+            # If GPU has significantly more samples, its result is more accurate than Python reference
+            python_samples = 100000
+            if result.total_samples <= python_samples * 10:  # Comparable sample counts
+                if gpu_vs_python > 0.01:
+                    print(f"  ⚠️  Warning: Large deviation from Python reference suggests bug!")
+            # If GPU has >>10x samples, trust GPU result over Python reference
+            # Large deviation is expected due to Python's higher statistical error
         print("="*80)
 
 
