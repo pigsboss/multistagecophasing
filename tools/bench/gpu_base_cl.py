@@ -258,51 +258,51 @@ class GPUBaseCapability:
         info.platform_name = self.platform.name
         info.platform_vendor = self.platform.vendor
         
-        # Compute resources
-        info.max_compute_units = self.device.max_compute_units
-        info.max_work_group_size = self.device.max_work_group_size
-        info.max_work_item_dimensions = self.device.max_work_item_dimensions
+        # Compute resources - 添加安全检查
+        info.max_compute_units = max(1, self.device.max_compute_units)
+        info.max_work_group_size = max(1, self.device.max_work_group_size)
+        info.max_work_item_dimensions = max(1, self.device.max_work_item_dimensions)
         
         # Get max work item sizes for each dimension
         max_sizes = []
         for i in range(info.max_work_item_dimensions):
-            max_sizes.append(self.device.max_work_item_sizes[i])
+            max_sizes.append(max(1, self.device.max_work_item_sizes[i]))
         info.max_work_item_sizes = max_sizes
         
-        # Vector widths
-        info.preferred_vector_width_char = self.device.preferred_vector_width_char
-        info.preferred_vector_width_short = self.device.preferred_vector_width_short
-        info.preferred_vector_width_int = self.device.preferred_vector_width_int
-        info.preferred_vector_width_long = self.device.preferred_vector_width_long
-        info.preferred_vector_width_float = self.device.preferred_vector_width_float
-        info.preferred_vector_width_double = self.device.preferred_vector_width_double
-        info.native_vector_width_char = self.device.native_vector_width_char
-        info.native_vector_width_short = self.device.native_vector_width_short
-        info.native_vector_width_int = self.device.native_vector_width_int
-        info.native_vector_width_long = self.device.native_vector_width_long
-        info.native_vector_width_float = self.device.native_vector_width_float
-        info.native_vector_width_double = self.device.native_vector_width_double
+        # Vector widths - 确保至少为1
+        info.preferred_vector_width_char = max(1, self.device.preferred_vector_width_char)
+        info.preferred_vector_width_short = max(1, self.device.preferred_vector_width_short)
+        info.preferred_vector_width_int = max(1, self.device.preferred_vector_width_int)
+        info.preferred_vector_width_long = max(1, self.device.preferred_vector_width_long)
+        info.preferred_vector_width_float = max(1, self.device.preferred_vector_width_float)
+        info.preferred_vector_width_double = max(1, self.device.preferred_vector_width_double)
+        info.native_vector_width_char = max(1, self.device.native_vector_width_char)
+        info.native_vector_width_short = max(1, self.device.native_vector_width_short)
+        info.native_vector_width_int = max(1, self.device.native_vector_width_int)
+        info.native_vector_width_long = max(1, self.device.native_vector_width_long)
+        info.native_vector_width_float = max(1, self.device.native_vector_width_float)
+        info.native_vector_width_double = max(1, self.device.native_vector_width_double)
         
-        # Work group size multiple
+        # Work group size multiple - 确保至少为1
         try:
-            info.preferred_work_group_size_multiple = self.device.preferred_work_group_size_multiple
+            info.preferred_work_group_size_multiple = max(1, self.device.preferred_work_group_size_multiple)
         except:
             info.preferred_work_group_size_multiple = 1
-            self._print("Preferred work group size multiple not available")
+            self._print("Preferred work group size multiple not available, using 1", "WARN")
         
-        # Memory architecture
-        info.global_mem_size = self.device.global_mem_size
-        info.global_mem_cache_size = self.device.global_mem_cache_size
-        info.global_mem_cacheline_size = self.device.global_mem_cacheline_size
-        info.local_mem_size = self.device.local_mem_size
+        # Memory architecture - 添加最小安全值
+        info.global_mem_size = max(100 * 1024 * 1024, self.device.global_mem_size)  # 至少100MB
+        info.global_mem_cache_size = max(0, self.device.global_mem_cache_size)
+        info.global_mem_cacheline_size = max(64, self.device.global_mem_cacheline_size)  # 至少64字节
+        info.local_mem_size = max(1024, self.device.local_mem_size)  # 至少1KB
         info.local_mem_type = str(self.device.local_mem_type)
-        info.constant_buffer_size = self.device.max_constant_buffer_size
-        info.max_mem_alloc_size = self.device.max_mem_alloc_size
-        info.max_parameter_size = self.device.max_parameter_size
+        info.constant_buffer_size = max(1024, self.device.max_constant_buffer_size)  # 至少1KB
+        info.max_mem_alloc_size = max(10 * 1024 * 1024, self.device.max_mem_alloc_size)  # 至少10MB
+        info.max_parameter_size = max(1024, self.device.max_parameter_size)  # 至少1KB
         
-        # Clock and frequency
-        info.max_clock_frequency = self.device.max_clock_frequency
-        info.profiling_timer_resolution = self.device.profiling_timer_resolution
+        # Clock and frequency - 确保合理值
+        info.max_clock_frequency = max(100, self.device.max_clock_frequency)  # 至少100MHz
+        info.profiling_timer_resolution = max(1, self.device.profiling_timer_resolution)
         
         # Extension support
         info.extensions = self.device.extensions.strip().split()
@@ -887,11 +887,17 @@ class GPUBaseCapability:
         info = self.report.device_info
         
         # Memory capability score (0-1)
-        mem_score = min(1.0, info.global_mem_size / (4 * 1024**3))  # Normalize to 4GB
+        # 修复：检查全局内存大小是否为0
+        if info.global_mem_size <= 0:
+            # 如果全局内存大小为0，使用默认值4GB
+            self._print("Warning: global_mem_size is 0 or negative, using default 4GB for memory score", "WARN")
+            mem_score = 0.5  # 中等内存评分
+        else:
+            mem_score = min(1.0, info.global_mem_size / (4 * 1024**3))  # Normalize to 4GB
         
         # Compute capability score
-        compute_units = info.max_compute_units
-        clock_freq = info.max_clock_frequency
+        compute_units = max(1, info.max_compute_units)  # 确保至少为1
+        clock_freq = max(100, info.max_clock_frequency)  # 确保至少为100MHz
         compute_score = min(1.0, (compute_units * clock_freq) / (2048 * 1000))  # Normalize to 2048 CUs at 1GHz
         
         # Bandwidth score (if available)
@@ -904,8 +910,8 @@ class GPUBaseCapability:
         
         # Vectorization score
         vec_widths = [
-            info.preferred_vector_width_float,
-            info.preferred_vector_width_double,
+            max(1, info.preferred_vector_width_float),  # 确保至少为1
+            max(1, info.preferred_vector_width_double),
         ]
         vec_score = min(1.0, np.mean(vec_widths) / 4.0)  # Normalize to vector width 4
         
@@ -953,6 +959,12 @@ class GPUBaseCapability:
         estimated_memory = paths * 4 * precision_size  # bytes
         max_memory = info.global_mem_size * self.config_params["memory_safety_factor"]
         
+        # 修复：检查 max_memory 是否为0
+        if max_memory <= 0:
+            # 如果最大内存为0或负数，使用最小安全值
+            max_memory = 100 * 1024 * 1024  # 100 MB 作为最小安全值
+            self._print(f"  Warning: max_memory is 0 or negative, using {max_memory/1024/1024:.0f} MB as minimum", "WARN")
+        
         if estimated_memory > max_memory:
             # Reduce paths to fit in memory
             paths = int(max_memory / (4 * precision_size))
@@ -983,7 +995,12 @@ class GPUBaseCapability:
         
         # Calculate confidence and safety
         confidence = min(1.0, compute_score * 0.8 + mem_score * 0.2)
-        safety = min(1.0, 1.0 - (estimated_memory / max_memory))
+        
+        # 修复：避免除零错误
+        if max_memory <= 0:
+            safety = 0.0
+        else:
+            safety = min(1.0, 1.0 - (estimated_memory / max_memory))
         
         config = TestConfiguration(
             benchmark_type="trajectory",
@@ -1044,6 +1061,7 @@ class GPUBaseCapability:
         # Estimate runtime
         # Each sample: random number generation (2 values) + multiplication + addition + comparison
         total_ops = samples * 10  # ~10 ops per sample
+        # Very rough ops/sec estimation based on compute units and frequency
         ops_per_sec = info.max_compute_units * info.max_clock_frequency * 1e6 * 0.15  # 15% efficiency
         estimated_runtime = total_ops / ops_per_sec if ops_per_sec > 0 else 20.0
         
