@@ -243,21 +243,21 @@ class GPUNBodyBenchmark:
         convert_out = config['convert_out']
         ext_pragma = config['ext_pragma']
         
-        # For Intel GPUs, prefer simpler kernels
-        if self.intel_gpu and not self.no_tile and num_bodies < 500:
-            self._debug_print("Intel GPU with small N: using simplified kernel", "INFO")
-            return self._generate_simplified_kernel(
-                precision, config, ctype, vec_type, suffix, 
-                zero, accum_type, convert_in, convert_out, ext_pragma
-            )
-        elif self.no_tile:
+        if self.no_tile:
             # 简化的全局内存内核（不使用tile机制）
             return self._generate_naive_kernel(
                 precision, config, ctype, vec_type, suffix, 
                 zero, accum_type, convert_in, convert_out, ext_pragma
             )
+        elif self.intel_gpu:
+            # Intel GPU使用特别优化的tile内核
+            self._debug_print("Intel GPU: Using optimized tile kernel", "INFO")
+            return self._generate_intel_optimized_tiled_kernel(
+                precision, config, ctype, vec_type, suffix, 
+                zero, accum_type, convert_in, convert_out, ext_pragma
+            )
         else:
-            # 原有的tile优化内核
+            # 原有的tile优化内核（用于非Intel GPU）
             return self._generate_tiled_kernel(
                 precision, config, ctype, vec_type, suffix, 
                 zero, accum_type, convert_in, convert_out, ext_pragma
@@ -335,79 +335,16 @@ class GPUNBodyBenchmark:
         '''
         return kernel
 
-    def _generate_simplified_kernel(self, precision: str, config: Dict, ctype: str, vec_type: str,
-                                   suffix: str, zero: str, accum_type: str,
-                                   convert_in: str, convert_out: str, ext_pragma: str) -> str:
+    def _generate_intel_optimized_tiled_kernel(self, precision: str, config: Dict, ctype: str, vec_type: str,
+                                              suffix: str, zero: str, accum_type: str,
+                                              convert_in: str, convert_out: str, ext_pragma: str) -> str:
         """
-        为Intel GPU生成简化的内核 - 不使用复杂的局部内存和barriers
-        """
-        kernel = f'''
-        {ext_pragma}
-        
-        #define SOFTENING (0.01{suffix} * 0.01{suffix})
-        
-        __kernel void nbody_simulation(
-            __global {vec_type}* positions,
-            __global {vec_type}* velocities,
-            __global {ctype}* masses,
-            int n,
-            {ctype} G,
-            {ctype} dt,
-            int steps
-        ) {{
-            int gid = get_global_id(0);
-            if (gid >= n) return;
-            
-            {vec_type} pos_i_vec = positions[gid];
-            {vec_type} vel_i_vec = velocities[gid];
-            
-            {accum_type}4 pos_i = {"convert_float4(pos_i_vec)" if precision == "fp16" else "pos_i_vec"};
-            {accum_type}4 vel_i = {"convert_float4(vel_i_vec)" if precision == "fp16" else "vel_i_vec"};
-            
-            for (int s = 0; s < steps; s++) {{
-                {accum_type}4 acc = ({accum_type}4)({zero});
-                
-                // Simplified loop - no tiling for Intel
-                for (int j = 0; j < n; j++) {{
-                    if (j == gid) continue;
-                    
-                    {vec_type} pos_j_vec = positions[j];
-                    {ctype} mass_j = masses[j];
-                    
-                    {accum_type}4 pos_j = {"convert_float4(pos_j_vec)" if precision == "fp16" else "pos_j_vec"};
-                    {accum_type}4 r_vec = pos_j - pos_i;
-                    {accum_type} r2 = r_vec.x*r_vec.x + r_vec.y*r_vec.y + r_vec.z*r_vec.z + SOFTENING;
-                    {accum_type} inv_r = rsqrt(r2);
-                    {accum_type} inv_r3 = inv_r * inv_r * inv_r;
-                    
-                    acc += mass_j * inv_r3 * r_vec;
-                }}
-                
-                vel_i += G * acc * dt;
-                pos_i += vel_i * dt;
-            }}
-            
-            positions[gid] = {"convert_half4(pos_i)" if precision == "fp16" else "pos_i"};
-            velocities[gid] = {"convert_half4(vel_i)" if precision == "fp16" else "vel_i"};
-        }}
-        '''
-        return kernel
-    
-    def _generate_tiled_kernel(self, precision: str, config: Dict, ctype: str, vec_type: str,
-                              suffix: str, zero: str, accum_type: str,
-                              convert_in: str, convert_out: str, ext_pragma: str) -> str:
-        """
-        生成修复后的tile优化内核 - 减少寄存器压力
+        为Intel GPU特别优化的tile内核
+        - 使用更小的TILE_SIZE
+        - 减少寄存器压力
+        - 避免复杂的宏和函数
         """
         tile_size = self.TILE_SIZE
-        
-        # For Intel GPUs, use simpler kernel without complex optimizations
-        if self.intel_gpu:
-            unroll_pragma = ""  # No unrolling for Intel
-            extra_optimizations = ""
-        else:
-            unroll_pragma = "#pragma unroll 2"  # Reduced unrolling
-            extra_optimizations = "-cl-fast-relaxed-math -cl-mad-enable"
         
         kernel = f'''
         {ext_pragma}
@@ -427,7 +364,7 @@ class GPUNBodyBenchmark:
             int gid = get_global_id(0);
             int lid = get_local_id(0);
             
-            if (gid >= n) return;  // Simple return for Intel
+            if (gid >= n) return;
             
             // 加载数据
             {vec_type} pos_i_vec = positions[gid];
@@ -459,7 +396,95 @@ class GPUNBodyBenchmark:
                     // 计算当前瓦片的贡献
                     int tile_end = min(TILE_SIZE, n - tile * TILE_SIZE);
                     
-                    {unroll_pragma}
+                    // 不使用unroll，减少寄存器压力
+                    for (int k = 0; k < tile_end; k++) {{
+                        int j_idx = tile * TILE_SIZE + k;
+                        if (j_idx == gid) continue;
+                        
+                        {accum_type}4 pos_j = {"convert_float4(local_pos[k])" if precision == "fp16" else "local_pos[k]"};
+                        {accum_type} mass_j = local_mass[k];
+                        
+                        // 内联计算，避免函数调用开销
+                        {accum_type}4 r_vec = pos_j - pos_i;
+                        {accum_type} r2 = r_vec.x*r_vec.x + r_vec.y*r_vec.y + r_vec.z*r_vec.z + SOFTENING;
+                        {accum_type} inv_r = rsqrt(r2);
+                        {accum_type} inv_r3 = inv_r * inv_r * inv_r;
+                        acc += mass_j * inv_r3 * r_vec;
+                    }}
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                }}
+                
+                // 更新速度和位置
+                vel_i += G * acc * dt;
+                pos_i += vel_i * dt;
+            }}
+            
+            // 写回结果
+            positions[gid] = {"convert_half4(pos_i)" if precision == "fp16" else "pos_i"};
+            velocities[gid] = {"convert_half4(vel_i)" if precision == "fp16" else "vel_i"};
+        }}
+        '''
+        return kernel
+    
+    def _generate_tiled_kernel(self, precision: str, config: Dict, ctype: str, vec_type: str,
+                              suffix: str, zero: str, accum_type: str,
+                              convert_in: str, convert_out: str, ext_pragma: str) -> str:
+        """
+        生成修复后的tile优化内核 - 减少寄存器压力
+        """
+        tile_size = self.TILE_SIZE
+        
+        kernel = f'''
+        {ext_pragma}
+        
+        #define TILE_SIZE {tile_size}
+        #define SOFTENING (0.01{suffix} * 0.01{suffix})  // Plummer softening squared
+        
+        __kernel void nbody_simulation(
+            __global {vec_type}* positions,
+            __global {vec_type}* velocities,
+            __global {ctype}* masses,
+            int n,
+            {ctype} G,
+            {ctype} dt,
+            int steps
+        ) {{
+            int gid = get_global_id(0);
+            int lid = get_local_id(0);
+            
+            if (gid >= n) return;
+            
+            // 加载数据
+            {vec_type} pos_i_vec = positions[gid];
+            {vec_type} vel_i_vec = velocities[gid];
+            
+            {accum_type}4 pos_i = {"convert_float4(pos_i_vec)" if precision == "fp16" else "pos_i_vec"};
+            {accum_type}4 vel_i = {"convert_float4(vel_i_vec)" if precision == "fp16" else "vel_i_vec"};
+            
+            __local {vec_type} local_pos[TILE_SIZE];
+            __local {ctype} local_mass[TILE_SIZE];
+            
+            int num_tiles = (n + TILE_SIZE - 1) / TILE_SIZE;
+            
+            // 主模拟循环
+            for (int s = 0; s < steps; s++) {{
+                {accum_type}4 acc = ({accum_type}4)({zero});
+                
+                // 瓦片循环
+                for (int tile = 0; tile < num_tiles; tile++) {{
+                    int j = tile * TILE_SIZE + lid;
+                    
+                    // 协作加载到局部内存
+                    if (j < n) {{
+                        local_pos[lid] = positions[j];
+                        local_mass[lid] = masses[j];
+                    }}
+                    barrier(CLK_LOCAL_MEM_FENCE);
+                    
+                    // 计算当前瓦片的贡献
+                    int tile_end = min(TILE_SIZE, n - tile * TILE_SIZE);
+                    
+                    #pragma unroll 2
                     for (int k = 0; k < tile_end; k++) {{
                         int j_idx = tile * TILE_SIZE + k;
                         if (j_idx == gid) continue;
@@ -539,17 +564,27 @@ class GPUNBodyBenchmark:
             raise RuntimeError(f"Precision {precision} not supported by device")
         
         # Intel GPU specific optimizations
-        if self.intel_gpu:
-            # Always use no-tile for Intel GPUs for better stability
-            if not self.no_tile:
-                self._debug_print("Intel GPU: Forcing no-tile mode for better stability", "INFO")
-                self.no_tile = True
+        if self.intel_gpu and not self.no_tile:
+            # 对于Intel GPU，如果用户明确要求使用tile模式，可以使用更保守的设置
+            # 但只在用户没有指定--no-tile时才这样做
+            self._debug_print("Intel GPU: Using very conservative tile mode settings", "INFO")
             
-            # Use smaller work groups for Intel
-            local_size = min(32, self.max_wg_size, num_bodies)
-            self.TILE_SIZE = local_size
-            self._debug_print(f"Intel GPU: Using local_size={local_size}", "INFO")
-        else:
+            # 进一步减小工作组合TILE_SIZE以提高稳定性
+            max_safe_tile = min(16, self.max_wg_size)
+            if self.TILE_SIZE > max_safe_tile:
+                self.TILE_SIZE = max_safe_tile
+                self._debug_print(f"Intel GPU: Reduced TILE_SIZE to {self.TILE_SIZE} for stability", "INFO")
+            
+            # 对于Intel GPU使用更小的工作组
+            local_size = min(self.TILE_SIZE, num_bodies)
+            local_size = min(local_size, 32)  # 进一步限制最大32
+            
+            # 确保local_size至少为1
+            if local_size < 1:
+                local_size = 1
+                
+            self._debug_print(f"Intel GPU: Using local_size={local_size} for tile mode", "INFO")
+        elif not self.intel_gpu:
             # Original logic for non-Intel GPUs
             if num_bodies >= 5000 and not self.no_tile:
                 self._debug_print(f"Large N={num_bodies}, switching to no-tile mode to reduce resource usage", "INFO")
