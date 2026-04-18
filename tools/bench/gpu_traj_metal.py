@@ -76,7 +76,9 @@ class BenchmarkResult:
 
 
 # ---------- core computation – single path, JAX jit ---------- #
-@jax.jit(static_argnames=('steps',))
+from functools import partial
+
+@partial(jax.jit, static_argnames=('steps',))
 def _integrate_single_path(steps: int, key: jax.Array) -> jnp.float32:
     """Integrate a single path; 100 % match to OpenCL kernel logic."""
     def body_fn(carry, step):
