@@ -19,6 +19,7 @@ from typing import Dict, List, Tuple, Any, Optional, Union
 import dataclasses
 from dataclasses import dataclass, field
 import warnings
+from contextlib import contextmanager
 
 # Set default environment variables for logging
 os.environ.setdefault('TF_CPP_MIN_LOG_LEVEL', '2')  # Default: only show warnings and errors
@@ -52,6 +53,19 @@ def print_subsection(title: str) -> None:
     print(f"\n{'-' * 40}")
     print(f" {title}")
     print(f"{'-' * 40}")
+
+
+@contextmanager
+def suppress_stderr():
+    """完全抑制 stderr 输出（用于抑制 C++ 库日志）"""
+    with open(os.devnull, 'w') as devnull:
+        old_stderr = os.dup(2)
+        os.dup2(devnull.fileno(), 2)
+        try:
+            yield
+        finally:
+            os.dup2(old_stderr, 2)
+            os.close(old_stderr)
 
 
 @dataclass
@@ -960,7 +974,7 @@ Examples:
     
     parser.add_argument(
         "--verbose", "-v", action="store_true",
-        help="Enable verbose output, show all warnings and logs"
+        help="Enable verbose output, show all logs and warnings"
     )
     
     parser.add_argument(
@@ -1008,13 +1022,22 @@ Examples:
     
     # Get system information
     print_section("System Information")
-    system_info = get_system_info()
+    if args.quiet:
+        # Quiet mode: 抑制 C++ stderr 日志，但保留 Python print 输出（stdout）
+        with suppress_stderr():
+            system_info = get_system_info()
+    else:
+        system_info = get_system_info()
     for key, value in system_info.items():
         print(f"{key.replace('_', ' ').title()}: {value}")
     
     # Check Metal and JAX installation
     print_section("Metal & JAX Installation Check")
-    packages = check_metal_installation()
+    if args.quiet:
+        with suppress_stderr():
+            packages = check_metal_installation()
+    else:
+        packages = check_metal_installation()
     
     for pkg_name, pkg_info in packages.items():
         if pkg_info.get('available', False):
@@ -1031,7 +1054,11 @@ Examples:
     
     # Get Metal device information
     print_section("Metal Device Information")
-    metal_info = get_metal_device_info()
+    if args.quiet:
+        with suppress_stderr():
+            metal_info = get_metal_device_info()
+    else:
+        metal_info = get_metal_device_info()
     
     if 'error' in metal_info:
         print(f"Error: {metal_info['error']}")
@@ -1060,7 +1087,11 @@ Examples:
     
     # Get JAX device information
     print_section("JAX Device Information")
-    jax_info = get_jax_device_info()
+    if args.quiet:
+        with suppress_stderr():
+            jax_info = get_jax_device_info()
+    else:
+        jax_info = get_jax_device_info()
     
     if 'error' in jax_info:
         print(f"Error: {jax_info['error']}")
@@ -1079,9 +1110,20 @@ Examples:
     # Ask user if they want to run benchmarks
     if jax_info and 'error' not in jax_info:
         if jax_info.get('device_count', 0) > 0:
-            response = input(f"\nRun JAX performance benchmarks? [Y/n]: ").strip().lower()
-            if response == '' or response == 'y':
-                benchmark_results = run_jax_benchmarks(device_idx=0)
+            if not args.quiet:
+                response = input(f"\nRun JAX performance benchmarks? [Y/n]: ").strip().lower()
+                if response == '' or response == 'y':
+                    if args.quiet:
+                        with suppress_stderr():
+                            benchmark_results = run_jax_benchmarks(device_idx=0)
+                    else:
+                        benchmark_results = run_jax_benchmarks(device_idx=0)
+                else:
+                    benchmark_results = {}
+            else:
+                # In quiet mode, automatically run benchmarks
+                with suppress_stderr():
+                    benchmark_results = run_jax_benchmarks(device_idx=0)
                 
                 # Print benchmark summary
                 print_section("Benchmark Results")
@@ -1133,8 +1175,6 @@ Examples:
                             else:
                                 size_str = f"{size_bytes/(1024*1024):.0f} MB"
                             print(f"  {size_str}: {avg_bw:.2f} MB/s")
-            else:
-                benchmark_results = {}
         else:
             print("No JAX devices found for benchmarking.")
             benchmark_results = {}
