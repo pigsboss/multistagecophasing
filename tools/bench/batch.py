@@ -137,6 +137,8 @@ class BatchBenchmarkRunner:
             # Parse tool string to support cpu.py::traj format
             tool_str = template['tool']
             tool_args = []
+            tool_name = tool_str
+            test_type = 'all'
             
             if '::' in tool_str:
                 # Split tool name and test type
@@ -160,22 +162,64 @@ class BatchBenchmarkRunner:
                     # Build command line arguments
                     args = template['base_args'].copy() + tool_args
                     
-                    # Add scale parameters
+                    # Add scale parameters with correct argument names
                     if scale_type == 'trajectory':
                         if param_name == 'steps':
-                            args.extend(["--size-traj", f"({param_value},{fixed_params.get('trajectories', 500)})"])
+                            # Update or add --size parameter
+                            size_value = f"({param_value},{fixed_params.get('trajectories', 500)})"
+                            # Find and replace --size in args, or add it
+                            found = False
+                            for i, arg in enumerate(args):
+                                if arg == "--size":
+                                    args[i+1] = size_value
+                                    found = True
+                                    break
+                            if not found:
+                                args.extend(["--size", size_value])
                         elif param_name == 'trajectories':
-                            args.extend(["--size-traj", f"({fixed_params.get('steps', 5000)},{param_value})"])
+                            size_value = f"({fixed_params.get('steps', 5000)},{param_value})"
+                            found = False
+                            for i, arg in enumerate(args):
+                                if arg == "--size":
+                                    args[i+1] = size_value
+                                    found = True
+                                    break
+                            if not found:
+                                args.extend(["--size", size_value])
                     
                     elif scale_type == 'monte_carlo':
                         if param_name == 'samples':
-                            args.extend(["--size-mc", str(param_value)])
+                            # Update or add --samples parameter
+                            found = False
+                            for i, arg in enumerate(args):
+                                if arg == "--samples":
+                                    args[i+1] = str(param_value)
+                                    found = True
+                                    break
+                            if not found:
+                                args.extend(["--samples", str(param_value)])
                     
                     elif scale_type == 'nbody':
                         if param_name == 'bodies':
-                            args.extend(["--size-nbody", f"({param_value},{fixed_params.get('steps', 20)})"])
+                            # Update --bodies parameter
+                            found = False
+                            for i, arg in enumerate(args):
+                                if arg == "--bodies":
+                                    args[i+1] = str(param_value)
+                                    found = True
+                                    break
+                            if not found:
+                                args.extend(["--bodies", str(param_value)])
                         elif param_name == 'steps':
-                            args.extend(["--size-nbody", f"({fixed_params.get('bodies', 500)},{param_value})"])
+                            # Update --steps parameter
+                            found = False
+                            for i, arg in enumerate(args):
+                                if arg == "--steps":
+                                    args[i+1] = str(param_value)
+                                    found = True
+                                    break
+                            if not found:
+                                args.extend(["--steps", str(param_value)])
                     
                     # Output file
                     output_file = self.output_dir / f"{job_name}.json"
@@ -187,7 +231,7 @@ class BatchBenchmarkRunner:
                         'task': task,
                         'scale_type': scale_type,
                         'tool_name': tool_name,
-                        'test_type': test_type if '::' in tool_str else 'all',
+                        'test_type': test_type,
                         param_name: param_value,
                         **fixed_params
                     }
