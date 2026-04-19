@@ -219,15 +219,6 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
     """Detect available PJRT plugins for different hardware."""
     plugins = {}
     
-    # Always check CPU first (base backend)
-    cpu_info = BackendInfo(
-        name='CPU',
-        platform='cpu',
-        available=False,
-        pjrt_plugin='pjrt_c_api_cpu_plugin',
-        priority=100
-    )
-    
     try:
         with suppress_jax_warnings():
             import jax
@@ -235,8 +226,21 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
         # Get all devices
         all_devices = jax.devices()
         
-        # CPU devices
-        cpu_devices = [d for d in all_devices if d.platform == 'cpu']
+        # DEBUG: Print all devices for troubleshooting
+        print(f"\nDEBUG: Found {len(all_devices)} JAX devices:")
+        for i, d in enumerate(all_devices):
+            print(f"  Device {i}: platform='{d.platform}', kind='{d.device_kind}', id='{d.id}'")
+        
+        # CPU devices - use case-insensitive comparison
+        cpu_info = BackendInfo(
+            name='CPU',
+            platform='cpu',
+            available=False,
+            pjrt_plugin='pjrt_c_api_cpu_plugin',
+            priority=100
+        )
+        
+        cpu_devices = [d for d in all_devices if d.platform.lower() == 'cpu']
         if cpu_devices:
             cpu_info.available = True
             cpu_info.device_count = len(cpu_devices)
@@ -244,12 +248,11 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
                 'id': d.id,
                 'kind': d.device_kind,
                 'platform': d.platform,
-                'client': str(d.client)[:100],
             } for d in cpu_devices]
         
         plugins['cpu'] = cpu_info
         
-        # Check for CUDA (NVIDIA GPU)
+        # Check for CUDA (NVIDIA GPU) - case-insensitive
         cuda_info = BackendInfo(
             name='NVIDIA GPU (CUDA)',
             platform='cuda',
@@ -258,7 +261,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
             priority=10
         )
         
-        cuda_devices = [d for d in all_devices if d.platform == 'cuda']
+        cuda_devices = [d for d in all_devices if d.platform.lower() == 'cuda']
         if cuda_devices:
             cuda_info.available = True
             cuda_info.device_count = len(cuda_devices)
@@ -279,7 +282,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
         
         plugins['cuda'] = cuda_info
         
-        # Check for ROCm (AMD GPU)
+        # Check for ROCm (AMD GPU) - case-insensitive
         rocm_info = BackendInfo(
             name='AMD GPU (ROCm)',
             platform='rocm',
@@ -288,7 +291,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
             priority=20
         )
         
-        rocm_devices = [d for d in all_devices if d.platform == 'rocm']
+        rocm_devices = [d for d in all_devices if d.platform.lower() == 'rocm']
         if rocm_devices:
             rocm_info.available = True
             rocm_info.device_count = len(rocm_devices)
@@ -300,7 +303,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
         
         plugins['rocm'] = rocm_info
         
-        # Check for Metal (Apple GPU)
+        # Check for Metal (Apple GPU) - case-insensitive
         metal_info = BackendInfo(
             name='Apple Metal GPU',
             platform='metal',
@@ -309,7 +312,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
             priority=30
         )
         
-        metal_devices = [d for d in all_devices if d.platform == 'metal']
+        metal_devices = [d for d in all_devices if d.platform.lower() == 'metal']
         if metal_devices:
             metal_info.available = True
             metal_info.device_count = len(metal_devices)
@@ -318,10 +321,25 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
                 'kind': d.device_kind,
                 'platform': d.platform,
             } for d in metal_devices]
+        elif all_devices:
+            # If we have devices but none are marked as 'metal', check if any might be Metal
+            # Apple Silicon devices might show up as 'gpu' or other platform names
+            potential_metal = [d for d in all_devices 
+                              if any(keyword in d.device_kind.lower() 
+                                     for keyword in ['apple', 'm1', 'm2', 'm3', 'metal'])]
+            if potential_metal:
+                metal_info.available = True
+                metal_info.device_count = len(potential_metal)
+                metal_info.devices = [{
+                    'id': d.id,
+                    'kind': d.device_kind,
+                    'platform': d.platform,
+                } for d in potential_metal]
+                metal_info.notes = f"Detected as {potential_metal[0].platform}, assumed to be Metal"
         
         plugins['metal'] = metal_info
         
-        # Check for TPU
+        # Check for TPU - case-insensitive
         tpu_info = BackendInfo(
             name='Google Cloud TPU',
             platform='tpu',
@@ -330,7 +348,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
             priority=40
         )
         
-        tpu_devices = [d for d in all_devices if d.platform == 'tpu']
+        tpu_devices = [d for d in all_devices if d.platform.lower() == 'tpu']
         if tpu_devices:
             tpu_info.available = True
             tpu_info.device_count = len(tpu_devices)
@@ -342,7 +360,7 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
         
         plugins['tpu'] = tpu_info
         
-        # Check for Intel GPU (via oneAPI/SYCL)
+        # Check for Intel GPU (via oneAPI/SYCL) - case-insensitive
         intel_info = BackendInfo(
             name='Intel GPU (Arc/Data Center)',
             platform='intel',
@@ -351,11 +369,14 @@ def detect_pjrt_plugins() -> Dict[str, BackendInfo]:
             priority=50
         )
         
-        # Intel devices might appear under 'gpu' or 'sycl' platform
+        # Intel devices might appear under various platforms
         intel_devices = []
         for d in all_devices:
-            if (d.platform in ['gpu', 'sycl', 'opencl'] and 
-                any(keyword in d.device_kind.lower() for keyword in ['intel', 'arc', 'xe'])):
+            platform_lower = d.platform.lower()
+            device_kind_lower = d.device_kind.lower()
+            
+            if (platform_lower in ['gpu', 'sycl', 'opencl', 'intel'] and 
+                any(keyword in device_kind_lower for keyword in ['intel', 'arc', 'xe'])):
                 intel_devices.append(d)
         
         if intel_devices:
@@ -685,7 +706,15 @@ Examples:
     if not args.quiet:
         for key, value in system_info.items():
             if key not in ['error']:
-                print(f"{key.replace('_', ' ').title()}: {value}")
+                # 特殊处理键名，确保缩写为大写
+                display_key = key.replace('_', ' ').title()
+                # 修复常见缩写
+                display_key = display_key.replace('Cpu', 'CPU')
+                display_key = display_key.replace('Ram', 'RAM')
+                display_key = display_key.replace('Gb', 'GB')
+                display_key = display_key.replace('Mhz', 'MHz')
+                display_key = display_key.replace('Mac', 'macOS')
+                print(f"{display_key}: {value}")
     
     # Check JAX installation
     if not args.quiet:
