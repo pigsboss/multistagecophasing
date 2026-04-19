@@ -283,108 +283,112 @@ class ScalarOpenCLStyle:
 
 # ---------- 技术途径2：向量化计算（NumPy风格） ---------- #
 class VectorizedNumPyStyle:
-    """向量化实现，仿效NumPy显式编写向量计算过程"""
+    """向量化实现，与cpu.py的numpy_scipy_implementation完全一致的计算模式"""
     
     @staticmethod
     def create_compute_function(steps: int, paths: int, use_lcg: bool = False):
-        """创建向量化计算函数 - 修复版本"""
+        """创建向量化计算函数 - 完全匹配cpu.py的计算模式"""
         import jax
         import jax.numpy as jnp
         from jax import random
         
-        if use_lcg:
-            # LCG实现
-            @jax.jit
-            def compute_lcg(key):
+        delta = 1.0 / steps
+        
+        @jax.jit
+        def compute_vectorized(key):
+            # 初始化所有路径的状态
+            x_array = jnp.zeros((paths,), dtype=jnp.float32)
+            integral_array = jnp.zeros((paths,), dtype=jnp.float32)
+            
+            if use_lcg:
+                # LCG初始化
                 base_seed = key.astype(jnp.uint32)
-                lcg_states = base_seed + jnp.arange(paths, dtype=jnp.uint32)
+                states = base_seed + jnp.arange(paths, dtype=jnp.uint32)
                 
-                x = jnp.zeros((paths,), dtype=jnp.float32)
-                integral = jnp.zeros((paths,), dtype=jnp.float32)
-                
-                def body_fun(step, carry):
-                    x, integral, states = carry
+                # 时间步循环 - 使用fori_loop
+                def body_fn_lcg(step, carry):
+                    x_array, integral_array, states = carry
                     
-                    # LCG随机数生成
+                    # LCG随机数
                     new_states = states * jnp.uint32(1103515245) + jnp.uint32(12345)
                     rand_vals = (new_states & jnp.uint32(0x7fffffff)).astype(jnp.float32)
-                    rand_vals = rand_vals / jnp.float32(2147483647.0)
+                    rand_vals = rand_vals / jnp.float32(2147483647.0) * 0.1
                     
-                    # 分支逻辑
-                    weight = jnp.where(
-                        x < -1.0, 0.1,
-                        jnp.where(x < 0.0, 0.3 * x + 0.4,
-                            jnp.where(x < 1.0, 0.5 * (1.0 - x * x), 0.2))
+                    # 与cpu.py完全相同的分支逻辑
+                    weight_array = jnp.where(
+                        x_array < -1.0, 0.1,
+                        jnp.where(
+                            x_array < 0.0, 0.3 * x_array + 0.4,
+                            jnp.where(
+                                x_array < 1.0, 0.5 * (1.0 - x_array * x_array),
+                                0.2
+                            )
+                        )
                     )
                     
                     # 交替因子
-                    factor = jnp.where((step % 2) == 0, 1.0 + 0.1 * x, 1.0 - 0.1 * x)
+                    if step % 2 == 0:
+                        factor_array = 1.0 + 0.1 * x_array
+                    else:
+                        factor_array = 1.0 - 0.1 * x_array
                     
-                    delta = 1.0 / steps
-                    integral = integral + weight * delta * factor
+                    # 更新积分
+                    integral_array = integral_array + weight_array * delta * factor_array
                     
                     # 更新x
-                    x = jnp.clip(x + rand_vals * 0.1, -2.0, 2.0)
+                    x_array = jnp.clip(x_array + rand_vals, -2.0, 2.0)
                     
-                    return (x, integral, new_states)
+                    return (x_array, integral_array, new_states)
                 
-                # 执行循环
                 final_x, final_integral, _ = jax.lax.fori_loop(
-                    0, steps, body_fun, (x, integral, lcg_states)
+                    0, steps, body_fn_lcg, (x_array, integral_array, states)
                 )
                 
-                return jnp.mean(final_integral)
-            
-            return compute_lcg
-        
-        else:
-            # JAX随机数生成器实现
-            @jax.jit
-            def compute_jax(key):
-                # 一次性生成所有随机数
-                step_keys = random.split(key, steps)
-                
-                def generate_step_random(step_key):
-                    subkeys = random.split(step_key, paths)
-                    return jax.vmap(lambda k: random.uniform(k, dtype=jnp.float32))(subkeys)
-                
-                all_rand_vals = jax.vmap(generate_step_random)(step_keys)
-                
-                x = jnp.zeros((paths,), dtype=jnp.float32)
-                integral = jnp.zeros((paths,), dtype=jnp.float32)
-                
-                def body_fun(carry, step_data):
-                    x, integral = carry
-                    step_idx, rand_vals = step_data
+            else:
+                # JAX随机数
+                # 时间步循环 - 使用scan
+                def body_fn_jax(carry, step):
+                    x_array, integral_array = carry
                     
-                    # 分支逻辑
-                    weight = jnp.where(
-                        x < -1.0, 0.1,
-                        jnp.where(x < 0.0, 0.3 * x + 0.4,
-                            jnp.where(x < 1.0, 0.5 * (1.0 - x * x), 0.2))
+                    # 为当前时间步生成随机数
+                    step_key = random.fold_in(key, step)
+                    subkeys = random.split(step_key, paths)
+                    rand_vals = jax.vmap(lambda k: random.uniform(k, dtype=jnp.float32))(subkeys) * 0.1
+                    
+                    # 与cpu.py完全相同的分支逻辑
+                    weight_array = jnp.where(
+                        x_array < -1.0, 0.1,
+                        jnp.where(
+                            x_array < 0.0, 0.3 * x_array + 0.4,
+                            jnp.where(
+                                x_array < 1.0, 0.5 * (1.0 - x_array * x_array),
+                                0.2
+                            )
+                        )
                     )
                     
                     # 交替因子
-                    factor = jnp.where((step_idx % 2) == 0, 1.0 + 0.1 * x, 1.0 - 0.1 * x)
+                    if step % 2 == 0:
+                        factor_array = 1.0 + 0.1 * x_array
+                    else:
+                        factor_array = 1.0 - 0.1 * x_array
                     
-                    delta = 1.0 / steps
-                    integral = integral + weight * delta * factor
+                    # 更新积分
+                    integral_array = integral_array + weight_array * delta * factor_array
                     
                     # 更新x
-                    x = jnp.clip(x + rand_vals * 0.1, -2.0, 2.0)
+                    x_array = jnp.clip(x_array + rand_vals, -2.0, 2.0)
                     
-                    return (x, integral), None
-                
-                step_indices = jnp.arange(steps)
-                step_data = (step_indices, all_rand_vals)
+                    return (x_array, integral_array), None
                 
                 (final_x, final_integral), _ = jax.lax.scan(
-                    body_fun, (x, integral), step_data
+                    body_fn_jax, (x_array, integral_array), jnp.arange(steps)
                 )
-                
-                return jnp.mean(final_integral)
             
-            return compute_jax
+            # 返回平均值
+            return jnp.mean(final_integral)
+        
+        return compute_vectorized
 
 
 # ---------- public benchmark routine ---------- #
