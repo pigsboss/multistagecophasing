@@ -326,11 +326,12 @@ class VectorizedNumPyStyle:
                         )
                     )
                     
-                    # 交替因子
-                    if step % 2 == 0:
-                        factor_array = 1.0 + 0.1 * x_array
-                    else:
-                        factor_array = 1.0 - 0.1 * x_array
+                    # 交替因子 - 使用jnp.where代替if语句
+                    factor_array = jnp.where(
+                        step % 2 == 0,
+                        1.0 + 0.1 * x_array,
+                        1.0 - 0.1 * x_array
+                    )
                     
                     # 更新积分
                     integral_array = integral_array + weight_array * delta * factor_array
@@ -367,11 +368,12 @@ class VectorizedNumPyStyle:
                         )
                     )
                     
-                    # 交替因子
-                    if step % 2 == 0:
-                        factor_array = 1.0 + 0.1 * x_array
-                    else:
-                        factor_array = 1.0 - 0.1 * x_array
+                    # 交替因子 - 使用jnp.where代替if语句
+                    factor_array = jnp.where(
+                        step % 2 == 0,
+                        1.0 + 0.1 * x_array,
+                        1.0 - 0.1 * x_array
+                    )
                     
                     # 更新积分
                     integral_array = integral_array + weight_array * delta * factor_array
