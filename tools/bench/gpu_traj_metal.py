@@ -56,6 +56,30 @@ class BenchmarkResult:
     @property
     def iterations_per_second(self) -> float:
         return 1.0 / self.avg_time if self.avg_time > 0 else float('inf')
+    
+    @property
+    def paths_per_second(self) -> float:
+        """Return number of paths processed per second"""
+        import re
+        notes = self.notes or ""
+        match = re.search(r'Paths=(\d+)', notes)
+        if match:
+            paths = int(match.group(1))
+            return paths / self.avg_time if self.avg_time > 0 else 0.0
+        return 0.0
+    
+    @property
+    def total_ops_per_second(self) -> float:
+        """Return steps * paths / time"""
+        import re
+        notes = self.notes or ""
+        steps_match = re.search(r'Steps=(\d+)', notes)
+        paths_match = re.search(r'Paths=(\d+)', notes)
+        if steps_match and paths_match:
+            steps = int(steps_match.group(1))
+            paths = int(paths_match.group(1))
+            return (steps * paths) / self.avg_time if self.avg_time > 0 else 0.0
+        return 0.0
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -69,6 +93,8 @@ class BenchmarkResult:
             "median_time": self.median_time,
             "std_time": self.std_time,
             "iterations_per_second": self.iterations_per_second,
+            "paths_per_second": self.paths_per_second,
+            "total_ops_per_second": self.total_ops_per_second,
             "memory_usage": self.memory_usage,
             "notes": self.notes,
             "result_value": self.result_value,
@@ -78,12 +104,24 @@ class BenchmarkResult:
 # ---------- core computation – single path, JAX jit ---------- #
 from functools import partial
 
-@partial(jax.jit, static_argnames=('steps',))
-def _integrate_single_path(steps: int, key: jax.Array) -> jnp.float32:
+# LCG implementation matching OpenCL's random number generator
+def _lcg_next(state: jnp.uint32) -> jnp.uint32:
+    """LCG matching OpenCL implementation: state * 1103515245 + 12345"""
+    return state * jnp.uint32(1103515245) + jnp.uint32(12345)
+
+def _lcg_random(state: jnp.uint32) -> jnp.float32:
+    """Generate random float in [0, 1) matching OpenCL implementation"""
+    new_state = _lcg_next(state)
+    # Take lower 31 bits (0x7fffffffu in OpenCL)
+    val = new_state & jnp.uint32(0x7fffffffu)
+    return val.astype(jnp.float32) / jnp.float32(0x7fffffffu)
+
+@partial(jax.jit, static_argnames=('steps', 'use_lcg'))
+def _integrate_single_path(steps: int, key: jax.Array, use_lcg: bool = False) -> jnp.float32:
     """Integrate a single path; 100 % match to OpenCL kernel logic."""
-    def body_fn(carry, step):
-        x, integral = carry
-        rng_key = jax.random.fold_in(key, step)
+    def body_fn_jax(carry, step):
+        x, integral, rng_key = carry
+        rng_key = jax.random.fold_in(rng_key, step)
 
         # ---- branching logic identical to OpenCL ---- #
         weight = jnp.where(
@@ -111,23 +149,85 @@ def _integrate_single_path(steps: int, key: jax.Array) -> jnp.float32:
         x += rand_val * 0.1
         x = jnp.clip(x, -2.0, 2.0)
 
-        return (x, integral), None
+        return (x, integral, rng_key), None
 
-    carry, _ = jax.lax.scan(body_fn, (0.0, 0.0), jnp.arange(steps))
+    def body_fn_lcg(carry, step):
+        x, integral, rng_state = carry
+        
+        # ---- branching logic identical to OpenCL ---- #
+        weight = jnp.where(
+            x < -1.0,
+            0.1,
+            jnp.where(
+                x < 0.0,
+                0.3 * x + 0.4,
+                jnp.where(x < 1.0, 0.5 * (1.0 - x * x), 0.2),
+            ),
+        )
+
+        # ---- alternating factor ---- #
+        factor = jnp.where(
+            step % 2 == 0,
+            1.0 + 0.1 * x,
+            1.0 - 0.1 * x,
+        )
+
+        delta = 1.0 / steps
+        integral += weight * delta * factor
+
+        # ---- random walk + boundary clip (using LCG) ---- #
+        rand_val = _lcg_random(rng_state)
+        x += rand_val * 0.1
+        x = jnp.clip(x, -2.0, 2.0)
+        
+        # Update LCG state for next iteration
+        rng_state = _lcg_next(rng_state)
+
+        return (x, integral, rng_state), None
+    
+    if use_lcg:
+        # For LCG, key is used as initial state
+        init_state = key.astype(jnp.uint32)
+        carry, _ = jax.lax.scan(body_fn_lcg, (0.0, 0.0, init_state), jnp.arange(steps))
+    else:
+        # For JAX RNG
+        carry, _ = jax.lax.scan(body_fn_jax, (0.0, 0.0, key), jnp.arange(steps))
+    
     return carry[1]
 
 
-_vmap_integrate = jax.vmap(_integrate_single_path, in_axes=(None, 0))
+def _create_vmap_integrate(use_lcg: bool = False):
+    """Create vmap function with specified RNG method"""
+    def vmap_func(steps: int, keys: jax.Array) -> jnp.float32:
+        if use_lcg:
+            # For LCG, keys are initial states
+            integrals = jax.vmap(_integrate_single_path, in_axes=(None, 0, None))(
+                steps, keys, use_lcg
+            )
+        else:
+            # For JAX RNG
+            integrals = jax.vmap(_integrate_single_path, in_axes=(None, 0, None))(
+                steps, keys, use_lcg
+            )
+        return jnp.mean(integrals)
+    return vmap_func
 
-
-def _run_paths(steps: int, paths: int, key: jax.Array) -> jnp.float32:
+def _run_paths(steps: int, paths: int, key: jax.Array, use_lcg: bool = False) -> jnp.float32:
     """Run all paths and return mean integral."""
-    keys = jax.random.split(key, paths)
-    integrals = _vmap_integrate(steps, keys)
-    return jnp.mean(integrals)
+    if use_lcg:
+        # For LCG, create initial states: base_seed + path_id
+        base_seed = key.astype(jnp.uint32)
+        # Create array of initial states: [base_seed, base_seed+1, ..., base_seed+paths-1]
+        states = base_seed + jnp.arange(paths, dtype=jnp.uint32)
+        vmap_func = _create_vmap_integrate(use_lcg=True)
+        return vmap_func(steps, states)
+    else:
+        # For JAX RNG
+        keys = jax.random.split(key, paths)
+        vmap_func = _create_vmap_integrate(use_lcg=False)
+        return vmap_func(steps, keys)
 
-
-_run_paths_jit = jax.jit(_run_paths, static_argnums=(0, 1))
+_run_paths_jit = jax.jit(_run_paths, static_argnums=(0, 1, 3))
 
 
 # ---------- public benchmark routine ---------- #
@@ -136,34 +236,57 @@ def run_benchmark(
     paths: int = 1_000,
     warmup_iterations: int = 3,
     test_iterations: int = 10,
+    use_lcg: bool = False,
 ) -> BenchmarkResult:
     """Return BenchmarkResult matching gpu_traj_cl.py signature."""
     if not JAX_AVAILABLE:
         raise RuntimeError("JAX not available")
 
     device = jax.devices()[0]  # Metal or fallback
-    impl_name = f"JAX {device.platform.upper()} ({device.device_kind})"
+    rng_method = "LCG" if use_lcg else "JAX-RNG"
+    impl_name = f"JAX {device.platform.upper()} ({device.device_kind}, {rng_method})"
 
     # Warm-up
-    key = random.PRNGKey(42)
+    if use_lcg:
+        key = jnp.uint32(42)
+    else:
+        key = random.PRNGKey(42)
+    
     for _ in range(warmup_iterations):
-        _ = _run_paths_jit(steps, paths, key).block_until_ready()
+        _ = _run_paths_jit(steps, paths, key, use_lcg).block_until_ready()
 
     # Timed runs
     times: List[float] = []
+    results_list: List[float] = []
+    
     for i in range(test_iterations):
-        key = random.PRNGKey(12345 + i)
+        if use_lcg:
+            key = jnp.uint32(12345 + i)
+        else:
+            key = random.PRNGKey(12345 + i)
+        
         start = time.perf_counter()
-        result = _run_paths_jit(steps, paths, key).block_until_ready()
+        result = _run_paths_jit(steps, paths, key, use_lcg).block_until_ready()
         times.append(time.perf_counter() - start)
+        results_list.append(float(result))
+
+    # Calculate throughput metrics
+    avg_time = float(np.mean(times)) if times else 0.0
+    paths_per_sec = paths / avg_time if avg_time > 0 else 0.0
+    total_ops_per_sec = (steps * paths) / avg_time if avg_time > 0 else 0.0
+    
+    # Use the last result
+    final_result = results_list[-1] if results_list else 0.0
 
     return BenchmarkResult(
         task_name="Trajectory Integral (GPU)",
         implementation=impl_name,
         execution_times=times,
         precision="fp32",
-        notes=f"Steps={steps}, Paths={paths}",
-        result_value=float(result),
+        notes=f"Steps={steps}, Paths={paths}, RNG={rng_method}, "
+              f"Throughput={paths_per_sec:.0f} paths/sec, "
+              f"Ops={total_ops_per_sec:.0f} steps·paths/sec",
+        result_value=final_result,
     )
 
 
@@ -242,6 +365,11 @@ Examples:
         help="Number of warmup iterations (default 3)",
     )
     parser.add_argument(
+        "--use-lcg",
+        action="store_true",
+        help="Use LCG random number generator (matches OpenCL implementation)",
+    )
+    parser.add_argument(
         "--output",
         type=str,
         help="Optional JSON output file",
@@ -264,6 +392,7 @@ Examples:
         paths=paths,
         warmup_iterations=args.warmup,
         test_iterations=args.repeats,
+        use_lcg=args.use_lcg,
     )
 
     BenchmarkReporter.print_results([result], output_file=args.output)
@@ -274,7 +403,13 @@ Examples:
     ref_steps, ref_paths = min(steps, 1000), min(paths, 100)
     from cpu import PathIntegralBenchmark  # local import to avoid circular deps
     ref = PathIntegralBenchmark.python_implementation(steps=ref_steps, paths=ref_paths)
-    gpu = float(_run_paths_jit(ref_steps, ref_paths, random.PRNGKey(999)).block_until_ready())
+    
+    if args.use_lcg:
+        gpu_key = jnp.uint32(999)
+    else:
+        gpu_key = random.PRNGKey(999)
+    
+    gpu = float(_run_paths_jit(ref_steps, ref_paths, gpu_key, args.use_lcg).block_until_ready())
     diff = abs(ref - gpu)
     print(f"  Reference: {ref:.6f}")
     print(f"  GPU:       {gpu:.6f}")

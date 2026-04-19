@@ -49,6 +49,31 @@ class BenchmarkResult:
     def iterations_per_second(self) -> float:
         return 1.0 / self.avg_time if self.avg_time > 0 else float('inf')
     
+    @property
+    def paths_per_second(self) -> float:
+        """Return number of paths processed per second"""
+        # Parse paths from notes
+        import re
+        notes = self.notes or ""
+        match = re.search(r'Paths=(\d+)', notes)
+        if match:
+            paths = int(match.group(1))
+            return paths / self.avg_time if self.avg_time > 0 else 0.0
+        return 0.0
+    
+    @property
+    def total_ops_per_second(self) -> float:
+        """Return steps * paths / time"""
+        import re
+        notes = self.notes or ""
+        steps_match = re.search(r'Steps=(\d+)', notes)
+        paths_match = re.search(r'Paths=(\d+)', notes)
+        if steps_match and paths_match:
+            steps = int(steps_match.group(1))
+            paths = int(paths_match.group(1))
+            return (steps * paths) / self.avg_time if self.avg_time > 0 else 0.0
+        return 0.0
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "task_name": self.task_name,
@@ -61,6 +86,8 @@ class BenchmarkResult:
             "median_time": self.median_time,
             "std_time": self.std_time,
             "iterations_per_second": self.iterations_per_second,
+            "paths_per_second": self.paths_per_second,
+            "total_ops_per_second": self.total_ops_per_second,
             "memory_usage": self.memory_usage,
             "notes": self.notes,
             "result_value": self.result_value
@@ -242,8 +269,6 @@ class GPUPathIntegralBenchmark:
         # Prepare buffers
         config = self.PRECISION_CONFIG[precision]
         np_dtype = config['np_dtype']
-        results_np = np.empty(paths, dtype=np_dtype)
-        results_buf = cl.Buffer(self.context, cl.mem_flags.WRITE_ONLY, results_np.nbytes)
         
         # Determine work group size
         max_wg_size = self.device.max_work_group_size
@@ -253,35 +278,52 @@ class GPUPathIntegralBenchmark:
         # Warm-up runs
         for i in range(warmup_iterations):
             seed = np.uint32(12345 + i)
+            results_np = np.empty(paths, dtype=np_dtype)
+            results_buf = cl.Buffer(self.context, cl.mem_flags.WRITE_ONLY, results_np.nbytes)
             kernel(self.queue, (global_size,), (wg_size,),
                    np.int32(steps), np.int32(paths), seed, results_buf)
             self.queue.finish()
         
         # Test runs with timing
         execution_times = []
+        final_results = []
+        
         for i in range(test_iterations):
             seed = np.uint32(12345 + i + warmup_iterations)
+            results_np = np.empty(paths, dtype=np_dtype)
+            results_buf = cl.Buffer(self.context, cl.mem_flags.WRITE_ONLY, results_np.nbytes)
             
             # Use Python time for wall-clock time (consistent with cpu.py)
+            # Include data transfer in timing for fair comparison with Metal
             start = time.perf_counter()
-            event = kernel(self.queue, (global_size,), (wg_size,),
-                          np.int32(steps), np.int32(paths), seed, results_buf)
-            event.wait()
+            kernel(self.queue, (global_size,), (wg_size,),
+                   np.int32(steps), np.int32(paths), seed, results_buf)
+            cl.enqueue_copy(self.queue, results_np, results_buf)
+            self.queue.finish()
             end = time.perf_counter()
             
             execution_times.append(end - start)
+            final_results.append(float(np.mean(results_np)))
+            
+            # Clean up buffer
+            results_buf.release()
         
-        # Read results for validation (only once)
-        cl.enqueue_copy(self.queue, results_np, results_buf)
-        self.queue.finish()
-        final_result = float(np.mean(results_np))
+        # Use the last result for validation
+        final_result = final_results[-1] if final_results else 0.0
+        
+        # Calculate throughput metrics
+        avg_time = statistics.mean(execution_times) if execution_times else 0.0
+        paths_per_sec = paths / avg_time if avg_time > 0 else 0.0
+        total_ops_per_sec = (steps * paths) / avg_time if avg_time > 0 else 0.0
         
         return BenchmarkResult(
             task_name="Trajectory Integral (GPU)",
             implementation=f"OpenCL {self.device.name}",
             precision=precision,
             execution_times=execution_times,
-            notes=f"Steps={steps}, Paths={paths}, WorkGroup={wg_size}",
+            notes=f"Steps={steps}, Paths={paths}, WorkGroup={wg_size}, "
+                  f"Throughput={paths_per_sec:.0f} paths/sec, "
+                  f"Ops={total_ops_per_sec:.0f} steps·paths/sec",
             result_value=final_result
         )
     
