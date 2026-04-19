@@ -231,7 +231,114 @@ class PathIntegralBenchmark:
     
     @staticmethod
     def numpy_scipy_implementation(steps: int = 10000, paths: int = 1000) -> float:
-        """NumPy/SciPy实现"""
+        """NumPy/SciPy实现 - 路径间向量化，路径内循环"""
+        if not NUMPY_AVAILABLE:
+            return 0.0
+        
+        import numpy as np
+        
+        # 初始化：所有路径的初始状态
+        x_array = np.zeros(paths, dtype=np.float64)  # 所有路径的当前x值
+        integral_array = np.zeros(paths, dtype=np.float64)  # 所有路径的积分值
+        
+        delta = 1.0 / steps
+        
+        # 时间步循环 - 路径内顺序执行
+        for step in range(steps):
+            # 为所有路径生成随机数 - 路径间向量化
+            rand_vals = np.random.random(paths) * 0.1
+            
+            # 分支逻辑计算 - 路径间向量化
+            # 使用向量化的条件判断
+            weight_array = np.where(
+                x_array < -1.0, 
+                0.1,
+                np.where(
+                    x_array < 0.0,
+                    0.3 * x_array + 0.4,
+                    np.where(
+                        x_array < 1.0,
+                        0.5 * (1.0 - x_array * x_array),
+                        0.2
+                    )
+                )
+            )
+            
+            # 交替因子 - 路径间向量化
+            if step % 2 == 0:
+                factor_array = 1.0 + 0.1 * x_array
+            else:
+                factor_array = 1.0 - 0.1 * x_array
+            
+            # 更新积分 - 路径间向量化
+            integral_array += weight_array * delta * factor_array
+            
+            # 更新x值 - 路径间向量化
+            x_array += rand_vals
+            # 边界裁剪 - 路径间向量化
+            x_array = np.clip(x_array, -2.0, 2.0)
+        
+        # 返回所有路径的平均积分值
+        return float(np.mean(integral_array))
+    
+    @staticmethod
+    def numpy_vectorized_both(steps: int = 10000, paths: int = 1000) -> float:
+        """NumPy实现 - 路径间和时间步都向量化（对比用）"""
+        if not NUMPY_AVAILABLE:
+            return 0.0
+        
+        import numpy as np
+        
+        # 一次性生成所有随机数 (steps, paths)
+        all_rand_vals = np.random.random((steps, paths)) * 0.1
+        
+        # 初始化所有路径的x值 (paths,)
+        x_array = np.zeros(paths, dtype=np.float64)
+        
+        # 初始化所有路径的积分值 (paths,)
+        integral_array = np.zeros(paths, dtype=np.float64)
+        
+        delta = 1.0 / steps
+        
+        # 时间步循环
+        for step in range(steps):
+            # 获取当前时间步所有路径的随机数
+            rand_vals = all_rand_vals[step, :]
+            
+            # 分支逻辑计算
+            weight_array = np.where(
+                x_array < -1.0, 
+                0.1,
+                np.where(
+                    x_array < 0.0,
+                    0.3 * x_array + 0.4,
+                    np.where(
+                        x_array < 1.0,
+                        0.5 * (1.0 - x_array * x_array),
+                        0.2
+                    )
+                )
+            )
+            
+            # 交替因子
+            if step % 2 == 0:
+                factor_array = 1.0 + 0.1 * x_array
+            else:
+                factor_array = 1.0 - 0.1 * x_array
+            
+            # 更新积分
+            integral_array += weight_array * delta * factor_array
+            
+            # 更新x值
+            x_array += rand_vals
+            x_array = np.clip(x_array, -2.0, 2.0)
+        
+        # 返回所有路径的平均积分值
+        return float(np.mean(integral_array))
+    
+    @staticmethod
+    def numpy_old_implementation(steps: int = 10000, paths: int = 1000) -> float:
+        """原NumPy/SciPy实现（保留供对比）"""
         if not NUMPY_AVAILABLE or not SCIPY_AVAILABLE:
             return 0.0
         
@@ -744,12 +851,23 @@ Scale parameters:
         )
         all_results.append(result)
         
-        # NumPy/SciPy implementation
+        # 新的NumPy实现 - 路径间向量化，路径内循环
+        if NUMPY_AVAILABLE:
+            result = benchmark.run_benchmark(
+                path_integral.numpy_scipy_implementation,  # 使用新的实现
+                task_name="Trajectory Integral",
+                impl_name="NumPy (Vectorized across paths)",
+                steps=traj_steps,
+                paths=traj_trajectories
+            )
+            all_results.append(result)
+        
+        # 原NumPy/SciPy实现（如果需要保留对比）
         if NUMPY_AVAILABLE and SCIPY_AVAILABLE:
             result = benchmark.run_benchmark(
-                path_integral.numpy_scipy_implementation,
+                path_integral.numpy_old_implementation,
                 task_name="Trajectory Integral",
-                impl_name="NumPy/SciPy",
+                impl_name="NumPy/SciPy (Old - vectorized within path)",
                 steps=traj_steps,
                 paths=traj_trajectories
             )
