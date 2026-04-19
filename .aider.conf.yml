@@ -22,8 +22,8 @@ read:
 # thinking-tokens: 8k
 architect: true
 model: ds
-weak-model: ds-chat
-editor-model: ds-chat
+weak-model: kimi-chat
+editor-model: kimi-code
 
 ##########################################################
 # Sample .aider.conf.yml
