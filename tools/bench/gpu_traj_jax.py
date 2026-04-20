@@ -759,7 +759,7 @@ class VectorizedNumPyStyle:
                 rand_array = jax.vmap(gen_step_rand)(step_keys)
             
             # Now scan through steps using pre-generated random numbers
-            def body_fn(step_in_chunk, carry):
+            def body_fn(carry, step_in_chunk):
                 x_array, integral_array = carry
                 global_step = chunk_start_idx + step_in_chunk
                 
