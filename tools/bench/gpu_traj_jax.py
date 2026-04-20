@@ -538,17 +538,10 @@ class VectorizedNumPyStyle:
         return compute_vectorized
 
     @staticmethod
-    def create_compute_function_chunked(steps: int, paths: int, use_lcg: bool = False, 
-                                       use_continuous: bool = False, chunk_size: int = 10000):
+    def create_compute_function_optimized_rng(steps: int, paths: int, use_lcg: bool = False, use_continuous: bool = False):
         """
-        创建分块向量化计算函数
-        
-        Args:
-            steps: 总时间步数
-            paths: 路径数
-            use_lcg: 是否使用LCG随机数
-            use_continuous: 是否使用连续权重函数
-            chunk_size: 每个JIT块的时间步数（默认10000，可调整）
+        Optimized version with pre-generated random numbers for all steps.
+        Suitable for smaller problems that fit in memory.
         """
         import jax
         import jax.numpy as jnp
@@ -556,7 +549,96 @@ class VectorizedNumPyStyle:
         
         delta = 1.0 / steps
         
-        # 预计算多项式系数
+        if use_continuous:
+            c0, c1, c2, c3, c4, c5, c6 = (
+                0.3125, 0.234375, -0.2734375, 
+                -0.05859375, 0.13671875, 0.01953125, -0.03125
+            )
+        
+        @jax.jit
+        def compute_vectorized_optimized(key):
+            # Pre-generate all random numbers: (steps, paths)
+            if use_lcg:
+                # LCG generation
+                base_seed = key.astype(jnp.uint32)
+                step_offsets = jnp.arange(steps, dtype=jnp.uint32)[:, None]
+                path_offsets = jnp.arange(paths, dtype=jnp.uint32)[None, :]
+                states = base_seed + step_offsets * paths + path_offsets
+                
+                a, c, mask = jnp.uint32(1103515245), jnp.uint32(12345), jnp.uint32(0x7fffffff)
+                new_states = states * a + c
+                all_rand = (new_states & mask).astype(jnp.float32) / jnp.float32(2147483647.0) * 0.1
+            else:
+                # JAX RNG: Generate all at once
+                step_keys = random.split(key, steps)
+                
+                def gen_step(step_k):
+                    return random.uniform(step_k, (paths,), dtype=jnp.float32) * 0.1
+                
+                all_rand = jax.vmap(gen_step)(step_keys)  # (steps, paths)
+            
+            # Initialize state
+            x_array = jnp.zeros((paths,), dtype=jnp.float32)
+            integral_array = jnp.zeros((paths,), dtype=jnp.float32)
+            
+            def body_fn(step, carry):
+                x_arr, int_arr = carry
+                
+                # Use pre-generated random number
+                rand_vals = all_rand[step]
+                
+                # Weight calculation
+                if use_continuous:
+                    w = c6
+                    w = w * x_arr + c5
+                    w = w * x_arr + c4
+                    w = w * x_arr + c3
+                    w = w * x_arr + c2
+                    w = w * x_arr + c1
+                    w = w * x_arr + c0
+                else:
+                    w = jnp.where(
+                        x_arr < -1.0, 0.1,
+                        jnp.where(
+                            x_arr < 0.0, 0.3 * x_arr + 0.4,
+                            jnp.where(
+                                x_arr < 1.0, 0.5 * (1.0 - x_arr * x_arr),
+                                0.2
+                            )
+                        )
+                    )
+                
+                factor = jnp.where(step % 2 == 0, 1.0 + 0.1 * x_arr, 1.0 - 0.1 * x_arr)
+                
+                int_arr = int_arr + w * delta * factor
+                x_arr = jnp.clip(x_arr + rand_vals, -2.0, 2.0)
+                
+                return (x_arr, int_arr), None
+            
+            (final_x, final_integral), _ = jax.lax.scan(
+                body_fn, (x_array, integral_array), jnp.arange(steps)
+            )
+            
+            return jnp.mean(final_integral)
+        
+        return compute_vectorized_optimized
+
+    @staticmethod
+    def create_compute_function_chunked(steps: int, paths: int, use_lcg: bool = False, 
+                                       use_continuous: bool = False, chunk_size: int = 10000):
+        """
+        Create chunked computation function with optimized RNG pre-generation.
+        
+        For JAX RNG (non-LCG): Pre-generates all random numbers for the chunk
+        to avoid per-step random.split overhead.
+        """
+        import jax
+        import jax.numpy as jnp
+        from jax import random
+        
+        delta = 1.0 / steps
+        
+        # Precompute polynomial coefficients
         if use_continuous:
             c0, c1, c2, c3, c4, c5, c6 = (
                 0.3125, 0.234375, -0.2734375, 
@@ -566,41 +648,65 @@ class VectorizedNumPyStyle:
         @jax.jit
         def compute_chunk(x_init, integral_init, key, chunk_start_idx: int, chunk_steps: int):
             """
-            计算一个时间块（chunk）
-            
-            Args:
-                x_init: 初始状态 (paths,)
-                integral_init: 初始积分 (paths,)
-                key: 随机数密钥
-                chunk_start_idx: 全局起始步索引（用于计算交替因子奇偶性）
-                chunk_steps: 本块实际步数（处理余数时可能小于 chunk_size）
+            Compute a single chunk with pre-generated random numbers.
             """
+            # Determine actual tile size (handle remainder chunks)
+            actual_paths = x_init.shape[0]
+            
+            # Generate all random numbers for this chunk at once
+            # Shape: (chunk_steps, actual_paths)
+            if use_lcg:
+                # For LCG, we generate states and convert to random numbers
+                # Using vmap for vectorized LCG generation
+                base_seed = key.astype(jnp.uint32) if jnp.issubdtype(key.dtype, jnp.integer) else jnp.uint32(12345)
+                
+                # Create initial states for each path and step
+                # state[i, j] = base + i * paths + j
+                step_offsets = jnp.arange(chunk_steps, dtype=jnp.uint32)[:, None]
+                path_offsets = jnp.arange(actual_paths, dtype=jnp.uint32)[None, :]
+                states = base_seed + step_offsets * actual_paths + path_offsets
+                
+                # LCG parameters
+                a = jnp.uint32(1103515245)
+                c = jnp.uint32(12345)
+                mask = jnp.uint32(0x7fffffff)
+                
+                # Vectorized LCG
+                new_states = states * a + c
+                rand_array = (new_states & mask).astype(jnp.float32) / jnp.float32(2147483647.0) * 0.1
+            else:
+                # For JAX RNG: Use split once to get subkeys for all steps, then vmap
+                # More efficient than split in loop
+                step_keys = random.split(key, chunk_steps)
+                
+                # Generate random numbers for all steps and paths at once
+                # Using vmap over steps, each generating (paths,) random numbers
+                def gen_step_rand(step_key):
+                    return random.uniform(step_key, (actual_paths,), dtype=jnp.float32) * 0.1
+                
+                # Vectorized generation: (chunk_steps, paths)
+                rand_array = jax.vmap(gen_step_rand)(step_keys)
+            
+            # Now scan through steps using pre-generated random numbers
             def body_fn(step_in_chunk, carry):
                 x_array, integral_array = carry
                 global_step = chunk_start_idx + step_in_chunk
                 
-                # 随机数生成
-                if use_lcg:
-                    # LCG实现（简化版，实际应传递状态）
-                    step_key = random.fold_in(key, step_in_chunk)
-                    subkeys = random.split(step_key, paths)
-                    rand_vals = jax.vmap(lambda k: random.uniform(k, dtype=jnp.float32))(subkeys) * 0.1
-                else:
-                    step_key = random.fold_in(key, step_in_chunk)
-                    subkeys = random.split(step_key, paths)
-                    rand_vals = jax.vmap(lambda k: random.uniform(k, dtype=jnp.float32))(subkeys) * 0.1
+                # Use pre-generated random number (no generation overhead)
+                rand_vals = rand_array[step_in_chunk]
                 
-                # 权重计算（连续或分段）
+                # Weight calculation (continuous or piecewise)
                 if use_continuous:
-                    weight_array = c6
-                    weight_array = weight_array * x_array + c5
-                    weight_array = weight_array * x_array + c4
-                    weight_array = weight_array * x_array + c3
-                    weight_array = weight_array * x_array + c2
-                    weight_array = weight_array * x_array + c1
-                    weight_array = weight_array * x_array + c0
+                    # Horner's method for polynomial
+                    w = c6
+                    w = w * x_array + c5
+                    w = w * x_array + c4
+                    w = w * x_array + c3
+                    w = w * x_array + c2
+                    w = w * x_array + c1
+                    w = w * x_array + c0
                 else:
-                    weight_array = jnp.where(
+                    w = jnp.where(
                         x_array < -1.0, 0.1,
                         jnp.where(
                             x_array < 0.0, 0.3 * x_array + 0.4,
@@ -611,22 +717,20 @@ class VectorizedNumPyStyle:
                         )
                     )
                 
-                # 交替因子（基于全局步数）
-                factor_array = jnp.where(
+                # Alternating factor
+                factor = jnp.where(
                     global_step % 2 == 0,
                     1.0 + 0.1 * x_array,
                     1.0 - 0.1 * x_array
                 )
                 
-                # 更新积分
-                integral_array = integral_array + weight_array * delta * factor_array
-                
-                # 更新x
+                # Update state
+                integral_array = integral_array + w * delta * factor
                 x_array = jnp.clip(x_array + rand_vals, -2.0, 2.0)
                 
                 return (x_array, integral_array), None
             
-            # 使用 scan 处理 chunk 内步骤（更节省内存）
+            # Execute scan using pre-generated random numbers
             (final_x, final_integral), _ = jax.lax.scan(
                 body_fn, 
                 (x_init, integral_init), 
@@ -636,30 +740,30 @@ class VectorizedNumPyStyle:
             return final_x, final_integral
         
         def compute_full_chunked(key):
-            """主控函数：分块执行"""
-            # 初始化
+            """Main execution with chunking and optimized RNG."""
+            # Initialize state
             x_array = jnp.zeros((paths,), dtype=jnp.float32)
             integral_array = jnp.zeros((paths,), dtype=jnp.float32)
             
-            # 计算完整 chunks 数量和余数
+            # Calculate chunks
             num_full_chunks = steps // chunk_size
             remainder = steps % chunk_size
             
-            # 为每个 chunk 生成独立密钥
+            # Generate keys for each chunk
             chunk_keys = random.split(key, num_full_chunks + (1 if remainder > 0 else 0))
             
-            # 顺序处理完整 chunks（马尔可夫链必须顺序）
+            # Process full chunks sequentially
             for i in range(num_full_chunks):
                 start_idx = i * chunk_size
                 x_array, integral_array = compute_chunk(
                     x_array, integral_array, chunk_keys[i], 
                     start_idx, chunk_size
                 )
-                # 每 10 个 chunks 同步一次，防止内存堆积（可选）
+                # Periodic synchronization to manage memory pressure
                 if i % 10 == 9:
                     jax.block_until_ready((x_array, integral_array))
             
-            # 处理余数（最后不足 chunk_size 的部分）
+            # Process remainder
             if remainder > 0:
                 start_idx = num_full_chunks * chunk_size
                 x_array, integral_array = compute_chunk(
@@ -738,16 +842,24 @@ def run_benchmark(
         method_desc = "Scalar (OpenCL-style loops)"
     elif method_type == "vectorized":
         if use_chunking:
-            # For now, use time-based chunking only (existing implementation)
-            # Full 2D chunking would need additional implementation
+            # Use optimized chunked version with pre-generated RNG
             actual_chunk_steps = chunk_steps if chunk_steps is not None else steps
             compute_func = VectorizedNumPyStyle.create_compute_function_chunked(
                 steps, paths, use_lcg, use_continuous, actual_chunk_steps
             )
-            method_desc = f"Vectorized Chunked (chunk_steps={actual_chunk_steps})"
+            method_desc = f"Vectorized Chunked (chunk_steps={actual_chunk_steps}, pre-gen RNG)"
         else:
-            compute_func = VectorizedNumPyStyle.create_compute_function(steps, paths, use_lcg, use_continuous)
-            method_desc = "Vectorized (monolithic)"
+            # Optionally use optimized RNG version for monolithic mode too
+            if steps <= 50000:  # Only for sizes that fit in memory
+                compute_func = VectorizedNumPyStyle.create_compute_function_optimized_rng(
+                    steps, paths, use_lcg, use_continuous
+                )
+                method_desc = "Vectorized (monolithic, pre-gen RNG)"
+            else:
+                compute_func = VectorizedNumPyStyle.create_compute_function(
+                    steps, paths, use_lcg, use_continuous
+                )
+                method_desc = "Vectorized (monolithic)"
     else:
         raise ValueError(f"Unknown method_type: {method_type}")
 
