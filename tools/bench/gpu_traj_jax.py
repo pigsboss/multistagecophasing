@@ -1424,7 +1424,7 @@ Chunking Strategy:
             )
             
             # Re-run GPU computation with same parameters for validation
-            gpu_result = run_benchmark(
+            gpu_result, _ = run_benchmark(
                 steps=ref_steps,
                 paths=ref_paths,
                 warmup_iterations=1,
