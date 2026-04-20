@@ -717,7 +717,6 @@ class VectorizedNumPyStyle:
                 -0.05859375, 0.13671875, 0.01953125, -0.03125
             )
         
-        @jax.jit(static_argnames=('chunk_steps',))
         def compute_chunk(x_init, integral_init, key, chunk_start_idx: int, chunk_steps: int):
             """
             Compute a single chunk with pre-generated random numbers.
@@ -810,6 +809,9 @@ class VectorizedNumPyStyle:
             )
             
             return final_x, final_integral
+        
+        # Apply JIT with static_argnums for compatibility with older JAX versions
+        compute_chunk = jax.jit(compute_chunk, static_argnums=(4,))
         
         def compute_full_chunked(key):
             """Main execution with chunking and optimized RNG."""
