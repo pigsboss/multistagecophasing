@@ -22,6 +22,11 @@ GPU Path-Integral Benchmark - JAX通用后端
   python gpu_traj_jax.py --method scalar --backend metal
   python gpu_traj_jax.py --method vectorized --backend cuda
   python gpu_traj_jax.py --method both --use-lcg --output results.json
+  
+性能分析模式：
+  python gpu_traj_jax.py --profile --size "(1000,1000)"
+  python gpu_traj_jax.py --profile-micro --backend cpu
+  python gpu_traj_jax.py --profile --profile-detail scalar --backend metal
 """
 
 import argparse
@@ -33,6 +38,340 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Tuple, Callable
 
 import numpy as np
+
+# ---------- Profiling Utilities ---------- #
+class TimeProfiler:
+    """时间分析器，用于测量不同阶段的时间开销"""
+    
+    @staticmethod
+    def profile_scalar_implementation(steps: int = 1000, paths: int = 1000, 
+                                    use_lcg: bool = False, backend: str = "auto") -> Dict[str, float]:
+        """分析标量实现的时间分布"""
+        import jax
+        import jax.numpy as jnp
+        from jax import random
+        
+        # 设置后端
+        if backend != "auto":
+            set_jax_backend(backend)
+        
+        profile_results = {}
+        
+        print("\n" + "="*60)
+        print("PROFILING: Scalar Implementation Time Distribution")
+        print("="*60)
+        
+        # 阶段1: 编译时间
+        print("1. Measuring compilation time...")
+        start_compile = time.perf_counter()
+        compute_func = ScalarOpenCLStyle.create_compute_function(steps, paths, use_lcg)
+        end_compile = time.perf_counter()
+        compile_time = end_compile - start_compile
+        profile_results["compilation"] = compile_time
+        print(f"   Compilation time: {compile_time:.4f}s")
+        
+        # 准备key
+        if use_lcg:
+            key = jnp.uint32(42)
+        else:
+            key = random.PRNGKey(42)
+        
+        # 阶段2: JIT预热时间
+        print("2. Measuring JIT warmup time...")
+        start_warmup = time.perf_counter()
+        compute_func(key).block_until_ready()
+        end_warmup = time.perf_counter()
+        warmup_time = end_warmup - start_warmup
+        profile_results["warmup"] = warmup_time
+        print(f"   First execution (JIT warmup): {warmup_time:.4f}s")
+        
+        # 阶段3: 多次执行时间
+        print("3. Measuring execution time (10 iterations)...")
+        execution_times = []
+        for i in range(10):
+            if use_lcg:
+                iter_key = jnp.uint32(12345 + i)
+            else:
+                iter_key = random.PRNGKey(12345 + i)
+            
+            start_exec = time.perf_counter()
+            compute_func(iter_key).block_until_ready()
+            end_exec = time.perf_counter()
+            execution_times.append(end_exec - start_exec)
+        
+        avg_execution = sum(execution_times) / len(execution_times)
+        min_execution = min(execution_times)
+        max_execution = max(execution_times)
+        profile_results["execution_avg"] = avg_execution
+        profile_results["execution_min"] = min_execution
+        profile_results["execution_max"] = max_execution
+        
+        print(f"   Average execution: {avg_execution:.4f}s")
+        print(f"   Min execution: {min_execution:.4f}s")
+        print(f"   Max execution: {max_execution:.4f}s")
+        print(f"   Std deviation: {np.std(execution_times):.6f}s")
+        
+        # 阶段4: 内存使用估计
+        # 基于路径数和步数估计内存使用
+        estimated_memory_mb = (paths * 4 * 3) / (1024 * 1024)  # 假设3个float32数组
+        profile_results["estimated_memory_mb"] = estimated_memory_mb
+        print(f"4. Estimated memory usage: {estimated_memory_mb:.2f} MB")
+        
+        # 计算百分比
+        total_time = compile_time + warmup_time + avg_execution * 10  # 近似总时间
+        if total_time > 0:
+            profile_results["compile_percent"] = (compile_time / total_time) * 100
+            profile_results["warmup_percent"] = (warmup_time / total_time) * 100
+            profile_results["execution_percent"] = (avg_execution * 10 / total_time) * 100
+            
+            print("\nTime Distribution (% of total):")
+            print(f"   Compilation: {profile_results['compile_percent']:.1f}%")
+            print(f"   Warmup: {profile_results['warmup_percent']:.1f}%")
+            print(f"   Execution (10x): {profile_results['execution_percent']:.1f}%")
+        
+        return profile_results
+    
+    @staticmethod
+    def profile_vectorized_implementation(steps: int = 1000, paths: int = 1000,
+                                         use_lcg: bool = False, backend: str = "auto") -> Dict[str, float]:
+        """分析向量化实现的时间分布"""
+        import jax
+        import jax.numpy as jnp
+        from jax import random
+        
+        # 设置后端
+        if backend != "auto":
+            set_jax_backend(backend)
+        
+        profile_results = {}
+        
+        print("\n" + "="*60)
+        print("PROFILING: Vectorized Implementation Time Distribution")
+        print("="*60)
+        
+        # 阶段1: 编译时间
+        print("1. Measuring compilation time...")
+        start_compile = time.perf_counter()
+        compute_func = VectorizedNumPyStyle.create_compute_function(steps, paths, use_lcg)
+        end_compile = time.perf_counter()
+        compile_time = end_compile - start_compile
+        profile_results["compilation"] = compile_time
+        print(f"   Compilation time: {compile_time:.4f}s")
+        
+        # 准备key
+        if use_lcg:
+            key = jnp.uint32(42)
+        else:
+            key = random.PRNGKey(42)
+        
+        # 阶段2: JIT预热时间
+        print("2. Measuring JIT warmup time...")
+        start_warmup = time.perf_counter()
+        compute_func(key).block_until_ready()
+        end_warmup = time.perf_counter()
+        warmup_time = end_warmup - start_warmup
+        profile_results["warmup"] = warmup_time
+        print(f"   First execution (JIT warmup): {warmup_time:.4f}s")
+        
+        # 阶段3: 多次执行时间
+        print("3. Measuring execution time (10 iterations)...")
+        execution_times = []
+        for i in range(10):
+            if use_lcg:
+                iter_key = jnp.uint32(12345 + i)
+            else:
+                iter_key = random.PRNGKey(12345 + i)
+            
+            start_exec = time.perf_counter()
+            compute_func(iter_key).block_until_ready()
+            end_exec = time.perf_counter()
+            execution_times.append(end_exec - start_exec)
+        
+        avg_execution = sum(execution_times) / len(execution_times)
+        min_execution = min(execution_times)
+        max_execution = max(execution_times)
+        profile_results["execution_avg"] = avg_execution
+        profile_results["execution_min"] = min_execution
+        profile_results["execution_max"] = max_execution
+        
+        print(f"   Average execution: {avg_execution:.4f}s")
+        print(f"   Min execution: {min_execution:.4f}s")
+        print(f"   Max execution: {max_execution:.4f}s")
+        print(f"   Std deviation: {np.std(execution_times):.6f}s")
+        
+        # 阶段4: 内存使用估计
+        # 基于路径数和步数估计内存使用
+        estimated_memory_mb = (paths * 4 * 3 + steps * paths * 4) / (1024 * 1024)  # 状态数组 + 随机数数组
+        profile_results["estimated_memory_mb"] = estimated_memory_mb
+        print(f"4. Estimated memory usage: {estimated_memory_mb:.2f} MB")
+        
+        # 阶段5: 分析计算密度
+        total_operations = steps * paths * 10  # 每个路径每步大约10次操作
+        if avg_execution > 0:
+            gflops = (total_operations / 1e9) / avg_execution
+            profile_results["estimated_gflops"] = gflops
+            print(f"5. Estimated compute performance: {gflops:.2f} GFLOPs")
+        
+        # 计算百分比
+        total_time = compile_time + warmup_time + avg_execution * 10  # 近似总时间
+        if total_time > 0:
+            profile_results["compile_percent"] = (compile_time / total_time) * 100
+            profile_results["warmup_percent"] = (warmup_time / total_time) * 100
+            profile_results["execution_percent"] = (avg_execution * 10 / total_time) * 100
+            
+            print("\nTime Distribution (% of total):")
+            print(f"   Compilation: {profile_results['compile_percent']:.1f}%")
+            print(f"   Warmup: {profile_results['warmup_percent']:.1f}%")
+            print(f"   Execution (10x): {profile_results['execution_percent']:.1f}%")
+        
+        return profile_results
+
+    @staticmethod
+    def profile_micro_operations(steps: int = 100, paths: int = 100,
+                                backend: str = "cpu", use_lcg: bool = False) -> Dict[str, float]:
+        """分析微操作时间开销（小规模测试）"""
+        import jax
+        import jax.numpy as jnp
+        from jax import random
+        
+        # 设置后端
+        if backend != "auto":
+            set_jax_backend(backend)
+        
+        print("\n" + "="*60)
+        print("PROFILING: Micro-Operation Timing (Small Scale)")
+        print(f"Steps={steps}, Paths={paths}, Backend={backend}")
+        print("="*60)
+        
+        # 使用小规模问题分析不同操作
+        delta = 1.0 / steps
+        
+        # 1. 随机数生成时间
+        print("1. Measuring RNG performance...")
+        if use_lcg:
+            start = time.perf_counter()
+            key = jnp.uint32(42)
+            states = key + jnp.arange(paths, dtype=jnp.uint32)
+            # LCG操作
+            new_states = states * jnp.uint32(1103515245) + jnp.uint32(12345)
+            rand_vals = (new_states & jnp.uint32(0x7fffffff)).astype(jnp.float32)
+            rand_vals = rand_vals / jnp.float32(2147483647.0) * 0.1
+            rand_vals.block_until_ready()
+            end = time.perf_counter()
+            rng_time = end - start
+            print(f"   LCG RNG time for {paths} values: {rng_time:.6f}s")
+        else:
+            start = time.perf_counter()
+            key = random.PRNGKey(42)
+            rand_vals = random.uniform(key, (paths,), dtype=jnp.float32) * 0.1
+            rand_vals.block_until_ready()
+            end = time.perf_counter()
+            rng_time = end - start
+            print(f"   JAX RNG time for {paths} values: {rng_time:.6f}s")
+        
+        # 2. 分支逻辑计算时间
+        print("2. Measuring branch logic performance...")
+        x_array = jnp.zeros((paths,), dtype=jnp.float32)
+        start = time.perf_counter()
+        weight_array = jnp.where(
+            x_array < -1.0, 0.1,
+            jnp.where(
+                x_array < 0.0, 0.3 * x_array + 0.4,
+                jnp.where(
+                    x_array < 1.0, 0.5 * (1.0 - x_array * x_array),
+                    0.2
+                )
+            )
+        )
+        weight_array.block_until_ready()
+        end = time.perf_counter()
+        branch_time = end - start
+        print(f"   Branch logic time for {paths} values: {branch_time:.6f}s")
+        
+        # 3. 向量操作时间
+        print("3. Measuring vector operations...")
+        start = time.perf_counter()
+        # 向量加减乘除
+        a = jnp.ones((paths,), dtype=jnp.float32) * 1.5
+        b = jnp.ones((paths,), dtype=jnp.float32) * 2.5
+        c = a + b
+        d = a * b
+        e = jnp.sqrt(c)
+        e.block_until_ready()
+        end = time.perf_counter()
+        vector_ops_time = end - start
+        print(f"   Vector operations time: {vector_ops_time:.6f}s")
+        
+        # 4. 边界裁剪时间
+        print("4. Measuring boundary clipping...")
+        test_array = jnp.linspace(-3.0, 3.0, paths)
+        start = time.perf_counter()
+        clipped = jnp.clip(test_array, -2.0, 2.0)
+        clipped.block_until_ready()
+        end = time.perf_counter()
+        clip_time = end - start
+        print(f"   Clip operation time: {clip_time:.6f}s")
+        
+        # 5. 完整的单步时间估计
+        print("5. Estimating per-step time...")
+        # 完整执行一个时间步
+        x_array = jnp.zeros((paths,), dtype=jnp.float32)
+        integral_array = jnp.zeros((paths,), dtype=jnp.float32)
+        
+        @jax.jit
+        def single_step(x, integral, step, key):
+            if use_lcg:
+                states = key + jnp.arange(paths, dtype=jnp.uint32)
+                new_states = states * jnp.uint32(1103515245) + jnp.uint32(12345)
+                rand_vals = (new_states & jnp.uint32(0x7fffffff)).astype(jnp.float32)
+                rand_vals = rand_vals / jnp.float32(2147483647.0) * 0.1
+            else:
+                step_key = random.fold_in(key, step)
+                subkeys = random.split(step_key, paths)
+                rand_vals = jax.vmap(lambda k: random.uniform(k, dtype=jnp.float32))(subkeys) * 0.1
+            
+            weight_array = jnp.where(
+                x < -1.0, 0.1,
+                jnp.where(
+                    x < 0.0, 0.3 * x + 0.4,
+                    jnp.where(
+                        x < 1.0, 0.5 * (1.0 - x * x),
+                        0.2
+                    )
+                )
+            )
+            
+            factor_array = jnp.where(step % 2 == 0, 1.0 + 0.1 * x, 1.0 - 0.1 * x)
+            integral = integral + weight_array * delta * factor_array
+            x = jnp.clip(x + rand_vals, -2.0, 2.0)
+            
+            return x, integral
+        
+        if use_lcg:
+            test_key = jnp.uint32(42)
+        else:
+            test_key = random.PRNGKey(42)
+        
+        start = time.perf_counter()
+        x_result, integral_result = single_step(x_array, integral_array, 0, test_key)
+        x_result.block_until_ready()
+        integral_result.block_until_ready()
+        end = time.perf_counter()
+        step_time = end - start
+        
+        estimated_total_time = step_time * steps
+        print(f"   Single step time: {step_time:.6f}s")
+        print(f"   Estimated total for {steps} steps: {estimated_total_time:.4f}s")
+        print(f"   Estimated per-path per-step time: {step_time/paths/steps:.9f}s")
+        
+        return {
+            "rng_time": rng_time,
+            "branch_time": branch_time,
+            "vector_ops_time": vector_ops_time,
+            "clip_time": clip_time,
+            "single_step_time": step_time,
+            "estimated_total_time": estimated_total_time
+        }
 
 # ---------- JAX环境检查和后端检测 ---------- #
 def detect_available_backends() -> List[str]:
@@ -489,7 +828,25 @@ def run_benchmark(
     paths_per_sec = paths / avg_time if avg_time > 0 else 0.0
     total_ops_per_sec = (steps * paths) / avg_time if avg_time > 0 else 0.0
     final_result = results_list[-1] if results_list else 0.0
-    
+        
+    # 添加更多详细的时间信息
+    if len(times) > 1:
+        print(f"  First iteration: {times[0]:.4f}s")
+        print(f"  Best iteration: {min(times):.4f}s")
+        print(f"  Std deviation: {np.std(times):.6f}s")
+            
+        # 计算稳定后的性能（去掉前2次可能较慢的迭代）
+        if len(times) > 3:
+            stable_times = times[2:]
+            stable_avg = sum(stable_times) / len(stable_times)
+            print(f"  Stable average (after warmup): {stable_avg:.4f}s")
+        
+    # 计算和显示性能指标
+    if steps > 0 and paths > 0 and avg_time > 0:
+        ops_per_second = (steps * paths) / avg_time
+        print(f"  Performance: {ops_per_second:.0f} operations/sec")
+        print(f"  Throughput: {paths/avg_time:.0f} paths/sec")
+        
     return BenchmarkResult(
         task_name="Trajectory Integral (GPU)",
         implementation=impl_name,
@@ -637,6 +994,27 @@ Available backends: {', '.join(available_backends)}
         action="store_true",
         help="快速测试模式（使用较小的问题规模）",
     )
+    
+    # 在现有的参数之后添加
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="启用性能分析模式（详细时间分布分析）",
+    )
+    
+    parser.add_argument(
+        "--profile-micro",
+        action="store_true",
+        help="启用微操作分析模式（分析基本操作时间开销）",
+    )
+    
+    parser.add_argument(
+        "--profile-detail",
+        type=str,
+        choices=["scalar", "vectorized", "both"],
+        default="both",
+        help="指定要分析的实现类型（仅当--profile启用时有效）",
+    )
 
     args = parser.parse_args()
     
@@ -647,6 +1025,123 @@ Available backends: {', '.join(available_backends)}
             print(f"  {i+1}. {backend}")
         return
     
+    # Profiling模式处理
+    if args.profile or args.profile_micro:
+        print("=" * 80)
+        print("PROFILING MODE ENABLED")
+        print("=" * 80)
+        
+        # 解析规模参数
+        size_str = args.size.strip()
+        if size_str.startswith("(") and size_str.endswith(")"):
+            size_str = size_str[1:-1]
+        steps, paths = map(int, size_str.split(","))
+        
+        # 设置后端
+        backend_to_use = args.backend
+        if backend_to_use == "auto":
+            if available_backends:
+                backend_to_use = available_backends[0]
+            else:
+                backend_to_use = "cpu"
+        
+        # 微操作分析
+        if args.profile_micro:
+            print(f"Running micro-operation profiling on backend: {backend_to_use}")
+            micro_results = TimeProfiler.profile_micro_operations(
+                steps=min(steps, 100),  # 小规模测试
+                paths=min(paths, 100),
+                backend=backend_to_use,
+                use_lcg=args.use_lcg
+            )
+            
+            # 输出总结
+            print("\n" + "="*60)
+            print("MICRO-PROFILING SUMMARY")
+            print("="*60)
+            for key, value in micro_results.items():
+                print(f"{key:25s}: {value:.6f}s")
+            
+            return
+        
+        # 详细性能分析
+        if args.profile_detail == "both":
+            methods_to_profile = ["scalar", "vectorized"]
+        else:
+            methods_to_profile = [args.profile_detail]
+        
+        all_profile_results = {}
+        for method in methods_to_profile:
+            print(f"\nProfiling {method} implementation...")
+            
+            if method == "scalar":
+                profile_results = TimeProfiler.profile_scalar_implementation(
+                    steps=steps,
+                    paths=paths,
+                    use_lcg=args.use_lcg,
+                    backend=backend_to_use
+                )
+            else:  # vectorized
+                profile_results = TimeProfiler.profile_vectorized_implementation(
+                    steps=steps,
+                    paths=paths,
+                    use_lcg=args.use_lcg,
+                    backend=backend_to_use
+                )
+            
+            all_profile_results[method] = profile_results
+        
+        # 输出对比总结
+        print("\n" + "="*80)
+        print("PROFILING COMPARISON SUMMARY")
+        print("="*80)
+        
+        print(f"{'Metric':<25s} {'Scalar':<15s} {'Vectorized':<15s} {'Difference':<15s}")
+        print("-" * 70)
+        
+        # 对比关键指标
+        metrics_to_compare = [
+            ("compilation", "Compilation (s)"),
+            ("warmup", "Warmup (s)"),
+            ("execution_avg", "Execution avg (s)"),
+            ("estimated_memory_mb", "Memory est (MB)")
+        ]
+        
+        for metric_key, metric_name in metrics_to_compare:
+            scalar_val = all_profile_results.get("scalar", {}).get(metric_key, 0)
+            vectorized_val = all_profile_results.get("vectorized", {}).get(metric_key, 0)
+            
+            if scalar_val and vectorized_val:
+                diff = vectorized_val - scalar_val
+                diff_pct = (diff / scalar_val * 100) if scalar_val != 0 else 0
+                diff_str = f"{diff:+.4f}s ({diff_pct:+.1f}%)"
+            else:
+                diff_str = "N/A"
+            
+            print(f"{metric_name:<25s} {scalar_val:<15.4f} {vectorized_val:<15.4f} {diff_str:<15s}")
+        
+        # 计算性能指标
+        if "scalar" in all_profile_results and "vectorized" in all_profile_results:
+            scalar_ops = steps * paths / all_profile_results["scalar"].get("execution_avg", 1)
+            vectorized_ops = steps * paths / all_profile_results["vectorized"].get("execution_avg", 1)
+            
+            speedup = vectorized_ops / scalar_ops if scalar_ops > 0 else 0
+            
+            print("\n" + "-" * 70)
+            print(f"{'Performance Metric':<25s} {'Scalar':<15s} {'Vectorized':<15s} {'Speedup':<15s}")
+            print("-" * 70)
+            print(f"{'Ops/sec (steps*paths/s)':<25s} {scalar_ops:<15.0f} {vectorized_ops:<15.0f} {speedup:<15.2f}x")
+            
+            if speedup > 1.0:
+                print(f"\n✓ Vectorized implementation is {speedup:.2f}x faster than scalar")
+            elif speedup < 1.0:
+                print(f"\n⚠ Scalar implementation is {1/speedup:.2f}x faster than vectorized")
+            else:
+                print(f"\nBoth implementations have similar performance")
+        
+        return  # 在profiling模式下不运行常规基准测试
+    
+    # 如果不在profiling模式，继续执行常规基准测试
     # 解析规模参数
     size_str = args.size.strip()
     if size_str.startswith("(") and size_str.endswith(")"):
