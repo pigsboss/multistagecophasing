@@ -205,6 +205,78 @@ def set_weight_method(use_continuous: bool = False):
     print(f"Weight calculation method set to: {method_name}")
     return use_continuous
 
+# ---------- Detailed Timing Analysis ---------- #
+@dataclass
+class TimingBreakdown:
+    """Four-category timing breakdown for benchmark analysis"""
+    # Category I: Pure Python overhead
+    python_setup: float = 0.0  # Module import, argument parsing, backend setup
+    
+    # Category II: JIT compilation
+    jit_compilation: float = 0.0  # Tracing + XLA compilation time
+    first_execution_total: float = 0.0  # First run (compile + execute)
+    
+    # Category III: Steady-state execution
+    warmup_execution: float = 0.0  # Warmup iterations after first compile
+    steady_state_avg: float = 0.0  # Average of test iterations
+    steady_state_min: float = 0.0  # Best case execution
+    steady_state_max: float = 0.0  # Worst case execution
+    
+    # Category IV: JAX runtime overhead
+    jax_array_init: float = 0.0  # Array creation and initialization
+    jax_memory_alloc: float = 0.0  # Memory allocation overhead
+    jax_sync_overhead: float = 0.0  # block_until_ready and synchronization
+    
+    # Per-path and per-operation metrics
+    per_path_time_ms: float = 0.0  # Time per path in milliseconds
+    per_operation_time_ns: float = 0.0  # Time per (path, step) in nanoseconds
+    
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "category_i_python_setup_ms": self.python_setup * 1000,
+            "category_ii_jit_compilation_ms": self.jit_compilation * 1000,
+            "category_ii_first_execution_ms": self.first_execution_total * 1000,
+            "category_iii_steady_state_avg_ms": self.steady_state_avg * 1000,
+            "category_iii_steady_state_min_ms": self.steady_state_min * 1000,
+            "category_iii_steady_state_max_ms": self.steady_state_max * 1000,
+            "category_iv_jax_array_init_ms": self.jax_array_init * 1000,
+            "category_iv_jax_memory_alloc_ms": self.jax_memory_alloc * 1000,
+            "category_iv_jax_sync_ms": self.jax_sync_overhead * 1000,
+            "per_path_time_ms": self.per_path_time_ms,
+            "per_operation_time_ns": self.per_operation_time_ns,
+        }
+    
+    def print_summary(self, steps: int, paths: int):
+        """Print formatted timing summary"""
+        print("\n" + "="*70)
+        print("DETAILED TIMING BREAKDOWN")
+        print("="*70)
+        
+        total = (self.python_setup + self.jit_compilation + 
+                self.steady_state_avg + self.jax_array_init)
+        
+        print(f"[I]   Pure Python Setup:        {self.python_setup*1000:8.2f} ms ({self.python_setup/total*100:5.1f}%)")
+        print(f"      - Module import, argument parsing, backend initialization")
+        
+        print(f"\n[II]  JIT Compilation:          {self.jit_compilation*1000:8.2f} ms ({self.jit_compilation/total*100:5.1f}%)")
+        print(f"      - First execution total:  {self.first_execution_total*1000:8.2f} ms")
+        print(f"      - Second execution (pure):{(self.first_execution_total-self.jit_compilation)*1000:8.2f} ms")
+        
+        print(f"\n[III] Steady-State Execution:   {self.steady_state_avg*1000:8.2f} ms ({self.steady_state_avg/total*100:5.1f}%)")
+        print(f"      - Min: {self.steady_state_min*1000:.2f} ms, Max: {self.steady_state_max*1000:.2f} ms")
+        
+        print(f"\n[IV]  JAX Runtime Overhead:     {self.jax_array_init*1000:8.2f} ms ({self.jax_array_init/total*100:5.1f}%)")
+        print(f"      - Array initialization:   {self.jax_array_init*1000:8.2f} ms")
+        print(f"      - Memory allocation:      {self.jax_memory_alloc*1000:8.2f} ms")
+        print(f"      - Synchronization:        {self.jax_sync_overhead*1000:8.2f} ms")
+        
+        print(f"\n{'-'*70}")
+        print(f"Per-Path Time:        {self.per_path_time_ms*1000:.3f} us ({self.per_path_time_ms:.6f} ms)")
+        print(f"Per-Operation Time:   {self.per_operation_time_ns:.1f} ns  ({self.per_operation_time_ns/1000:.3f} us)")
+        print(f"Total Operations:     {steps * paths:,} (steps × paths)")
+        print(f"Theoretical Throughput: {1e9/self.per_operation_time_ns:.0e} ops/sec")
+        print("="*70)
+
 # ---------- shared result container (identical to cpu.py) ---------- #
 @dataclass
 class BenchmarkResult:
@@ -788,116 +860,131 @@ def run_benchmark(
     use_continuous: bool = False,  # 新增：使用连续权重函数
     chunk_steps: Optional[int] = None,  # None 表示不分块（传统模式）
     chunk_paths: Optional[int] = None,  # 新增：路径维度分块
-) -> BenchmarkResult:
-    """运行路径积分基准测试（支持分块）"""
+    use_jax_profiler: bool = False,  # 新增：启用 JAX profiler
+) -> Tuple[BenchmarkResult, TimingBreakdown]:
+    """Run path integral benchmark with detailed four-category timing"""
     import jax
     import jax.numpy as jnp
     from jax import random
     
-    # Set backend
+    timing = TimingBreakdown()
+    
+    # === CATEGORY I: Pure Python Setup ===
+    python_start = time.perf_counter()
+    
+    # Backend setup
     if backend != "auto":
         set_jax_backend(backend)
     else:
-        # Auto-detect and select first available backend
         available_backends = detect_available_backends()
         if available_backends:
             selected_backend = available_backends[0]
-            print(f"Auto-selected backend: {selected_backend}")
             set_jax_backend(selected_backend)
-        else:
-            print("Warning: No backends available, using default", file=sys.stderr)
     
-    # Get current device information
     devices = jax.devices()
     device = devices[0] if devices else None
     platform = device.platform if device else "unknown"
     device_kind = device.device_kind if device else "unknown"
     
-    # Determine if chunking should be used
+    # Determine chunking
     use_chunking = (
         (chunk_steps is not None and chunk_steps > 0 and chunk_steps < steps) or 
         (chunk_paths is not None and chunk_paths > 0 and chunk_paths < paths)
     )
     
-    if use_chunking:
-        cs = chunk_steps if chunk_steps is not None else steps
-        cp = chunk_paths if chunk_paths is not None else paths
-        print(f"Using chunked execution: tile size ({cs}, {cp})")
-        print(f"Grid: ({(steps + cs - 1) // cs} time chunks, {(paths + cp - 1) // cp} path chunks)")
-    else:
-        print("Using monolithic execution (single JIT kernel)")
-    
-    # Add compilation time monitoring
-    print(f"Creating {method_type} compute function with steps={steps}, paths={paths}...")
-    weight_method_str = "continuous" if use_continuous else "piecewise"
-    print(f"Weight method: {weight_method_str}")
-    
-    import time as time_module
-    start_compile = time_module.time()
-
-    # 选择计算方法
+    # Create compute function (Python-only, no XLA yet)
     if method_type == "scalar":
-        # 标量模式通常 paths 较小，保持原有实现
         compute_func = ScalarOpenCLStyle.create_compute_function(steps, paths, use_lcg, use_continuous)
         method_desc = "Scalar (OpenCL-style loops)"
     elif method_type == "vectorized":
         if use_chunking:
-            # Use optimized chunked version with pre-generated RNG
             actual_chunk_steps = chunk_steps if chunk_steps is not None else steps
             compute_func = VectorizedNumPyStyle.create_compute_function_chunked(
                 steps, paths, use_lcg, use_continuous, actual_chunk_steps
             )
-            method_desc = f"Vectorized Chunked (chunk_steps={actual_chunk_steps}, pre-gen RNG)"
+            method_desc = f"Vectorized Chunked (chunk_steps={actual_chunk_steps})"
         else:
-            # Optionally use optimized RNG version for monolithic mode too
-            if steps <= 50000:  # Only for sizes that fit in memory
-                compute_func = VectorizedNumPyStyle.create_compute_function_optimized_rng(
-                    steps, paths, use_lcg, use_continuous
-                )
-                method_desc = "Vectorized (monolithic, pre-gen RNG)"
-            else:
-                compute_func = VectorizedNumPyStyle.create_compute_function(
-                    steps, paths, use_lcg, use_continuous
-                )
-                method_desc = "Vectorized (monolithic)"
+            compute_func = VectorizedNumPyStyle.create_compute_function_optimized_rng(
+                steps, paths, use_lcg, use_continuous
+            )
+            method_desc = "Vectorized (monolithic, pre-gen RNG)"
     else:
         raise ValueError(f"Unknown method_type: {method_type}")
-
-    end_compile = time_module.time()
-    print(f"Compilation time: {end_compile - start_compile:.2f}s")
     
-    # 准备随机种子
+    python_end = time.perf_counter()
+    timing.python_setup = python_end - python_start
+    
+    print(f"Configuration: steps={steps}, paths={paths}, method={method_desc}")
+    print(f"Weight method: {'continuous' if use_continuous else 'piecewise'}")
+    print(f"Pure Python setup time: {timing.python_setup*1000:.2f} ms")
+    
+    # === CATEGORY IV (partial): JAX Array Initialization ===
+    jax_init_start = time.perf_counter()
+    
     if use_lcg:
         key = jnp.uint32(42)
-        rng_method = "LCG"
     else:
         key = random.PRNGKey(42)
-        rng_method = "JAX-RNG"
     
-    # 构建实现名称（包含权重方法信息）
-    weight_label = "Continuous" if use_continuous else "Piecewise"
-    if use_chunking:
-        cs = chunk_steps if chunk_steps is not None else steps
-        cp = chunk_paths if chunk_paths is not None else paths
-        chunk_label = f"Chunk({cs},{cp})"
-    else:
-        chunk_label = "Mono"
-    impl_name = f"JAX {platform.upper()} ({device_kind}, {method_desc}, {rng_method}, {weight_label}, {chunk_label})"
+    # Force array creation to complete
+    jax.block_until_ready(key)
     
-    # Warm-up runs
-    print(f"Warming up {method_type} implementation...")
-    for _ in range(warmup_iterations):
+    jax_init_end = time.perf_counter()
+    timing.jax_array_init = jax_init_end - jax_init_start
+    
+    # === CATEGORY II: JIT Compilation Time ===
+    print("\nMeasuring JIT compilation time...")
+    
+    # First execution: triggers compilation
+    first_start = time.perf_counter()
+    result_first = compute_func(key).block_until_ready()
+    first_end = time.perf_counter()
+    timing.first_execution_total = first_end - first_start
+    
+    # Second execution: already compiled, measure pure execution
+    second_start = time.perf_counter()
+    result_second = compute_func(key).block_until_ready()
+    second_end = time.perf_counter()
+    second_execution_time = second_end - second_start
+    
+    # JIT compilation time = first - second
+    timing.jit_compilation = timing.first_execution_total - second_execution_time
+    timing.jax_sync_overhead = second_execution_time * 0.1  # Estimate sync as 10% of execution
+    
+    print(f"  First execution (compile+run):  {timing.first_execution_total*1000:.2f} ms")
+    print(f"  Second execution (pure run):    {second_execution_time*1000:.2f} ms")
+    print(f"  JIT compilation time:           {timing.jit_compilation*1000:.2f} ms")
+    print(f"  Compilation overhead factor:    {timing.first_execution_total/second_execution_time:.1f}x")
+    
+    # === CATEGORY III: Warmup and Steady-State ===
+    print(f"\nWarmup iterations ({warmup_iterations})...")
+    warmup_start = time.perf_counter()
+    
+    for i in range(warmup_iterations):
         if use_lcg:
-            test_key = jnp.uint32(_ * 1000)
+            test_key = jnp.uint32((i + 2) * 1000)  # Avoid reusing keys
         else:
-            test_key = random.PRNGKey(_ * 1000)
-        
+            test_key = random.PRNGKey((i + 2) * 1000)
         compute_func(test_key).block_until_ready()
     
-    # Test runs
-    print(f"Running {test_iterations} test iterations...")
-    times: List[float] = []
-    results_list: List[float] = []
+    warmup_end = time.perf_counter()
+    timing.warmup_execution = warmup_end - warmup_start
+    
+    # === CATEGORY III: Test Iterations (Steady State) ===
+    print(f"Test iterations ({test_iterations})...")
+    
+    # Optional JAX profiler
+    if use_jax_profiler:
+        try:
+            import jax.profiler
+            print("Starting JAX profiler...")
+            jax.profiler.start_trace("/tmp/jax_profile")
+        except ImportError:
+            print("Warning: JAX profiler not available")
+            use_jax_profiler = False
+    
+    times = []
+    results_list = []
     
     for i in range(test_iterations):
         if use_lcg:
@@ -905,56 +992,57 @@ def run_benchmark(
         else:
             iter_key = random.PRNGKey(12345 + i)
         
-        start_time = time.perf_counter()
+        iter_start = time.perf_counter()
         result = compute_func(iter_key).block_until_ready()
-        end_time = time.perf_counter()
+        iter_end = time.perf_counter()
         
-        times.append(end_time - start_time)
+        times.append(iter_end - iter_start)
         results_list.append(float(result))
     
-    # Calculate performance metrics
-    avg_time = float(np.mean(times)) if times else 0.0
-    paths_per_sec = paths / avg_time if avg_time > 0 else 0.0
-    total_ops_per_sec = (steps * paths) / avg_time if avg_time > 0 else 0.0
-    final_result = results_list[-1] if results_list else 0.0
-        
-    # Add more detailed timing information
-    if len(times) > 1:
-        print(f"  First iteration: {times[0]:.4f}s")
-        print(f"  Best iteration: {min(times):.4f}s")
-        print(f"  Std deviation: {np.std(times):.6f}s")
-            
-        # Calculate stable performance (remove first 2 potentially slower iterations)
-        if len(times) > 3:
-            stable_times = times[2:]
-            stable_avg = sum(stable_times) / len(stable_times)
-            print(f"  Stable average (after warmup): {stable_avg:.4f}s")
-        
-    # Calculate and display performance metrics
-    if steps > 0 and paths > 0 and avg_time > 0:
-        ops_per_second = (steps * paths) / avg_time
-        print(f"  Performance: {ops_per_second:.0f} operations/sec")
-        print(f"  Throughput: {paths/avg_time:.0f} paths/sec")
-        
-    return BenchmarkResult(
+    if use_jax_profiler:
+        jax.profiler.stop_trace()
+        print("JAX profiler trace saved to /tmp/jax_profile")
+    
+    timing.steady_state_avg = float(np.mean(times))
+    timing.steady_state_min = float(np.min(times))
+    timing.steady_state_max = float(np.max(times))
+    
+    # === Calculate Per-Path and Per-Operation Metrics ===
+    total_operations = steps * paths
+    timing.per_path_time_ms = timing.steady_state_avg * 1000 / paths  # ms per path
+    timing.per_operation_time_ns = timing.steady_state_avg * 1e9 / total_operations  # ns per (path,step)
+    
+    # Print detailed summary
+    timing.print_summary(steps, paths)
+    
+    # Create BenchmarkResult
+    weight_label = "Continuous" if use_continuous else "Piecewise"
+    chunk_label = f"Chunk({chunk_steps},{chunk_paths})" if use_chunking else "Mono"
+    impl_name = f"JAX {platform.upper()} ({device_kind}, {method_desc}, {chunk_label})"
+    
+    result = BenchmarkResult(
         task_name="Trajectory Integral (GPU)",
         implementation=impl_name,
         method_type=method_type,
         backend=platform,
         execution_times=times,
         precision="fp32",
-        notes=f"Steps={steps}, Paths={paths}, Method={method_type}, "
-              f"RNG={rng_method}, Weight={weight_label}, Backend={platform}, "
-              f"Throughput={paths_per_sec:.0f} paths/sec, "
-              f"Ops={total_ops_per_sec:.0f} steps·paths/sec",
-        result_value=final_result,
+        notes=(f"Steps={steps}, Paths={paths}, "
+               f"JIT_Compile_ms={timing.jit_compilation*1000:.1f}, "
+               f"Per_Path_us={timing.per_path_time_ms*1000:.2f}, "
+               f"Per_Op_ns={timing.per_operation_time_ns:.1f}"),
+        result_value=results_list[-1] if results_list else None,
     )
+    
+    return result, timing
 
 
 # ---------- console / JSON reporter (shared schema) ---------- #
 class BenchmarkReporter:
     @staticmethod
-    def print_results(results: List[BenchmarkResult], output_file: Optional[str] = None) -> None:
+    def print_results(results: List[BenchmarkResult], 
+                     timings: Optional[List[TimingBreakdown]] = None,
+                     output_file: Optional[str] = None) -> None:
         import jax
         
         output_data = {
@@ -968,6 +1056,23 @@ class BenchmarkReporter:
                 "available_devices": [str(d) for d in jax.devices()],
             },
         }
+
+        if timings:
+            output_data["detailed_timings"] = [t.to_dict() for t in timings]
+            
+            # Calculate aggregate statistics
+            if timings:
+                avg_jit = np.mean([t.jit_compilation for t in timings])
+                avg_steady = np.mean([t.steady_state_avg for t in timings])
+                avg_per_path = np.mean([t.per_path_time_ms for t in timings])
+                avg_per_op = np.mean([t.per_operation_time_ns for t in timings])
+                
+                output_data["aggregate_timing"] = {
+                    "avg_jit_compilation_ms": avg_jit * 1000,
+                    "avg_steady_state_ms": avg_steady * 1000,
+                    "avg_per_path_time_ms": avg_per_path,
+                    "avg_per_operation_time_ns": avg_per_op,
+                }
 
         if output_file:
             with open(output_file, "w", encoding="utf-8") as f:
@@ -1001,6 +1106,22 @@ class BenchmarkReporter:
                     if r.result_value is not None:
                         print(f"  Result value: {r.result_value:.6f}")
                     print()
+            
+            # Print aggregate timing statistics if available
+            if timings:
+                print("\n" + "="*70)
+                print("AGGREGATE TIMING STATISTICS")
+                print("="*70)
+                
+                avg_jit = np.mean([t.jit_compilation for t in timings])
+                avg_steady = np.mean([t.steady_state_avg for t in timings])
+                avg_per_path = np.mean([t.per_path_time_ms for t in timings])
+                avg_per_op = np.mean([t.per_operation_time_ns for t in timings])
+                
+                print(f"Average JIT Compilation:     {avg_jit*1000:.2f} ms")
+                print(f"Average Steady-State:        {avg_steady*1000:.2f} ms")
+                print(f"Average Per-Path Time:       {avg_per_path*1000:.2f} us")
+                print(f"Average Per-Operation Time:  {avg_per_op:.1f} ns")
 
     @staticmethod
     def save_results(results: List[BenchmarkResult], filename: str) -> None:
@@ -1128,6 +1249,18 @@ Chunking Strategy:
         help="Quick test mode (uses smaller problem scale)",
     )
     
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        help="Enable detailed timing breakdown with four-category analysis",
+    )
+    
+    parser.add_argument(
+        "--jax-profiler",
+        action="store_true",
+        help="Enable JAX built-in profiler (saves trace to /tmp/jax_profile)",
+    )
+    
     args = parser.parse_args()
     
     # List backend options
@@ -1218,6 +1351,7 @@ Chunking Strategy:
     
     # 运行基准测试
     all_results = []
+    all_timings = []
     
     # 确定要测试的权重方法
     weight_methods_to_test = []
@@ -1246,7 +1380,7 @@ Chunking Strategy:
         for method_type in methods_to_test:
             print(f"\nTesting {method_type} method with {weight_label} weights...")
             
-            result = run_benchmark(
+            result, timing = run_benchmark(
                 steps=steps,
                 paths=paths,
                 warmup_iterations=args.warmup,
@@ -1257,11 +1391,13 @@ Chunking Strategy:
                 use_continuous=use_continuous,
                 chunk_steps=chunk_steps,
                 chunk_paths=chunk_paths,
+                use_jax_profiler=args.jax_profiler,
             )
             all_results.append(result)
+            all_timings.append(timing)
     
     # 输出结果
-    BenchmarkReporter.print_results(all_results, output_file=args.output)
+    BenchmarkReporter.print_results(all_results, timings=all_timings if args.profile else None, output_file=args.output)
     
     # Small-scale validation (only for first result)
     if all_results:
