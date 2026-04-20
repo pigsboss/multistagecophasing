@@ -34,6 +34,48 @@ from typing import Dict, List, Optional, Any, Tuple, Callable
 
 import numpy as np
 
+# ---------- Helper functions for 2D chunking ---------- #
+def estimate_optimal_chunk_sizes(steps: int, paths: int, device_memory_gb: float = 16.0) -> Tuple[int, int]:
+    """
+    Estimate optimal 2D chunk sizes based on device memory constraints.
+    
+    Returns:
+        Tuple of (chunk_steps, chunk_paths)
+    """
+    # Memory estimation: each path requires ~4 bytes * steps for intermediate arrays
+    # Conservative estimate: use only 20% of device memory for working set
+    available_bytes = device_memory_gb * 1024**3 * 0.2
+    
+    # Bytes per path per step (rough estimate for float32 arrays: x, integral, random, weight)
+    bytes_per_cell = 4 * 4  # 4 arrays * 4 bytes
+    
+    total_cells = steps * paths
+    memory_needed = total_cells * bytes_per_cell
+    
+    if memory_needed <= available_bytes:
+        # No chunking needed
+        return steps, paths
+    
+    # Need to chunk. Strategy: keep paths as large as possible (for vectorization),
+    # chunk time dimension first, then path dimension if necessary.
+    
+    # Estimate max paths we can handle without time chunking
+    max_paths_no_time_chunk = int(available_bytes / (steps * bytes_per_cell))
+    
+    if max_paths_no_time_chunk >= 128:  # Minimum for GPU efficiency
+        # Only chunk time dimension
+        optimal_chunk_paths = min(paths, ((max_paths_no_time_chunk // 128) * 128))
+        optimal_chunk_steps = steps
+    else:
+        # Need 2D chunking
+        optimal_chunk_paths = 1024  # Standard GPU workgroup size multiple
+        cells_per_chunk = int(available_bytes / bytes_per_cell)
+        optimal_chunk_steps = max(100, cells_per_chunk // optimal_chunk_paths)
+        optimal_chunk_steps = min(optimal_chunk_steps, steps)
+    
+    print(f"Auto-chunking: steps={optimal_chunk_steps}, paths={optimal_chunk_paths}")
+    return optimal_chunk_steps, optimal_chunk_paths
+
 # ---------- JAX环境检查和后端检测 ---------- #
 def detect_available_backends() -> List[str]:
     """检测可用的JAX后端"""
@@ -924,15 +966,21 @@ Weight Methods:
         help="列出所有可用的JAX后端并退出",
     )
     parser.add_argument(
-        "--chunk-size",
+        "--chunk-steps",
         type=int,
         default=None,
-        help="时间维度分块大小（默认None表示不分块）。设置为正整数（如5000或10000）可启用分块执行，避免单次内核超时",
+        help="Chunk size for time dimension (steps). Enable 2D chunking when set smaller than total steps.",
     )
     parser.add_argument(
-        "--auto-chunk",
+        "--chunk-paths",
+        type=int,
+        default=None,
+        help="Chunk size for path dimension (paths). Enable path chunking to reduce memory usage.",
+    )
+    parser.add_argument(
+        "--chunk-auto",
         action="store_true",
-        help="自动根据steps选择分块大小（steps>50000时自动分块，每块10000步）",
+        help="Automatically determine chunk sizes based on problem scale and available memory.",
     )
     parser.add_argument(
         "--quick",
@@ -984,11 +1032,28 @@ Weight Methods:
         print(f"JAX backend: {jax.default_backend()}")
         print(f"Available devices: {[str(d) for d in devices]}")
     
-    # 确定chunk_size
-    chunk_size = args.chunk_size
-    if args.auto_chunk and steps > 50000 and chunk_size is None:
-        chunk_size = 10000
-        print(f"Auto-chunking enabled: using chunk_size={chunk_size}")
+    # Determine chunk sizes
+    chunk_steps = args.chunk_steps
+    chunk_paths = args.chunk_paths
+
+    if args.chunk_auto:
+        try:
+            devices = jax.devices()
+            # Estimate memory (simplified for Metal/CUDA)
+            mem_gb = 16.0  # Default assumption
+            if hasattr(devices[0], 'memory_stats'):
+                # Try to get actual memory info
+                stats = devices[0].memory_stats()
+                mem_gb = stats.get('bytes_limit', 16 * 1024**3) / 1024**3
+            
+            chunk_steps, chunk_paths = estimate_optimal_chunk_sizes(
+                steps, paths, mem_gb
+            )
+            print(f"Auto-selected chunk sizes: steps={chunk_steps}, paths={chunk_paths}")
+        except Exception as e:
+            print(f"Warning: Auto-chunking failed ({e}), using defaults")
+            chunk_steps = min(10000, steps)
+            chunk_paths = None
     
     # 运行基准测试
     all_results = []
@@ -1029,7 +1094,8 @@ Weight Methods:
                 method_type=method_type,
                 backend=args.backend,
                 use_continuous=use_continuous,
-                chunk_size=chunk_size,
+                chunk_steps=chunk_steps,
+                chunk_paths=chunk_paths,
             )
             all_results.append(result)
     
@@ -1063,6 +1129,8 @@ Weight Methods:
                 backend=args.backend,
                 use_continuous=all_results[0].implementation.find("Continuous") >= 0 or 
                               all_results[0].implementation.find("continuous") >= 0,
+                chunk_steps=None,
+                chunk_paths=None,
             )
             
             gpu_value = gpu_result.result_value
