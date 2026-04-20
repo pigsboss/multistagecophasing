@@ -822,7 +822,13 @@ class VectorizedNumPyStyle:
             remainder = steps % chunk_size
             
             # Generate keys for each chunk
-            chunk_keys = random.split(key, num_full_chunks + (1 if remainder > 0 else 0))
+            num_chunks_total = num_full_chunks + (1 if remainder > 0 else 0)
+            if use_lcg:
+                # For LCG, key is a uint32 scalar; create distinct seeds by offsetting
+                chunk_keys = jnp.arange(num_chunks_total, dtype=jnp.uint32) + key
+            else:
+                # For JAX RNG, use split to create distinct keys
+                chunk_keys = random.split(key, num_chunks_total)
             
             # Process full chunks sequentially
             for i in range(num_full_chunks):
