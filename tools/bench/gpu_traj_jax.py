@@ -763,7 +763,12 @@ def run_benchmark(
     
     # 构建实现名称（包含权重方法信息）
     weight_label = "Continuous" if use_continuous else "Piecewise"
-    chunk_label = f"Chunk{chunk_size}" if use_chunking else "Mono"
+    if use_chunking:
+        cs = chunk_steps if chunk_steps is not None else steps
+        cp = chunk_paths if chunk_paths is not None else paths
+        chunk_label = f"Chunk({cs},{cp})"
+    else:
+        chunk_label = "Mono"
     impl_name = f"JAX {platform.upper()} ({device_kind}, {method_desc}, {rng_method}, {weight_label}, {chunk_label})"
     
     # 预热运行
