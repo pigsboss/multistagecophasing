@@ -321,19 +321,21 @@ class SPICECalculator:
     - 时间转换
     """
     
-    # NAIF ID 映射表（补全所有行星）
+    # NAIF ID 映射表（使用 barycenter ID 获取可靠的星历数据）
+    # 对于除地球和月球以外的行星，使用 barycenter 以避免 SPK 不包含个体行星的问题
     NAIF_IDS = {
         'sun': 10,
-        'mercury': 199,
-        'venus': 299,
-        'earth': 399,
+        'mercury': 1,           # Mercury barycenter (NAIF 1)
+        'venus': 2,             # Venus barycenter (NAIF 2)
+        'earth': 399,           # Earth (NAIF 399, 行星自身)
         'moon': 301,
-        'mars': 499,
+        'mars': 4,              # Mars barycenter (NAIF 4)
         'mars_barycenter': 4,
-        'jupiter': 599,
-        'saturn': 699,
-        'uranus': 799,
-        'neptune': 899,
+        'jupiter': 5,           # Jupiter barycenter (NAIF 5)
+        'saturn': 6,            # Saturn barycenter (NAIF 6)
+        'uranus': 7,            # Uranus barycenter (NAIF 7)
+        'neptune': 8,           # Neptune barycenter (NAIF 8)
+        'pluto': 9,             # Pluto barycenter (NAIF 9)
         'l2_earth_moon': 302,
     }
     
@@ -407,7 +409,7 @@ class SPICECalculator:
             # 调用 SPICE spkezr 函数
             # 传递字符串 ID 给 spkezr 以避免 CSPICE 内部错误
             state_km, lt = spice.spkezr(
-                target_id,      # str like "399"
+                target_id,      # str like "1"
                 epoch,
                 spice_frame,
                 abcorr,
