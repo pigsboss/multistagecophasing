@@ -3,7 +3,7 @@
 MCPC Visualizer CLI
 
 Usage:
-    python -m utils.visualizers --time "2026-04-10T12:00:00" --spice-kernels ./spice_kernels [--vedo]
+    python -m utils.visualizers --time "2026-04-10T12:00:00" [--vedo]
 """
 
 import argparse
@@ -33,27 +33,19 @@ def main():
         description="MCPC 3D Scene Visualizer (Sun-Earth-Moon demo)")
     parser.add_argument("--time", type=str, default="2026-04-10T12:00:00",
                         help="UTC start time in ISO format (default: 2026-04-10T12:00:00)")
-    parser.add_argument("--spice-kernels", type=str, default="./spice_kernels",
-                        help="Path to SPICE kernel directory (default: ./spice_kernels)")
     parser.add_argument("--vedo", action="store_true",
                         help="Use vedo for interactive 3D view (requires vedo)")
     args = parser.parse_args()
 
-    kernel_path = Path(args.spice_kernels).resolve()
-    if not kernel_path.exists():
-        print(f"Error: SPICE kernel directory not found: {kernel_path}", file=sys.stderr)
-        sys.exit(1)
-
-    # Configure HighPrecisionEphemeris in SPICE mode
+    # Configure HighPrecisionEphemeris in SPICE mode – kernel discovery is automatic
     config = EphemerisConfig(
         mode=EphemerisMode.SPICE,
-        spice_kernels_path=kernel_path,
         verbose=False
     )
 
     eph = HighPrecisionEphemeris(config=config)
 
-    # Convert UTC string to ephemeris time (ET) using SPICE
+    # Convert UTC string to ephemeris time (ET) using SPICE (or fallback if SPICE unavailable)
     try:
         epoch = eph.utc_to_et(args.time)
     except Exception as exc:
