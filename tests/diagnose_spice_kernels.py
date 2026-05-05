@@ -56,9 +56,14 @@ def inspect_spk_file(spk_path: Path):
             intervals = []
             for i in range(n):
                 b, e = spice.wnfetd(cover, i)
-                intervals.append(
-                    f"{spice.et2utc(b, 'C', 0)}  to  {spice.et2utc(e, 'C', 0)}"
-                )
+                try:
+                    # Requires LSK to be loaded in kernel pool
+                    b_utc = spice.et2utc(b, 'C', 0)
+                    e_utc = spice.et2utc(e, 'C', 0)
+                    intervals.append(f"{b_utc}  to  {e_utc}")
+                except Exception:
+                    # Fallback to raw ET seconds if LSK unavailable
+                    intervals.append(f"ET {b:.3f} s  to  ET {e:.3f} s")
             print(f"  NAIF ID {obj_id:4d}: {n} interval(s)")
             for iv in intervals:
                 print(f"                 {iv}")
@@ -115,18 +120,8 @@ def main():
     kernel_path = find_kernel_path()
     print(f"[INFO] Kernel path: {kernel_path.resolve()}")
 
-    # 1. Inspect raw SPK contents BEFORE loading
-    spk_files = sorted(
-        set(list(kernel_path.rglob("de440.bsp")) + list(kernel_path.rglob("de44*.bsp")))
-    )
-    if not spk_files:
-        print("[FAIL] No de440*.bsp files found!")
-        sys.exit(1)
-
-    for spk in spk_files:
-        inspect_spk_file(spk)
-
-    # 2. Initialize SPICE and test queries
+    # 1. Initialize SPICE FIRST to ensure LSK is loaded into the kernel pool.
+    #    ET→UTC conversion (et2utc) requires leapsecond data.
     config = SPICEConfig(mission_type="interplanetary", verbose=True)
     iface = SPICEInterface(kernel_path, config)
 
@@ -137,7 +132,18 @@ def main():
 
     print(f"[INFO] Loaded kernels: {[k.name for k in iface._km.get_loaded_kernels()]}")
 
-    # Test epoch matching the visualizer command (2026-05-05)
+    # 2. Inspect raw SPK contents AFTER LSK is loaded, so UTC display works.
+    spk_files = sorted(
+        set(list(kernel_path.rglob("de440.bsp")) + list(kernel_path.rglob("de44*.bsp")))
+    )
+    if not spk_files:
+        print("[FAIL] No de440*.bsp files found!")
+        sys.exit(1)
+
+    for spk in spk_files:
+        inspect_spk_file(spk)
+
+    # 3. Run query tests (internal ET epoch is acceptable here as it stays inside spacetime)
     epoch = 831211269.185
     all_ok = test_body_queries(iface, epoch)
 
