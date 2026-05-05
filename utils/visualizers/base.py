@@ -290,6 +290,9 @@ class SceneBuilder:
             ephemeris_handler: An instance of HighPrecisionEphemeris (SPICE mode).
         """
         import math
+        AU = 149597870700.0        # metres
+        R_EARTH = 6378137.0        # metres
+
         scene = Scene("Solar-System")
         scene.time = epoch
 
@@ -349,10 +352,13 @@ class SceneBuilder:
 
                 # Ecliptic coordinates
                 ecl_lng, ecl_lat, ecl_dist = self._to_ecliptic(real_pos)
+                dist_au = np.linalg.norm(real_pos) / AU
+                display_dist_au = np.linalg.norm(display_pos) / AU
                 print(f"[DIAG] {name.capitalize():8s} "
                       f"ecl: l={ecl_lng:7.2f}° b={ecl_lat:+7.2f}° "
                       f"real={real_pos!r} "
-                      f"display={display_pos!r}")
+                      f"display={display_pos!r} "
+                      f"dist_au={dist_au:.4f} display_au={display_dist_au:.4f}")
 
                 planet_data[name] = (real_pos, display_pos, data)
             except Exception as exc:
@@ -412,16 +418,21 @@ class SceneBuilder:
         # DO NOT attach background to root – it is metadata, not geometry
 
         # DIAGNOSTIC: print world positions so we can verify without relying on renderer
-        print(f"[DIAG] Sun at {sun_node.transform.position}, scale={sun_node.transform.scale[0]:.3e}")
+        sun_radius_R = sun_radii[0] / R_EARTH
+        sun_world_radius_R = sun_radii[0] * sun_node.transform.scale[0] / R_EARTH
+        print(f"[DIAG] Sun at {sun_node.transform.position}, "
+              f"scale={sun_node.transform.scale[0]:.3e}, "
+              f"R={sun_radius_R:.1f} Re, world_R={sun_world_radius_R:.3f} Re")
         for child in scene.root.children:
             if isinstance(child, Ellipsoid) and child.name != "Sun":
                 pos = child.transform.position
                 dist_to_cam = np.linalg.norm(pos - camera_pos)
                 world_per_px = (2.0 * dist_to_cam * math.tan(fov_rad / 2.0)) / target_vertical_px
                 w_radius = child.radii[0] * child.transform.scale[0]
+                w_radius_R = w_radius / R_EARTH
                 print(f"[DIAG] {child.name:8s} pos={pos!r} "
                       f"dist_cam={dist_to_cam:.3e} m "
-                      f"world_radius={w_radius:.3e} m "
+                      f"world_radius={w_radius:.3e} m ({w_radius_R:.3f} Re) "
                       f"scale={child.transform.scale[0]:.3e}")
         print(f"[DIAG] Camera target={camera.target} pos={camera.transform.position}")
 
@@ -434,6 +445,10 @@ class SceneBuilder:
 
         ephemeris_handler must be an instance of HighPrecisionEphemeris (SPICE mode).
         """
+        import math
+        LD = 3.844e8               # metres
+        R_EARTH = 6378137.0        # metres
+
         scene = Scene("Sun-Earth-Moon")
         scene.time = epoch
 
@@ -501,6 +516,23 @@ class SceneBuilder:
         moon_node = Ellipsoid("Moon", radii=moon_radii, color="gray")
         moon_node.transform.scale = np.array([10.0, 10.0, 10.0])
         moon_group.add_child(moon_node)
+
+        # === Diagnostic for Earth‑Moon scene ===
+        earth_real_dist = np.linalg.norm(earth_pos)
+        earth_display_dist = np.linalg.norm(earth_display_pos)
+        moon_real_pos_hc = earth_pos + moon_rel_pos
+        moon_real_dist = np.linalg.norm(moon_real_pos_hc)
+        moon_display_dist = np.linalg.norm(moon_display_pos)
+        print(f"[DIAG DEMO] Sun        R={sun_radii[0]/R_EARTH:.1f} Re, "
+              f"world_R={sun_radii[0]*sun_node.transform.scale[0]/R_EARTH:.3f} Re")
+        print(f"[DIAG DEMO] Earth      real_dist={earth_real_dist/LD:.4f} LD, "
+              f"display_dist={earth_display_dist/LD:.4f} LD, "
+              f"R={earth_radii[0]/R_EARTH:.1f} Re, "
+              f"world_R={earth_radii[0]*earth_node.transform.scale[0]/R_EARTH:.3f} Re")
+        print(f"[DIAG DEMO] Moon       real_dist={moon_real_dist/LD:.4f} LD, "
+              f"display_dist={moon_display_dist/LD:.4f} LD, "
+              f"R={moon_radii[0]/R_EARTH:.1f} Re, "
+              f"world_R={moon_radii[0]*moon_node.transform.scale[0]/R_EARTH:.3f} Re")
 
         # Camera – look at Earth's display position (Moon is now offset visibly)
         camera = Camera("Main Camera")
