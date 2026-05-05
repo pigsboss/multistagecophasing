@@ -347,7 +347,8 @@ class SceneBuilder:
         sun_node.transform.scale = np.array([sun_scale] * 3)
         scene.root.add_child(sun_node)
 
-        # Second pass: create planet nodes with pixel‑aware scales
+        # Second pass: create planet nodes directly under root (bypass Group wrapper)
+        # DIAGNOSTIC: if this makes all 8 planets appear, vedo ignores Group.transform
         for name, (real_pos, display_pos, data) in planet_data.items():
             dist = np.linalg.norm(display_pos - camera_pos)
             world_per_px = (2.0 * dist * math.tan(fov_rad / 2.0)) / target_vertical_px
@@ -356,13 +357,11 @@ class SceneBuilder:
             real_radius = data["radii"][0]   # use equatorial radius as representative
             scale_factor = max(min_world_radius / real_radius, 1.0)  # never shrink below natural size
 
-            group = Group(name.capitalize())
-            scene.root.add_child(group)
-            group.transform.position = display_pos
-
             ellip = Ellipsoid(name.capitalize(), radii=data["radii"], color=data["color"])
+            # Position directly on the leaf node, not on an intermediate Group
+            ellip.transform.position = display_pos
             ellip.transform.scale = np.array([scale_factor] * 3)
-            group.add_child(ellip)
+            scene.root.add_child(ellip)
 
         # --- Camera ---
         camera = Camera("Top-Down Camera")
@@ -371,12 +370,19 @@ class SceneBuilder:
         camera.up = np.array([0.0, 1.0, 0.0])
         camera.fov = fov_deg
         scene.camera = camera
-        scene.root.add_child(camera)
+        # DO NOT attach camera to root – it is metadata, not geometry
 
         # --- Background ---
         bg = Background()
         scene.background = bg
-        scene.root.add_child(bg)
+        # DO NOT attach background to root – it is metadata, not geometry
+
+        # DIAGNOSTIC: print world positions so we can verify without relying on renderer
+        print(f"[DIAG] Sun at {sun_node.transform.position}, scale={sun_node.transform.scale[0]:.3e}")
+        for child in scene.root.children:
+            if isinstance(child, Ellipsoid) and child.name != "Sun":
+                print(f"[DIAG] {child.name} at {child.transform.position}, scale={child.transform.scale[0]:.3e}")
+        print(f"[DIAG] Camera target={camera.target} pos={camera.transform.position}")
 
         return scene
 
