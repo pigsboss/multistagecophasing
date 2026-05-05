@@ -90,8 +90,8 @@ class DebugRenderer(Renderer):
         ax.axhline(0, color='gray', linewidth=0.5)
         ax.axvline(0, color='gray', linewidth=0.5)
         ax.set_aspect('equal')
-        ax.set_xlim(-30, 30)
-        ax.set_ylim(-30, 30)
+        ax.set_xlim(-15, 15)
+        ax.set_ylim(-15, 15)
 
         # Plot Sun larger, others smaller
         for name, x, y, col in zip(names, xs, ys, cols):
