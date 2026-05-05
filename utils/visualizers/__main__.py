@@ -17,7 +17,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from utils.visualizers.base import SceneBuilder, LogScale
-from utils.visualizers.backends.debug import DebugRenderer
+from utils.visualizers.backends.simple import SimpleRenderer
 from mission_sim.core.spacetime.ids import CoordinateFrame
 
 # Import MCPC high precision ephemeris
@@ -114,7 +114,7 @@ def main():
     use_vedo = args.vedo or (args.output is not None)
 
     # Renderer (vedo backend will handle single/multi‑frame)
-    renderer = DebugRenderer(use_vedo=use_vedo)
+    renderer = SimpleRenderer(use_vedo=use_vedo)
 
     total_frames = len(times)
     for idx, epoch in enumerate(times):
