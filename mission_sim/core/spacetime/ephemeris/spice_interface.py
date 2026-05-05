@@ -632,13 +632,13 @@ class SPICECalculator:
     def _to_naif_id(self, body: Union[str, int]) -> object:
         """
         转换天体名称为 SPICE 可识别的标识。
-        直接使用小写名称，SPICE 接受标准天体名称。
+        直接使用大写名称，SPICE 接受标准 NAIF 名称。
         """
         if isinstance(body, int):
             return str(body)
         if isinstance(body, str):
-            # Use the lower‑case name directly; SPICE accepts standard body names.
-            return body.lower()
+            # Use the UPPER‑CASE name; standard NAIF identifiers are e.g., 'SUN', 'MARS'.
+            return body.upper()
         raise SPICEError(f"Unknown body identifier: {body}")
     
     def _to_spice_frame(self, frame: Union[CoordinateFrame, str]) -> str:
