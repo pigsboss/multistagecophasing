@@ -89,6 +89,16 @@ class DebugRenderer(Renderer):
 
             # ---------- Draw geometry ----------
             if isinstance(node, Ellipsoid):
+                # --- Colour by name ---
+                if "Sun" in node.name:
+                    color = "yellow"
+                elif "Earth" in node.name:
+                    color = "blue"
+                elif "Moon" in node.name:
+                    color = "gray"
+                else:
+                    color = "white"
+
                 effective_radii = node.radii * node.transform.scale
                 S = np.eye(4)
                 S[0, 0] = effective_radii[0]
@@ -97,7 +107,7 @@ class DebugRenderer(Renderer):
 
                 full_transform = mat @ S
 
-                sph = vedo.Sphere(pos=(0, 0, 0), r=1.0, c='white', res=24)
+                sph = vedo.Sphere(pos=(0, 0, 0), r=1.0, c=color, res=24)
                 vtk_mat = vtk.vtkMatrix4x4()
                 for i in range(4):
                     for j in range(4):

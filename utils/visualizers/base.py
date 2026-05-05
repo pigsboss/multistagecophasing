@@ -255,6 +255,7 @@ class SceneBuilder:
 
         # --- Sun (root) ---
         sun_node = Ellipsoid("Sun", radii=(6.957e8, 6.957e8, 6.957e8))
+        sun_node.transform.scale = np.array([0.05, 0.05, 0.05])   # shrink for debug
         scene.root.add_child(sun_node)
 
         # --- Earth heliocentric state ---
@@ -289,6 +290,7 @@ class SceneBuilder:
         earth_group.transform.rotation = earth_rot
 
         earth_node = Ellipsoid("Earth", radii=earth_radii)
+        earth_node.transform.scale = np.array([10.0, 10.0, 10.0])  # enlarge for debug
         earth_group.add_child(earth_node)
 
         # --- Moon relative to Earth (no extra scaling) ---
@@ -313,6 +315,7 @@ class SceneBuilder:
         moon_group.transform.rotation = moon_rot
 
         moon_node = Ellipsoid("Moon", radii=moon_radii)
+        moon_node.transform.scale = np.array([10.0, 10.0, 10.0])  # enlarge for debug
         moon_group.add_child(moon_node)
 
         # Compute display position of Earth (after nonlinear scaling)
@@ -320,10 +323,15 @@ class SceneBuilder:
 
         # --- Camera ---
         camera = Camera("Main Camera")
-        # Place camera outside the Sun, roughly one‑third of the way to Earth’s display position
-        cam_dir = earth_display_pos / np.linalg.norm(earth_display_pos)
-        camera.transform.position = cam_dir * np.linalg.norm(earth_display_pos) * 0.33
-        camera.target = earth_display_pos  # look at the displayed Earth
+        # Position the camera halfway between the Sun and Earth in display space,
+        # but offset upward for a better perspective.
+        sun_center = np.zeros(3)
+        mid_point = (sun_center + earth_display_pos) / 2.0
+        up = np.array([0.0, 0.0, 1.0])
+        cam_pos = mid_point + np.array([0.0, 0.0, 1e9])  # place above the orbital plane
+        camera.transform.position = cam_pos
+        camera.target = earth_display_pos  # still look toward Earth
+        camera.up = up
         scene.camera = camera
         scene.root.add_child(camera)
 
