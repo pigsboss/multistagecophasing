@@ -251,6 +251,9 @@ class SPICEKernelManager:
                         found = True
                         if self.config.verbose:
                             print(f"[SPICE] Loaded {ktype}: {selected.relative_to(self.kernel_root)}")
+                        # Only one file needed for non-pck types
+                        if ktype != 'pck':
+                            break
                     except Exception as e:
                         warnings.warn(f"Failed to load kernel {selected}: {e}")
                         # Continue to next file for pck type
@@ -258,6 +261,10 @@ class SPICEKernelManager:
                             continue
                         else:
                             break  # For non-pck types, break on first failure
+            
+            # Stop searching additional patterns once a non-pck kernel is found
+            if found and ktype != 'pck':
+                break
         
         if not found and config['required']:
             # 提供更详细的错误信息

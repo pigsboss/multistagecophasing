@@ -289,44 +289,52 @@ class SceneBuilder:
         sun_radii = (6.957e8, 6.957e8, 6.957e8)
         sun_node = Ellipsoid("Sun", radii=sun_radii, color="yellow")
 
-        # --- Planets (all direct children of root) ---
-        planet_display_positions = []   # to compute camera extent
-        planet_positions_real = []      # store real heliocentric position for later use if needed
+        planet_data = {}  # name -> (real_pos, display_pos, info_dict)
 
         # First pass: collect display positions to determine camera height
         for name, data in self._PLANET_DATA.items():
-            state = ephemeris_handler.get_state(
-                name, epoch,
-                observer_body="sun",
-                frame=CoordinateFrame.J2000_ECI
-            )
-            real_pos = state[:3]
+            try:
+                state = ephemeris_handler.get_state(
+                    name, epoch,
+                    observer_body="sun",
+                    frame=CoordinateFrame.J2000_ECI
+                )
+                real_pos = state[:3]
 
-            # Check for suspiciously small position (likely analytic model failure)
-            if np.linalg.norm(real_pos) < 1e8:
-                fallback_ok = False
-                if hasattr(ephemeris_handler, '_spice_if') and ephemeris_handler._spice_if is not None:
-                    try:
-                        state = ephemeris_handler._spice_if.get_state(
-                            name, epoch, observer="sun",
-                            frame=CoordinateFrame.J2000_ECI
-                        )
-                        real_pos = state[:3]
-                        fallback_ok = True
-                    except Exception:
-                        pass
-                if not fallback_ok:
-                    warnings.warn(f"SPICE not available for {name}, position may be invalid.")
+                # Check for suspiciously small position (likely analytic model failure)
+                if np.linalg.norm(real_pos) < 1e8:
+                    fallback_ok = False
+                    if hasattr(ephemeris_handler, '_spice_if') and ephemeris_handler._spice_if is not None:
+                        try:
+                            state = ephemeris_handler._spice_if.get_state(
+                                name, epoch, observer="sun",
+                                frame=CoordinateFrame.J2000_ECI
+                            )
+                            real_pos = state[:3]
+                            fallback_ok = True
+                        except Exception:
+                            pass
+                    if not fallback_ok:
+                        warnings.warn(f"Position data invalid for {name}, skipping.")
+                        continue
 
-            # Apply scale mapping
-            display_pos = self.scale_function.map_vector(real_pos)
-            planet_display_positions.append(display_pos)
-            planet_positions_real.append(real_pos)
+                # Apply scale mapping
+                display_pos = self.scale_function.map_vector(real_pos)
+                planet_data[name] = (real_pos, display_pos, data)
+            except Exception as exc:
+                warnings.warn(f"Failed to get state for {name}, skipping: {exc}")
+                continue
+
+        if not planet_data:
+            warnings.warn("No valid planetary ephemeris data; scene will only contain the Sun.")
 
         # Compute camera placement (cache after first call)
-        if not hasattr(self, '_cached_camera_height') or self._cached_camera_height is None:
-            max_display_dist = max(np.linalg.norm(p) for p in planet_display_positions)
-            self._cached_camera_height = max_display_dist * 3.0
+        if planet_data:
+            max_display_dist = max(np.linalg.norm(d[1]) for d in planet_data.values())
+        else:
+            max_display_dist = 0.0
+        if self._cached_camera_height is None:
+            self._cached_camera_height = max_display_dist * 3.0 if max_display_dist > 0 else 1.0
         camera_height = self._cached_camera_height
         camera_pos = np.array([0.0, 0.0, camera_height])
 
@@ -340,7 +348,7 @@ class SceneBuilder:
         scene.root.add_child(sun_node)
 
         # Second pass: create planet nodes with pixel‑aware scales
-        for (name, data), display_pos in zip(self._PLANET_DATA.items(), planet_display_positions):
+        for name, (real_pos, display_pos, data) in planet_data.items():
             dist = np.linalg.norm(display_pos - camera_pos)
             world_per_px = (2.0 * dist * math.tan(fov_rad / 2.0)) / target_vertical_px
             min_world_radius = planet_pixel_radius * world_per_px
