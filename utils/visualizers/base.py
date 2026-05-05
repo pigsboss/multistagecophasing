@@ -315,10 +315,15 @@ class SceneBuilder:
         moon_node = Ellipsoid("Moon", radii=moon_radii)
         moon_group.add_child(moon_node)
 
+        # Compute display position of Earth (after nonlinear scaling)
+        earth_display_pos = self.scale_function.map_vector(earth_pos)
+
         # --- Camera ---
         camera = Camera("Main Camera")
-        camera.transform.position = np.array([5e8, 0.0, 2e8])
-        camera.target = earth_pos  # look at Earth
+        # Place camera outside the Sun, roughly one‑third of the way to Earth’s display position
+        cam_dir = earth_display_pos / np.linalg.norm(earth_display_pos)
+        camera.transform.position = cam_dir * np.linalg.norm(earth_display_pos) * 0.33
+        camera.target = earth_display_pos  # look at the displayed Earth
         scene.camera = camera
         scene.root.add_child(camera)
 
