@@ -11,12 +11,14 @@ import argparse
 import sys
 from pathlib import Path
 import os
+import numpy as np
 
 # Ensure the project root is importable (in case running from any directory)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 
 from utils.visualizers.base import SceneBuilder, LogScale
 from utils.visualizers.backends.debug import DebugRenderer
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 # Import MCPC high precision ephemeris
 try:
@@ -59,7 +61,7 @@ def main():
     config = EphemerisConfig(
         mode=EphemerisMode.SPICE,
         spice_mission_type=mission_type,
-        verbose=False
+        verbose=True      # enable detailed SPICE kernel loading output
     )
 
     eph = HighPrecisionEphemeris(config=config)
@@ -73,6 +75,18 @@ def main():
         sys.exit(1)
 
     print(f"Initialized SPICE, start epoch = {start_epoch:.3f} s", file=sys.stdout)
+
+    # SPICE health check: query Earth to ensure SPICE is actually operational
+    try:
+        test_state = eph.get_state("earth", start_epoch, observer_body="sun",
+                                   frame=CoordinateFrame.J2000_ECI)
+        if np.linalg.norm(test_state[:3]) < 1e6:
+            raise RuntimeError("SPICE returned near-zero Earth position – kernels likely missing")
+    except Exception as e:
+        print(f"SPICE self-test failed: {e}", file=sys.stderr)
+        eph.shutdown()
+        sys.exit(1)
+    print("SPICE self-test passed (Earth position valid).", file=sys.stdout)
 
     # Build time sequence
     if args.duration is not None:

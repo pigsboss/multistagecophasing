@@ -9,6 +9,7 @@ All runtime messages strictly in English per MCPC internationalization policy.
 
 from __future__ import annotations
 import numpy as np
+import warnings
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
@@ -300,6 +301,22 @@ class SceneBuilder:
                 frame=CoordinateFrame.J2000_ECI
             )
             real_pos = state[:3]
+
+            # Check for suspiciously small position (likely analytic model failure)
+            if np.linalg.norm(real_pos) < 1e8:
+                fallback_ok = False
+                if hasattr(ephemeris_handler, '_spice_if') and ephemeris_handler._spice_if is not None:
+                    try:
+                        state = ephemeris_handler._spice_if.get_state(
+                            name, epoch, observer="sun",
+                            frame=CoordinateFrame.J2000_ECI
+                        )
+                        real_pos = state[:3]
+                        fallback_ok = True
+                    except Exception:
+                        pass
+                if not fallback_ok:
+                    warnings.warn(f"SPICE not available for {name}, position may be invalid.")
 
             # Apply scale mapping
             display_pos = self.scale_function.map_vector(real_pos)
