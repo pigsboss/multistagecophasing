@@ -10,6 +10,7 @@ All runtime messages strictly in English per MCPC internationalization policy.
 from __future__ import annotations
 import numpy as np
 import warnings
+import math
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
@@ -262,6 +263,23 @@ class SceneBuilder:
         # Cache the computed camera height across calls to avoid frame‑to‑frame jitter
         self._cached_camera_height: Optional[float] = None
 
+    @staticmethod
+    def _to_ecliptic(real_pos: np.ndarray) -> Tuple[float, float, float]:
+        """Convert J2000 equatorial position to ecliptic longitude (deg), latitude (deg), distance (m)."""
+        # Rotation matrix: equatorial -> ecliptic (rotation about X by obliquity)
+        obliquity = math.radians(23.4392911)   # J2000 mean obliquity
+        R = np.array([
+            [1, 0, 0],
+            [0, math.cos(obliquity), math.sin(obliquity)],
+            [0, -math.sin(obliquity), math.cos(obliquity)]
+        ])
+        ecl = R @ real_pos
+        x, y, z = ecl
+        distance = math.hypot(z, math.hypot(x, y))
+        lng = math.degrees(math.atan2(y, x)) % 360.0
+        lat = math.degrees(math.asin(z / distance))
+        return lng, lat, distance
+
     def build_solar_system(self, epoch: float,
                            ephemeris_handler) -> Scene:
         """
@@ -290,6 +308,14 @@ class SceneBuilder:
         sun_node = Ellipsoid("Sun", radii=sun_radii, color="yellow")
 
         planet_data = {}  # name -> (real_pos, display_pos, info_dict)
+
+        # Diagnostic: which scale function is active?
+        print(f"[DIAG] ScaleFunction: {self.scale_function.__class__.__name__}")
+        if hasattr(self.scale_function, 'linear_threshold'):
+            print(f"[DIAG]   linear_threshold = {self.scale_function.linear_threshold:.3e}")
+        if hasattr(self.scale_function, 'compression'):
+            print(f"[DIAG]   compression       = {self.scale_function.compression:.3e}")
+        print(f"[DIAG]   example (1e12 m) -> {self.scale_function.map_distance(1e12):.3e} m")
 
         # First pass: collect display positions to determine camera height
         for name, data in self._PLANET_DATA.items():
@@ -320,6 +346,14 @@ class SceneBuilder:
 
                 # Apply scale mapping
                 display_pos = self.scale_function.map_vector(real_pos)
+
+                # Ecliptic coordinates
+                ecl_lng, ecl_lat, ecl_dist = self._to_ecliptic(real_pos)
+                print(f"[DIAG] {name.capitalize():8s} "
+                      f"ecl: l={ecl_lng:7.2f}° b={ecl_lat:+7.2f}° "
+                      f"real={real_pos!r} "
+                      f"display={display_pos!r}")
+
                 planet_data[name] = (real_pos, display_pos, data)
             except Exception as exc:
                 warnings.warn(f"Failed to get state for {name}, skipping: {exc}")
@@ -381,7 +415,14 @@ class SceneBuilder:
         print(f"[DIAG] Sun at {sun_node.transform.position}, scale={sun_node.transform.scale[0]:.3e}")
         for child in scene.root.children:
             if isinstance(child, Ellipsoid) and child.name != "Sun":
-                print(f"[DIAG] {child.name} at {child.transform.position}, scale={child.transform.scale[0]:.3e}")
+                pos = child.transform.position
+                dist_to_cam = np.linalg.norm(pos - camera_pos)
+                world_per_px = (2.0 * dist_to_cam * math.tan(fov_rad / 2.0)) / target_vertical_px
+                w_radius = child.radii[0] * child.transform.scale[0]
+                print(f"[DIAG] {child.name:8s} pos={pos!r} "
+                      f"dist_cam={dist_to_cam:.3e} m "
+                      f"world_radius={w_radius:.3e} m "
+                      f"scale={child.transform.scale[0]:.3e}")
         print(f"[DIAG] Camera target={camera.target} pos={camera.transform.position}")
 
         return scene
