@@ -340,22 +340,27 @@ class HighPrecisionEphemeris(Ephemeris):
         coord_frame = self._normalize_frame(frame)
         
         # 根据计算模式选择计算方法
-        if self.config.mode == EphemerisMode.SPICE and self._spice_initialized:
+        if self.config.mode == EphemerisMode.SPICE:
+            if not self._spice_initialized:
+                raise SPICEError(
+                    "SPICE not initialized. Cannot compute state for "
+                    f"{target.value} relative to {observer.value}."
+                )
             return self._compute_spice_state(target, observer, epoch, coord_frame, abcorr)
-        elif self.config.mode == EphemerisMode.ANALYTICAL:
+        
+        if self.config.mode == EphemerisMode.ANALYTICAL:
             return self._compute_analytical_state(target, observer, epoch, coord_frame)
-        elif self.config.mode == EphemerisMode.CRTBP:
+        
+        if self.config.mode == EphemerisMode.CRTBP:
             return self._compute_crtbp_state(target, observer, epoch, coord_frame)
-        elif self.config.mode == EphemerisMode.NUMERICAL:
+        
+        if self.config.mode == EphemerisMode.NUMERICAL:
             return self._compute_numerical_state(target, observer, epoch, coord_frame)
-        elif self.config.mode == EphemerisMode.EXTERNAL:
+        
+        if self.config.mode == EphemerisMode.EXTERNAL:
             return self._compute_external_state(target, observer, epoch, coord_frame)
-        else:
-            # 如果 SPICE 初始化失败，回退到解析模式
-            if self.config.mode == EphemerisMode.SPICE:
-                warnings.warn("SPICE not initialized, falling back to analytical mode")
-                return self._compute_analytical_state(target, observer, epoch, coord_frame)
-            raise ValueError(f"Unsupported ephemeris mode: {self.config.mode}")
+        
+        raise ValueError(f"Unsupported ephemeris mode: {self.config.mode}")
     
     def _compute_spice_state(self,
                             target: CelestialBody,
@@ -363,28 +368,15 @@ class HighPrecisionEphemeris(Ephemeris):
                             epoch: float,
                             frame: CoordinateFrame,
                             abcorr: Optional[str] = None) -> np.ndarray:
-        """
-        使用 SPICE 计算高精度状态
-        
-        Args:
-            target: 目标天体
-            observer: 观察者天体
-            epoch: 时间（秒，J2000历元）
-            frame: 坐标系
-            abcorr: 光行差修正
-            
-        Returns:
-            np.ndarray: 状态向量 [x, y, z, vx, vy, vz] (m, m/s)
-        """
+        """使用 SPICE 计算高精度状态（不回退到解析模型）"""
         if not self._spice_initialized or self._spice_interface is None:
             raise SPICEError("SPICE not initialized")
         
-        # 转换天体名称为 SPICE 格式
-        target_name = self._SPICE_BODY_MAP.get(target, target.value)
-        observer_name = self._SPICE_BODY_MAP.get(observer, observer.value)
+        # 直接使用枚举值（小写字符串）作为 SPICE 目标名
+        target_name = target.value
+        observer_name = observer.value
         
         try:
-            # 调用 SPICE 接口
             state = self._spice_interface.get_state(
                 target=target_name,
                 epoch=epoch,
@@ -393,12 +385,11 @@ class HighPrecisionEphemeris(Ephemeris):
                 abcorr=abcorr
             )
             return state
-            
         except Exception as e:
-            if self.verbose:
-                print(f"[HighPrecisionEphemeris] SPICE calculation failed: {e}, falling back to analytical mode")
-            # 回退到解析模式
-            return self._compute_analytical_state(target, observer, epoch, frame)
+            raise SPICEError(
+                f"SPICE calculation failed for target={target_name}, "
+                f"observer={observer_name}: {e}"
+            )
     
     def get_spice_rotation_matrix(self,
                                  from_frame: CoordinateFrame,
