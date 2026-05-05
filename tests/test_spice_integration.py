@@ -863,3 +863,91 @@ class TestConvenienceFunctions:
 if __name__ == "__main__":
     # Manual test execution
     pytest.main([__file__, "-v", "--tb=short"])
+
+
+# ============================================================================
+# Solar-System Coverage Verification
+# ============================================================================
+
+class TestSolarSystemBodyCoverage:
+    """
+    Verify that all major solar-system bodies are queryable via SPICE.
+    Catches NAIF-ID mismatches and incomplete kernel files.
+    """
+
+    SOLAR_SYSTEM_CASES = [
+        # (body_name, expected_naif_id, min_dist_km, max_dist_km)
+        ("mercury", 1, 40e6, 80e6),
+        ("venus", 2, 100e6, 120e6),
+        ("earth", 399, 147e6, 152e6),
+        ("mars", 4, 200e6, 250e6),
+        ("jupiter", 5, 740e6, 816e6),
+        ("saturn", 6, 1350e6, 1510e6),
+        ("uranus", 7, 2700e6, 3000e6),
+        ("neptune", 8, 4300e6, 4600e6),
+    ]
+
+    @pytest.mark.parametrize(
+        "body_name,expected_id,min_dist,max_dist", SOLAR_SYSTEM_CASES
+    )
+    def test_body_state_relative_to_sun(
+        self, spice_interface, body_name, expected_id, min_dist, max_dist
+    ):
+        """Each planet must resolve to the correct NAIF ID and return a valid state."""
+        calc = spice_interface._calc
+
+        # Verify NAIF-ID resolution
+        resolved_str = calc._to_naif_id(body_name)
+        assert int(resolved_str) == expected_id, (
+            f"NAIF ID mismatch for {body_name}: expected {expected_id}, got {resolved_str}"
+        )
+
+        # Geometric query (no aberration) to rule out LT issues
+        state = spice_interface.get_state(
+            body_name,
+            epoch=831211269.185,  # 2026-05-05
+            observer="sun",
+            frame=CoordinateFrame.J2000_ECI,
+            abcorr="NONE",
+        )
+        assert isinstance(state, np.ndarray) and state.shape == (6,)
+
+        dist_km = np.linalg.norm(state[:3]) / 1e3
+        vel_kms = np.linalg.norm(state[3:6]) / 1e3
+
+        # Sanity-check distance
+        assert min_dist <= dist_km <= max_dist, (
+            f"{body_name} distance {dist_km:.1f} km out of expected range "
+            f"[{min_dist:.1f}, {max_dist:.1f}] km"
+        )
+
+        # Sanity-check velocity (planets orbit at roughly 5-60 km/s)
+        assert 5.0 < vel_kms < 70.0, (
+            f"{body_name} velocity {vel_kms:.3f} km/s is unrealistic"
+        )
+
+    def test_moon_relative_to_earth(self, spice_interface):
+        """Moon must resolve to ID 301 and sit near 384,400 km from Earth."""
+        resolved = int(spice_interface._calc._to_naif_id("moon"))
+        assert resolved == 301
+
+        state = spice_interface.get_state(
+            "moon", 0.0, "earth", CoordinateFrame.J2000_ECI, "NONE"
+        )
+        dist_km = np.linalg.norm(state[:3]) / 1e3
+        assert 350e3 <= dist_km <= 410e3, f"Moon distance {dist_km:.1f} km out of range"
+
+    def test_all_bodies_pass_together(self, spice_interface):
+        """Smoke-test: query every body in one loop; fail fast if any breaks."""
+        epoch = 831211269.185
+        failures = []
+        for body, expected_id, _, _ in self.SOLAR_SYSTEM_CASES:
+            try:
+                state = spice_interface.get_state(
+                    body, epoch, "sun", CoordinateFrame.J2000_ECI, "NONE"
+                )
+                assert np.linalg.norm(state[:3]) > 0
+            except Exception as e:
+                failures.append(f"{body}(id={expected_id}): {type(e).__name__}")
+
+        assert not failures, f"SPICE queries failed for: {failures}"
