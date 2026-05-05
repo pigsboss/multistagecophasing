@@ -118,7 +118,7 @@ def main():
     # Select renderer based on flags
     if args.debug:
         from utils.visualizers.backends.debug import DebugRenderer
-        renderer = DebugRenderer(use_vedo=use_vedo)
+        renderer = DebugRenderer()   # no arguments – pure matplotlib debug
     else:
         renderer = SimpleRenderer(use_vedo=use_vedo)
 
