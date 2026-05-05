@@ -398,13 +398,13 @@ class SPICECalculator:
         
         try:
             # 调用 SPICE spkezr 函数
-            # 传递整数 ID 给 spkezr 可避免被误解为字符串名称
+            # 传递字符串 ID 给 spkezr 以避免 CSPICE 内部错误
             state_km, lt = spice.spkezr(
-                target_id,      # int or str
+                target_id,      # str like "399"
                 epoch,
                 spice_frame,
                 abcorr,
-                observer_id     # int or str
+                observer_id     # str like "10"
             )
             
             # 转换为米制（MCPC 标准单位）
@@ -632,15 +632,15 @@ class SPICECalculator:
     def _to_naif_id(self, body: Union[str, int]) -> object:
         """
         转换天体名称为 SPICE 可识别的标识。
-        优先返回整数 ID 以保证 SPICE 正确解析。
+        优先返回字符串 ID（包含整数编码）以确保 spiceypy 正确解析。
         """
         if isinstance(body, int):
-            return body
+            return str(body)
         if isinstance(body, str):
             lower_body = body.lower()
             if lower_body in self.NAIF_IDS:
-                # Return integer ID (SPICE accepts int for body identifiers)
-                return self.NAIF_IDS[lower_body]
+                # Return string representation of NAIF integer ID (required by spiceypy)
+                return str(self.NAIF_IDS[lower_body])
             # 如果不在字典中，尝试直接使用原始字符串（可能是 SPICE 内置名称）
             # 但 SPICE 可能会解析失败，因此建议字典中覆盖所有常用名称
             return lower_body
