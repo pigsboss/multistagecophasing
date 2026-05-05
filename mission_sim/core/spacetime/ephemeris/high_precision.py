@@ -56,6 +56,8 @@ class CelestialBody(Enum):
     MERCURY = "mercury"
     JUPITER = "jupiter"
     SATURN = "saturn"
+    URANUS = "uranus"
+    NEPTUNE = "neptune"
 
 
 class EphemerisMode(Enum):
@@ -163,7 +165,9 @@ class HighPrecisionEphemeris(Ephemeris):
         CelestialBody.VENUS: "venus",
         CelestialBody.MERCURY: "mercury",
         CelestialBody.JUPITER: "jupiter",
-        CelestialBody.SATURN: "saturn"
+        CelestialBody.SATURN: "saturn",
+        CelestialBody.URANUS: "uranus",
+        CelestialBody.NEPTUNE: "neptune"
     }
     
     def __init__(self, 

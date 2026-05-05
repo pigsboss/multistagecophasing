@@ -44,3 +44,17 @@ class Telecommand:
             self.target_state = np.array(self.target_state, dtype=np.float64)
         if not isinstance(self.frame, CoordinateFrame):
             raise TypeError(f"指令的坐标系字段必须是 CoordinateFrame 枚举类型，当前为: {type(self.frame)}")
+
+
+class CelestialBody(Enum):
+    """太阳系天体枚举"""
+    SUN = "sun"
+    EARTH = "earth"
+    MOON = "moon"
+    MARS = "mars"
+    VENUS = "venus"
+    MERCURY = "mercury"
+    JUPITER = "jupiter"
+    SATURN = "saturn"
+    URANUS = "uranus"
+    NEPTUNE = "neptune"

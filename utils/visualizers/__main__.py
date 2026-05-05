@@ -54,9 +54,11 @@ def main():
         print("Error: --step must be positive.", file=sys.stderr)
         sys.exit(1)
 
-    # Configure HighPrecisionEphemeris in SPICE mode – kernel discovery is automatic
+    # Configure HighPrecisionEphemeris in SPICE mode with appropriate mission type.
+    mission_type = "interplanetary" if args.scene == "solar_system" else "earth_moon"
     config = EphemerisConfig(
         mode=EphemerisMode.SPICE,
+        spice_mission_type=mission_type,
         verbose=False
     )
 
