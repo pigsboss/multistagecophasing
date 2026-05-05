@@ -264,20 +264,30 @@ class SceneBuilder:
             epoch: Ephemeris time (seconds past J2000).
             ephemeris_handler: An instance of HighPrecisionEphemeris (SPICE mode).
         """
+        import math
         scene = Scene("Solar-System")
         scene.time = epoch
+
+        # Camera parameters (will be set later, but we compute them now for scaling)
+        fov_deg = 45.0
+        fov_rad = math.radians(fov_deg)
+        # assume a 720p vertical resolution for conservative pixel sizing
+        target_vertical_px = 720
+
+        # Desired minimum pixel radii
+        sun_pixel_radius = 50      # sun appears ~100px diameter
+        planet_pixel_radius = 15   # planets appear ~30px diameter
 
         # --- Sun at origin ---
         sun_radii = (6.957e8, 6.957e8, 6.957e8)
         sun_node = Ellipsoid("Sun", radii=sun_radii)
-        sun_node.transform.scale = np.array([0.5, 0.5, 0.5])   # slightly larger than before
-        scene.root.add_child(sun_node)
 
         # --- Planets (all direct children of root) ---
         planet_display_positions = []   # to compute camera extent
+        planet_positions_real = []      # store real heliocentric position for later use if needed
 
+        # First pass: collect display positions to determine camera height
         for name, data in self._PLANET_DATA.items():
-            # Get heliocentric state
             state = ephemeris_handler.get_state(
                 name, epoch,
                 observer_body="sun",
@@ -288,26 +298,43 @@ class SceneBuilder:
             # Apply scale mapping
             display_pos = self.scale_function.map_vector(real_pos)
             planet_display_positions.append(display_pos)
+            planet_positions_real.append(real_pos)
 
-            # Create group and ellipsoid
+        # Compute camera placement
+        max_display_dist = max(np.linalg.norm(p) for p in planet_display_positions)
+        camera_height = max_display_dist * 2.0
+        camera_pos = np.array([0.0, 0.0, camera_height])
+
+        # Distance from camera to Sun (in compressed space)
+        sun_dist = camera_height   # Sun is at origin
+        # World size per pixel at that distance
+        sun_world_per_px = (2.0 * sun_dist * math.tan(fov_rad / 2.0)) / target_vertical_px
+        sun_min_world_radius = sun_pixel_radius * sun_world_per_px
+        sun_scale = sun_min_world_radius / sun_radii[0]   # all radii equal
+        sun_node.transform.scale = np.array([sun_scale] * 3)
+        scene.root.add_child(sun_node)
+
+        # Second pass: create planet nodes with pixel‑aware scales
+        for (name, data), display_pos in zip(self._PLANET_DATA.items(), planet_display_positions):
+            dist = np.linalg.norm(display_pos - camera_pos)
+            world_per_px = (2.0 * dist * math.tan(fov_rad / 2.0)) / target_vertical_px
+            min_world_radius = planet_pixel_radius * world_per_px
+
+            real_radius = data["radii"][0]   # use equatorial radius as representative
+            scale_factor = max(min_world_radius / real_radius, 1.0)  # never shrink below natural size
+
             group = Group(name.capitalize())
             scene.root.add_child(group)
             group.transform.position = display_pos
-            # No rotation applied (can be added later with SPICE attitude)
 
             ellip = Ellipsoid(name.capitalize(), radii=data["radii"])
-            # Scale up for visibility; small planets need more boost
-            scale_factor = 10.0 if name not in ("jupiter", "saturn") else 5.0
             ellip.transform.scale = np.array([scale_factor] * 3)
             group.add_child(ellip)
 
-        # --- Camera: top‑down view ---
-        # Compute a height that encloses all planets comfortably
-        max_display_dist = max(np.linalg.norm(p) for p in planet_display_positions)
-        camera_height = max_display_dist * 2.0
+        # --- Camera ---
         camera = Camera("Top-Down Camera")
-        camera.transform.position = np.array([0.0, 0.0, camera_height])
-        camera.target = np.zeros(3)       # look at the Sun
+        camera.transform.position = camera_pos
+        camera.target = np.zeros(3)
         camera.up = np.array([0.0, 1.0, 0.0])
         scene.camera = camera
         scene.root.add_child(camera)
