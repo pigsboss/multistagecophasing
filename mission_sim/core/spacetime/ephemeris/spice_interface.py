@@ -389,7 +389,7 @@ class SPICECalculator:
         if abcorr is None:
             abcorr = self._get_default_abcorr()
         
-        # 转换目标/观察者为 NAIF ID
+        # 转换目标/观察者为 NAIF ID（可以是 int 或 str）
         target_id = self._to_naif_id(target)
         observer_id = self._to_naif_id(observer)
         
@@ -398,13 +398,13 @@ class SPICECalculator:
         
         try:
             # 调用 SPICE spkezr 函数
-            # 注意：spkezr 期望目标/观察者为字符串名称
+            # 传递整数 ID 给 spkezr 可避免被误解为字符串名称
             state_km, lt = spice.spkezr(
-                str(target_id),  # 确保转换为字符串
+                target_id,      # int or str
                 epoch,
                 spice_frame,
                 abcorr,
-                str(observer_id)  # 确保转换为字符串
+                observer_id     # int or str
             )
             
             # 转换为米制（MCPC 标准单位）
@@ -456,11 +456,11 @@ class SPICECalculator:
         
         try:
             _, lt = spice.spkezr(
-                str(target_id),  # 确保转换为字符串
+                target_id,
                 epoch,
                 spice_frame,
                 'LT',
-                str(observer_id)  # 确保转换为字符串
+                observer_id
             )
         except SpiceyError as e:
             # 如果计算失败，返回一个合理的估计值
@@ -629,18 +629,18 @@ class SPICECalculator:
         
         return np.concatenate([pos, vel])
     
-    def _to_naif_id(self, body: Union[str, int]) -> str:
+    def _to_naif_id(self, body: Union[str, int]) -> object:
         """
-        转换天体名称为 SPICE 可识别的字符串。
-        优先使用整数 ID 字符串以确保可靠解析。
+        转换天体名称为 SPICE 可识别的标识。
+        优先返回整数 ID 以保证 SPICE 正确解析。
         """
         if isinstance(body, int):
-            return str(body)
+            return body
         if isinstance(body, str):
             lower_body = body.lower()
             if lower_body in self.NAIF_IDS:
-                # 返回整数 ID 的字符串形式（如 '499'）
-                return str(self.NAIF_IDS[lower_body])
+                # Return integer ID (SPICE accepts int for body identifiers)
+                return self.NAIF_IDS[lower_body]
             # 如果不在字典中，尝试直接使用原始字符串（可能是 SPICE 内置名称）
             # 但 SPICE 可能会解析失败，因此建议字典中覆盖所有常用名称
             return lower_body
