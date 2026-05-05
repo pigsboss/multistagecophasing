@@ -629,17 +629,26 @@ class SPICECalculator:
         
         return np.concatenate([pos, vel])
     
-    def _to_naif_id(self, body: Union[str, int]) -> object:
+    def _to_naif_id(self, body: Union[str, int]) -> str:
         """
-        转换天体名称为 SPICE 可识别的标识。
-        直接使用大写名称，SPICE 接受标准 NAIF 名称。
+        Convert a body identifier to a NAIF integer-ID string.
+
+        Uses the internal NAIF_IDS dictionary for known names;
+        otherwise expects a string that already represents an integer ID.
         """
         if isinstance(body, int):
             return str(body)
         if isinstance(body, str):
-            # Use the UPPER‑CASE name; standard NAIF identifiers are e.g., 'SUN', 'MARS'.
-            return body.upper()
-        raise SPICEError(f"Unknown body identifier: {body}")
+            lower = body.lower()
+            if lower in self.NAIF_IDS:
+                return str(self.NAIF_IDS[lower])
+            # If it's already an integer string, return it unchanged.
+            try:
+                int(body)
+                return body
+            except ValueError:
+                raise SPICEError(f"Unknown body identifier: {body}")
+        raise SPICEError(f"Body identifier must be str or int, got {type(body)}")
     
     def _to_spice_frame(self, frame: Union[CoordinateFrame, str]) -> str:
         """转换 MCPC CoordinateFrame 到 SPICE 框架名"""
