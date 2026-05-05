@@ -314,7 +314,7 @@ class SPICECalculator:
     - 时间转换
     """
     
-    # NAIF ID 映射表
+    # NAIF ID 映射表（补全所有行星）
     NAIF_IDS = {
         'sun': 10,
         'mercury': 199,
@@ -325,7 +325,9 @@ class SPICECalculator:
         'mars_barycenter': 4,
         'jupiter': 599,
         'saturn': 699,
-        'l2_earth_moon': 302,  # 地月 L2 点的虚拟 ID（需自定义）
+        'uranus': 799,
+        'neptune': 899,
+        'l2_earth_moon': 302,
     }
     
     # 坐标系名称映射：MCPC -> SPICE
@@ -628,24 +630,20 @@ class SPICECalculator:
         return np.concatenate([pos, vel])
     
     def _to_naif_id(self, body: Union[str, int]) -> str:
-        """转换天体名称为 SPICE 可识别的字符串"""
+        """
+        转换天体名称为 SPICE 可识别的字符串。
+        优先使用整数 ID 字符串以确保可靠解析。
+        """
         if isinstance(body, int):
-            # 如果已经是整数，转换为字符串
             return str(body)
         if isinstance(body, str):
-            # 转换为小写以匹配字典
             lower_body = body.lower()
             if lower_body in self.NAIF_IDS:
-                # 使用字符串形式的名称（如 'moon', 'earth'）
-                # SPICE 可以通过名称解析为对应的 ID
-                return lower_body
-            # 如果已经是整数形式的字符串，直接返回
-            try:
-                int(body)  # 只是为了验证
-                return body
-            except ValueError:
-                # 可能是一个自定义的名称，直接返回
-                return body
+                # 返回整数 ID 的字符串形式（如 '499'）
+                return str(self.NAIF_IDS[lower_body])
+            # 如果不在字典中，尝试直接使用原始字符串（可能是 SPICE 内置名称）
+            # 但 SPICE 可能会解析失败，因此建议字典中覆盖所有常用名称
+            return lower_body
         raise SPICEError(f"Unknown body identifier: {body}")
     
     def _to_spice_frame(self, frame: Union[CoordinateFrame, str]) -> str:

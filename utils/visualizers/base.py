@@ -145,10 +145,13 @@ class Ellipsoid(SceneNode):
     """A celestial body or spacecraft represented as a triaxial ellipsoid.
 
     radii: (a, b, c) along local X, Y, Z axes.
+    color: colour name for rendering (e.g. 'yellow', 'blue', 'gray').
     """
-    def __init__(self, name: str = "", radii: Tuple[float, float, float] = (1.0, 1.0, 1.0)):
+    def __init__(self, name: str = "", radii: Tuple[float, float, float] = (1.0, 1.0, 1.0),
+                 color: str = "white"):
         super().__init__(name)
         self.radii = np.array(radii, dtype=float)
+        self.color = color
 
 
 class Arrow(SceneNode):
@@ -211,6 +214,7 @@ class Scene:
             }
             if isinstance(node, Ellipsoid):
                 entry["radii"] = node.radii.tolist()
+                entry["color"] = node.color
             elif isinstance(node, Arrow):
                 entry.update({
                     "direction": node.direction.tolist(),
@@ -240,7 +244,7 @@ class Scene:
 class SceneBuilder:
     """Creates a Scene using high‑precision ephemeris (SPICE) and scale mapping."""
 
-    # Predefined planetary data (radii in meters, vedo colour names)
+    # Predefined planetary data (radii in meters, colour names)
     _PLANET_DATA = {
         "mercury": {"radii": (2439.4e3, 2439.4e3, 2439.4e3), "color": "grey"},
         "venus":   {"radii": (6052e3,   6052e3,   6052e3),   "color": "orange"},
@@ -254,6 +258,8 @@ class SceneBuilder:
 
     def __init__(self, scale_function: Optional[ScaleFunction] = None):
         self.scale_function = scale_function or LogScale(linear_threshold=4e8, compression=5e8)
+        # Cache the computed camera height across calls to avoid frame‑to‑frame jitter
+        self._cached_camera_height: Optional[float] = None
 
     def build_solar_system(self, epoch: float,
                            ephemeris_handler) -> Scene:
@@ -269,7 +275,7 @@ class SceneBuilder:
         scene.time = epoch
 
         # Camera parameters (will be set later, but we compute them now for scaling)
-        fov_deg = 45.0
+        fov_deg = 60.0
         fov_rad = math.radians(fov_deg)
         # assume a 720p vertical resolution for conservative pixel sizing
         target_vertical_px = 720
@@ -280,7 +286,7 @@ class SceneBuilder:
 
         # --- Sun at origin ---
         sun_radii = (6.957e8, 6.957e8, 6.957e8)
-        sun_node = Ellipsoid("Sun", radii=sun_radii)
+        sun_node = Ellipsoid("Sun", radii=sun_radii, color="yellow")
 
         # --- Planets (all direct children of root) ---
         planet_display_positions = []   # to compute camera extent
@@ -300,9 +306,11 @@ class SceneBuilder:
             planet_display_positions.append(display_pos)
             planet_positions_real.append(real_pos)
 
-        # Compute camera placement
-        max_display_dist = max(np.linalg.norm(p) for p in planet_display_positions)
-        camera_height = max_display_dist * 2.0
+        # Compute camera placement (cache after first call)
+        if not hasattr(self, '_cached_camera_height') or self._cached_camera_height is None:
+            max_display_dist = max(np.linalg.norm(p) for p in planet_display_positions)
+            self._cached_camera_height = max_display_dist * 3.0
+        camera_height = self._cached_camera_height
         camera_pos = np.array([0.0, 0.0, camera_height])
 
         # Distance from camera to Sun (in compressed space)
@@ -327,7 +335,7 @@ class SceneBuilder:
             scene.root.add_child(group)
             group.transform.position = display_pos
 
-            ellip = Ellipsoid(name.capitalize(), radii=data["radii"])
+            ellip = Ellipsoid(name.capitalize(), radii=data["radii"], color=data["color"])
             ellip.transform.scale = np.array([scale_factor] * 3)
             group.add_child(ellip)
 
@@ -336,6 +344,7 @@ class SceneBuilder:
         camera.transform.position = camera_pos
         camera.target = np.zeros(3)
         camera.up = np.array([0.0, 1.0, 0.0])
+        camera.fov = fov_deg
         scene.camera = camera
         scene.root.add_child(camera)
 
@@ -357,7 +366,8 @@ class SceneBuilder:
         scene.time = epoch
 
         # --- Sun (root) ---
-        sun_node = Ellipsoid("Sun", radii=(6.957e8, 6.957e8, 6.957e8))
+        sun_node = Ellipsoid("Sun", radii=(6.957e8, 6.957e8, 6.957e8),
+                             color="yellow")
         sun_node.transform.scale = np.array([0.05, 0.05, 0.05])   # shrink for debug
         scene.root.add_child(sun_node)
 
@@ -392,7 +402,7 @@ class SceneBuilder:
         earth_group.transform.position = earth_display_pos  # use display coordinates
         earth_group.transform.rotation = earth_rot
 
-        earth_node = Ellipsoid("Earth", radii=earth_radii)
+        earth_node = Ellipsoid("Earth", radii=earth_radii, color="blue")
         earth_node.transform.scale = np.array([10.0, 10.0, 10.0])
         earth_group.add_child(earth_node)
 
@@ -416,7 +426,7 @@ class SceneBuilder:
         moon_group.transform.position = moon_display_pos
         moon_group.transform.rotation = moon_rot
 
-        moon_node = Ellipsoid("Moon", radii=moon_radii)
+        moon_node = Ellipsoid("Moon", radii=moon_radii, color="gray")
         moon_node.transform.scale = np.array([10.0, 10.0, 10.0])
         moon_group.add_child(moon_node)
 

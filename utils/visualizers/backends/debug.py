@@ -67,7 +67,7 @@ class DebugRenderer(Renderer):
     # ------------------------------------------------------------------
     def _vedo_render_interactive(self, scene: Scene):
         import vedo
-        plotter = vedo.Plotter()
+        plotter = vedo.Plotter(bg="black")
         self._draw_scene(scene, plotter)
         # Set camera from scene (if defined)
         if scene.camera:
@@ -82,7 +82,7 @@ class DebugRenderer(Renderer):
     # ------------------------------------------------------------------
     def _vedo_render_frame(self, scene: Scene, frame_index: int, output_dir: str):
         import vedo
-        plotter = vedo.Plotter(offscreen=True)
+        plotter = vedo.Plotter(offscreen=True, bg="black")
         self._draw_scene(scene, plotter)
         # Set camera from scene
         if scene.camera:
@@ -131,15 +131,8 @@ class DebugRenderer(Renderer):
 
             # ---------- Draw geometry ----------
             if isinstance(node, Ellipsoid):
-                # Colour by name
-                if "Sun" in node.name:
-                    color = "yellow"
-                elif "Earth" in node.name:
-                    color = "blue"
-                elif "Moon" in node.name:
-                    color = "gray"
-                else:
-                    color = "white"
+                # Use colour attribute if present, fall back to white
+                colour = getattr(node, 'color', 'white')
 
                 effective_radii = node.radii * node.transform.scale
                 S = np.eye(4)
@@ -149,7 +142,7 @@ class DebugRenderer(Renderer):
 
                 full_transform = mat @ S
 
-                sph = vedo.Sphere(pos=(0, 0, 0), r=1.0, c=color, res=24)
+                sph = vedo.Sphere(pos=(0, 0, 0), r=1.0, c=colour, res=24)
                 vtk_mat = vtk.vtkMatrix4x4()
                 for i in range(4):
                     for j in range(4):
