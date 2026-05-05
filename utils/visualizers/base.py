@@ -280,61 +280,51 @@ class SceneBuilder:
         except Exception:
             pass  # keep identity if SPICE does not provide it
 
-        # --- Scaled group for Sun‑Earth distance compression ---
-        scaled_se = ScaledGroup("Sun-Earth Scale", scale_function=self.scale_function)
-        scene.root.add_child(scaled_se)
+        # Compute display position of Earth (after nonlinear scaling)
+        earth_display_pos = self.scale_function.map_vector(earth_pos)
 
+        # Earth group placed at display position under root (no scaling)
         earth_group = Group("Earth")
-        scaled_se.add_child(earth_group)
-        earth_group.transform.position = earth_pos
+        scene.root.add_child(earth_group)
+        earth_group.transform.position = earth_display_pos  # use display coordinates
         earth_group.transform.rotation = earth_rot
 
         earth_node = Ellipsoid("Earth", radii=earth_radii)
-        earth_node.transform.scale = np.array([10.0, 10.0, 10.0])  # enlarge for debug
+        earth_node.transform.scale = np.array([10.0, 10.0, 10.0])
         earth_group.add_child(earth_node)
 
-        # --- Moon relative to Earth (placed in inertial space, NOT child of rotating Earth) ---
+        # --- Moon: compute heliocentric display position = Earth_display + Moon_rel ---
         moon_state = ephemeris_handler.get_state(
             "moon", epoch,
             observer_body="earth",
             frame=CoordinateFrame.J2000_ECI
         )
-        moon_rel_pos = moon_state[:3]                # Moon position relative to Earth
-        moon_pos_j2000 = earth_pos + moon_rel_pos    # Moon position in heliocentric J2000
+        moon_rel_pos = moon_state[:3]
+        moon_display_pos = earth_display_pos + moon_rel_pos   # add without scaling
 
-        # Approximate Moon ellipsoid
         moon_radii = (1737400.0, 1737400.0, 1735972.0)
-
         try:
             moon_rot = ephemeris_handler.get_moon_libration_matrix(epoch)
         except Exception:
             moon_rot = np.eye(3)
 
-        # Create Moon as a sibling of Earth under the scaled group.
-        # Its local position is the heliocentric position (scaling will be applied).
         moon_group = Group("Moon")
-        scaled_se.add_child(moon_group)
-        moon_group.transform.position = moon_pos_j2000
+        scene.root.add_child(moon_group)          # child of root, not of Earth
+        moon_group.transform.position = moon_display_pos
         moon_group.transform.rotation = moon_rot
 
         moon_node = Ellipsoid("Moon", radii=moon_radii)
-        moon_node.transform.scale = np.array([10.0, 10.0, 10.0])  # enlarge for debug
+        moon_node.transform.scale = np.array([10.0, 10.0, 10.0])
         moon_group.add_child(moon_node)
 
-        # Compute display position of Earth (after nonlinear scaling)
-        earth_display_pos = self.scale_function.map_vector(earth_pos)
-
-        # --- Camera ---
+        # Camera – look at Earth's display position (Moon is now offset visibly)
         camera = Camera("Main Camera")
-        # Position the camera halfway between the Sun and Earth in display space,
-        # but offset upward for a better perspective.
         sun_center = np.zeros(3)
         mid_point = (sun_center + earth_display_pos) / 2.0
-        up = np.array([0.0, 0.0, 1.0])
-        cam_pos = mid_point + np.array([0.0, 0.0, 1e9])  # place above the orbital plane
+        cam_pos = mid_point + np.array([0.0, 0.0, 1e9])
         camera.transform.position = cam_pos
-        camera.target = earth_display_pos  # still look toward Earth
-        camera.up = up
+        camera.target = earth_display_pos
+        camera.up = np.array([0.0, 0.0, 1.0])
         scene.camera = camera
         scene.root.add_child(camera)
 
