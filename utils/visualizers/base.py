@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 
+from mission_sim.core.spacetime.ids import CoordinateFrame
+
 
 # ---------------------------------------------------------------------------
 # Scale Functions (non‑hardcoded, swappable at runtime)
@@ -256,8 +258,11 @@ class SceneBuilder:
         scene.root.add_child(sun_node)
 
         # --- Earth heliocentric state ---
-        earth_state = ephemeris_handler.get_state("earth", epoch, observer="sun",
-                                                  frame="J2000")
+        earth_state = ephemeris_handler.get_state(
+            "earth", epoch,
+            observer_body="sun",
+            frame=CoordinateFrame.J2000_ECI
+        )
         earth_pos = earth_state[:3]
 
         # WGS84 ellipsoid
@@ -266,8 +271,11 @@ class SceneBuilder:
         # Earth rotation matrix (J2000 → IAU_EARTH)
         earth_rot = np.eye(3)
         try:
-            earth_rot = ephemeris_handler.get_rotation_matrix(
-                "J2000", "IAU_EARTH", epoch)
+            earth_rot = ephemeris_handler.get_spice_rotation_matrix(
+                CoordinateFrame.J2000_ECI,
+                CoordinateFrame.IAU_EARTH,
+                epoch
+            )
         except Exception:
             pass  # keep identity if SPICE does not provide it
 
@@ -284,8 +292,11 @@ class SceneBuilder:
         earth_group.add_child(earth_node)
 
         # --- Moon relative to Earth (no extra scaling) ---
-        moon_state = ephemeris_handler.get_state("moon", epoch, observer="earth",
-                                                 frame="J2000")
+        moon_state = ephemeris_handler.get_state(
+            "moon", epoch,
+            observer_body="earth",
+            frame=CoordinateFrame.J2000_ECI
+        )
         moon_pos = moon_state[:3]
 
         # Approximate Moon ellipsoid
