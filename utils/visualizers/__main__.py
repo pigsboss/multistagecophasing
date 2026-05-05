@@ -31,6 +31,36 @@ except ImportError as e:
     sys.exit(1)
 
 
+# ---------------------------------------------------------------------------
+# Time duration parser (supports optional unit suffixes)
+# ---------------------------------------------------------------------------
+
+def _parse_time_duration(val: str) -> float:
+    """
+    Parse a duration string with optional unit suffix.
+    Supported: plain seconds (no suffix), 'jd' (julian day), 'jy' (julian year).
+    Returns the value in seconds.
+    """
+    import re
+    val = val.strip().lower()
+    match = re.match(r'^([-+]?[0-9]*\.?[0-9]+)\s*(jd|jy)?$', val)
+    if not match:
+        raise ValueError(
+            f"Invalid time duration: '{val}'. "
+            f"Expected a number optionally followed by 'jd' or 'jy'."
+        )
+    number = float(match.group(1))
+    suffix = match.group(2)
+    if suffix == 'jd':
+        return number * 86400.0               # Julian day = 86400 s
+    elif suffix == 'jy':
+        return number * 31557600.0            # Julian year = 365.25 d * 86400 s
+    else:
+        return number                         # seconds (no suffix)
+
+
+# ---------------------------------------------------------------------------
+
 def main():
     parser = argparse.ArgumentParser(
         description="MCPC 3D Scene Visualizer")
@@ -39,10 +69,10 @@ def main():
                         help="Which scene to render (default: earth_moon)")
     parser.add_argument("--time", type=str, default="2026-04-10T12:00:00",
                         help="UTC start time in ISO format")
-    parser.add_argument("--duration", type=float, default=None,
-                        help="Total simulation duration in seconds")
-    parser.add_argument("--step", type=float, default=3600,
-                        help="Time step between frames in seconds (default: 3600)")
+    parser.add_argument("--duration", type=str, default=None,
+                        help="Total simulation duration (e.g. 86400, 1jd, 0.5jy) – default unit: seconds")
+    parser.add_argument("--step", type=str, default="3600",
+                        help="Time step between frames (e.g. 3600, 1jd, 0.5jy) – default unit: seconds")
     parser.add_argument("--vedo", action="store_true",
                         help="Use vedo for 3D output")
     parser.add_argument("--debug", action="store_true",
@@ -50,6 +80,15 @@ def main():
     parser.add_argument("--output", type=str, default=None,
                         help="Directory to save PNG frames (vedo required)")
     args = parser.parse_args()
+
+    # Parse and convert duration/step from human‑readable units
+    try:
+        if args.duration is not None:
+            args.duration = _parse_time_duration(args.duration)
+        args.step = _parse_time_duration(args.step)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
 
     if args.duration is not None and args.duration <= 0:
         print("Error: --duration must be positive.", file=sys.stderr)
