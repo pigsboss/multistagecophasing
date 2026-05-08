@@ -11,7 +11,7 @@ from ..base import (
 from . import Renderer
 import numpy as np
 import vtk
-from typing import Optional
+from typing import Optional, List, Tuple
 import sys
 from pathlib import Path
 
@@ -63,22 +63,64 @@ class SimpleRenderer(Renderer):
             self._print_node(child, indent + 1)
 
     # ------------------------------------------------------------------
+    # Node collection (identical to debug.py logic)
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _collect_ellipsoid_nodes(node: SceneNode, parent_pos: np.ndarray,
+                                 out: List[Tuple[str, np.ndarray, str]]):
+        """Depth‑first traversal that accumulates world positions (same as debug.py)."""
+        world_pos = parent_pos + node.transform.position
+
+        if isinstance(node, Ellipsoid):
+            colour = getattr(node, 'color', 'white')
+            out.append((node.name, world_pos, colour))
+        for child in node.children:
+            SimpleRenderer._collect_ellipsoid_nodes(child, world_pos, out)
+
+    # ------------------------------------------------------------------
     # Vedo – interactive single frame
     # ------------------------------------------------------------------
     def _vedo_render_interactive(self, scene: Scene):
         import vedo
         plotter = vedo.Plotter(bg="black")
-        self._draw_scene(scene, plotter)
-        # Hardcoded camera: top-down ortho + Sun centred, ±15 AU view
-        au = 149597870700.0  # meters
+
+        # Collect bodies exactly like debug.py
+        bodies: List[Tuple[str, np.ndarray, str]] = []
+        self._collect_ellipsoid_nodes(scene.root, np.zeros(3), bodies)
+
+        if not bodies:
+            print("[SIMPLE] No Ellipsoid nodes found.", file=sys.stderr)
+            plotter.show(interactive=True)
+            return
+
+        # Determine unit and limits like debug.py
+        scene_lower = scene.name.lower()
+        if "solar" in scene_lower:
+            unit_factor = 149597870700.0   # 1 AU in metres
+            view_limit = 15.0              # ±15 AU
+        else:
+            unit_factor = 3.844e8          # 1 LD in metres
+            view_limit = 5.0               # ±5 LD
+
+        # Create vedo spheres at display positions (top-down view: x, y only, z=0)
+        for name, pos, color in bodies:
+            x = pos[0] / unit_factor
+            y = pos[1] / unit_factor
+            # Size for visibility (not to real scale)
+            radius = 0.5 if name.lower() == 'sun' else 0.2
+            sph = vedo.Sphere(pos=(x, y, 0), r=radius, c=color, res=24)
+            plotter.add(sph)
+            # Label
+            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, 0), s=0.3, c='white')
+            plotter.add(lbl)
+
+        # Camera: top-down orthographic, strictly matching debug.py's xlim/ylim
         plotter.camera.SetParallelProjection(True)
-        plotter.camera.SetParallelScale(15.0 * au)
-        plotter.camera.SetPosition(0.0, 0.0, 15.0 * au)  # far above XY plane
-        plotter.camera.SetFocalPoint(0.0, 0.0, 0.0)        # Sun at origin
-        plotter.camera.SetViewUp(0.0, 1.0, 0.0)            # Y up
-        # Ensure clipping planes cover the full scene depth (AU scale)
-        plotter.camera.SetClippingRange(1e10, 1e14)  # 10,000 km to 1,000 AU
-        # Ensure square window so that ±15 AU is visible in both X and Y
+        plotter.camera.SetParallelScale(view_limit)   # shows -15..15 or -5..5
+        plotter.camera.SetPosition(0.0, 0.0, 10.0)    # above XY plane
+        plotter.camera.SetFocalPoint(0.0, 0.0, 0.0)   # look at origin (Sun)
+        plotter.camera.SetViewUp(0.0, 1.0, 0.0)
+        plotter.camera.SetClippingRange(0.1, 100.0)
         plotter.size = (800, 800)
         plotter.show(interactive=True, resetcam=False)
 
@@ -87,20 +129,48 @@ class SimpleRenderer(Renderer):
     # ------------------------------------------------------------------
     def _vedo_render_frame(self, scene: Scene, frame_index: int, output_dir: str):
         import vedo
+        from pathlib import Path
         plotter = vedo.Plotter(offscreen=True, bg="black")
-        self._draw_scene(scene, plotter)
-        # Hardcoded camera: top-down ortho + Sun centred, ±15 AU view
-        au = 149597870700.0  # meters
+
+        # Collect bodies exactly like debug.py
+        bodies: List[Tuple[str, np.ndarray, str]] = []
+        self._collect_ellipsoid_nodes(scene.root, np.zeros(3), bodies)
+
+        if not bodies:
+            print("[SIMPLE] No Ellipsoid nodes found.", file=sys.stderr)
+            plotter.close()
+            return
+
+        # Determine unit and limits like debug.py
+        scene_lower = scene.name.lower()
+        if "solar" in scene_lower:
+            unit_factor = 149597870700.0
+            view_limit = 15.0
+        else:
+            unit_factor = 3.844e8
+            view_limit = 5.0
+
+        # Create vedo spheres
+        for name, pos, color in bodies:
+            x = pos[0] / unit_factor
+            y = pos[1] / unit_factor
+            radius = 0.5 if name.lower() == 'sun' else 0.2
+            sph = vedo.Sphere(pos=(x, y, 0), r=radius, c=color, res=24)
+            plotter.add(sph)
+            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, 0), s=0.3, c='white')
+            plotter.add(lbl)
+
+        # Camera setup identical to interactive mode
         plotter.camera.SetParallelProjection(True)
-        plotter.camera.SetParallelScale(15.0 * au)
-        plotter.camera.SetPosition(0.0, 0.0, 15.0 * au)
+        plotter.camera.SetParallelScale(view_limit)
+        plotter.camera.SetPosition(0.0, 0.0, 10.0)
         plotter.camera.SetFocalPoint(0.0, 0.0, 0.0)
         plotter.camera.SetViewUp(0.0, 1.0, 0.0)
-        # Ensure clipping planes cover the full scene depth (AU scale)
-        plotter.camera.SetClippingRange(1e10, 1e14)  # 10,000 km to 1,000 AU
+        plotter.camera.SetClippingRange(0.1, 100.0)
         plotter.size = (800, 800)
+
         filename = Path(output_dir) / f"frame_{frame_index:04d}.png"
-        plotter.show(interactive=False, resetcam=False)          # render offscreen
+        plotter.show(interactive=False, resetcam=False)
         plotter.screenshot(str(filename))
         print(f"Saved {filename}", file=sys.stderr)
         plotter.close()
