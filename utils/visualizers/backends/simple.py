@@ -102,16 +102,17 @@ class SimpleRenderer(Renderer):
             unit_factor = 3.844e8          # 1 LD in metres
             view_limit = 5.0               # ±5 LD
 
-        # Create vedo spheres at display positions (top-down view: x, y only, z=0)
+        # Create vedo spheres at display positions (full 3D)
         for name, pos, color in bodies:
             x = pos[0] / unit_factor
             y = pos[1] / unit_factor
+            z = pos[2] / unit_factor
             # Size for visibility (not to real scale)
             radius = 0.5 if name.lower() == 'sun' else 0.2
-            sph = vedo.Sphere(pos=(x, y, 0), r=radius, c=color, res=24)
+            sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
             plotter.add(sph)
-            # Label
-            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, 0), s=0.3, c='white')
+            # Label at same depth as body
+            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
             plotter.add(lbl)
 
         # Camera: top-down orthographic, strictly matching debug.py's xlim/ylim
@@ -150,14 +151,15 @@ class SimpleRenderer(Renderer):
             unit_factor = 3.844e8
             view_limit = 5.0
 
-        # Create vedo spheres
+        # Create vedo spheres at display positions (full 3D)
         for name, pos, color in bodies:
             x = pos[0] / unit_factor
             y = pos[1] / unit_factor
+            z = pos[2] / unit_factor
             radius = 0.5 if name.lower() == 'sun' else 0.2
-            sph = vedo.Sphere(pos=(x, y, 0), r=radius, c=color, res=24)
+            sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
             plotter.add(sph)
-            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, 0), s=0.3, c='white')
+            lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
             plotter.add(lbl)
 
         # Camera setup identical to interactive mode
