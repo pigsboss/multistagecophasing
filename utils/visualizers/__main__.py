@@ -97,6 +97,12 @@ def main():
     parser.add_argument("--parallel-projection", action="store_true",
                         help="Use parallel/orthographic projection "
                              "(default: perspective)")
+    parser.add_argument("--size-strategy", type=str, default="compress",
+                        choices=["uniform", "compress"],
+                        help="Visual size strategy for celestial bodies. "
+                             "uniform: all bodies radius = 0.1 AU; "
+                             "compress: Sun radius = 0.1 AU, others scaled by "
+                             "compressed true ratio (default: compress)")
     args = parser.parse_args()
 
     # Parse and convert duration/step from human‑readable units
@@ -179,6 +185,7 @@ def main():
         'fov': args.cam_fov,
         'resolution': tuple(map(int, args.resolution.split('x'))),
         'parallel': args.parallel_projection,
+        'size_strategy': args.size_strategy,
     }
 
     # Select renderer based on flags

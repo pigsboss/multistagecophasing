@@ -64,17 +64,17 @@ class SimpleRenderer(Renderer):
             self._print_node(child, indent + 1)
 
     # ------------------------------------------------------------------
-    # Node collection (identical to debug.py logic)
+    # Node collection (updated to return radii)
     # ------------------------------------------------------------------
     @staticmethod
     def _collect_ellipsoid_nodes(node: SceneNode, parent_pos: np.ndarray,
-                                 out: List[Tuple[str, np.ndarray, str]]):
-        """Depth‑first traversal that accumulates world positions (same as debug.py)."""
+                                 out: List[Tuple[str, np.ndarray, str, np.ndarray]]):
+        """Depth‑first traversal that accumulates world positions and radii."""
         world_pos = parent_pos + node.transform.position
 
         if isinstance(node, Ellipsoid):
             colour = getattr(node, 'color', 'white')
-            out.append((node.name, world_pos, colour))
+            out.append((node.name, world_pos, colour, node.radii.copy()))
         for child in node.children:
             SimpleRenderer._collect_ellipsoid_nodes(child, world_pos, out)
 
@@ -85,8 +85,8 @@ class SimpleRenderer(Renderer):
         import vedo
         plotter = vedo.Plotter(bg="black")
 
-        # Collect bodies exactly like debug.py
-        bodies: List[Tuple[str, np.ndarray, str]] = []
+        # Collect bodies (now includes radii)
+        bodies: List[Tuple[str, np.ndarray, str, np.ndarray]] = []
         self._collect_ellipsoid_nodes(scene.root, np.zeros(3), bodies)
 
         if not bodies:
@@ -107,6 +107,7 @@ class SimpleRenderer(Renderer):
         cam_fov = self.camera_config.get('fov', 60.0)
         cam_res = self.camera_config.get('resolution', (800, 800))
         use_parallel = self.camera_config.get('parallel', False)
+        size_strategy = self.camera_config.get('size_strategy', 'compress')
 
         # Parse camera position (default: top-down view)
         cam_pos_str = self.camera_config.get('pos')
@@ -119,8 +120,8 @@ class SimpleRenderer(Renderer):
         target_str = self.camera_config.get('target', '0,0,0')
         target_body = target_str.lower()
 
-        # Build body lookup for targeting
-        body_dict = {name.lower(): (pos / unit_factor) for name, pos, _ in bodies}
+        # Build body lookup for targeting (ignore radii)
+        body_dict = {name.lower(): (pos / unit_factor) for name, pos, _, _ in bodies}
 
         if target_body in body_dict:
             cam_target = body_dict[target_body]
@@ -148,14 +149,29 @@ class SimpleRenderer(Renderer):
         plotter.camera.SetViewUp(0.0, 1.0, 0.0)
         plotter.camera.SetClippingRange(0.1, 100.0)
 
+        # ----- Determine size strategy -----
+        sun_real_radius = 6.957e8   # default
+        for name, _, _, radii in bodies:
+            if name.lower() == 'sun':
+                sun_real_radius = radii[0]
+                break
+
         # Create vedo spheres at display positions (full 3D)
-        for name, pos, color in bodies:
+        for name, pos, color, radii in bodies:
             x = pos[0] / unit_factor
             y = pos[1] / unit_factor
             z = pos[2] / unit_factor
-            # Size for visibility (not to real scale)
-            radius = 0.05 if name.lower() == 'sun' else 0.2
-            sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
+
+            if size_strategy == 'uniform':
+                display_radius = 0.1
+            else:
+                # compress: keep Sun at 0.1 AU, compress others by cube root of true ratio
+                real_radius = radii[0]
+                ratio = real_radius / sun_real_radius if sun_real_radius > 0 else 1.0
+                compressed_ratio = max(ratio ** (1/3), 1e-3)
+                display_radius = max(0.02, 0.1 * compressed_ratio)
+
+            sph = vedo.Sphere(pos=(x, y, z), r=display_radius, c=color, res=24)
             plotter.add(sph)
             # Label at same depth as body
             lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
@@ -179,8 +195,8 @@ class SimpleRenderer(Renderer):
         from pathlib import Path
         plotter = vedo.Plotter(offscreen=True, bg="black")
 
-        # Collect bodies exactly like debug.py
-        bodies: List[Tuple[str, np.ndarray, str]] = []
+        # Collect bodies (now includes radii)
+        bodies: List[Tuple[str, np.ndarray, str, np.ndarray]] = []
         self._collect_ellipsoid_nodes(scene.root, np.zeros(3), bodies)
 
         if not bodies:
@@ -201,6 +217,7 @@ class SimpleRenderer(Renderer):
         cam_fov = self.camera_config.get('fov', 60.0)
         cam_res = self.camera_config.get('resolution', (800, 800))
         use_parallel = self.camera_config.get('parallel', False)
+        size_strategy = self.camera_config.get('size_strategy', 'compress')
 
         # Parse camera position
         cam_pos_str = self.camera_config.get('pos')
@@ -212,7 +229,7 @@ class SimpleRenderer(Renderer):
         # Parse camera target
         target_str = self.camera_config.get('target', '0,0,0')
         target_body = target_str.lower()
-        body_dict = {name.lower(): (pos / unit_factor) for name, pos, _ in bodies}
+        body_dict = {name.lower(): (pos / unit_factor) for name, pos, _, _ in bodies}
         if target_body in body_dict:
             cam_target = body_dict[target_body]
         else:
@@ -237,13 +254,29 @@ class SimpleRenderer(Renderer):
         plotter.camera.SetViewUp(0.0, 1.0, 0.0)
         plotter.camera.SetClippingRange(0.1, 100.0)
 
+        # ----- Determine size strategy -----
+        sun_real_radius = 6.957e8   # default
+        for name, _, _, radii in bodies:
+            if name.lower() == 'sun':
+                sun_real_radius = radii[0]
+                break
+
         # Create vedo spheres at display positions
-        for name, pos, color in bodies:
+        for name, pos, color, radii in bodies:
             x = pos[0] / unit_factor
             y = pos[1] / unit_factor
             z = pos[2] / unit_factor
-            radius = 0.05 if name.lower() == 'sun' else 0.2
-            sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
+
+            if size_strategy == 'uniform':
+                display_radius = 0.1
+            else:
+                # compress: keep Sun at 0.1 AU, compress others by cube root of true ratio
+                real_radius = radii[0]
+                ratio = real_radius / sun_real_radius if sun_real_radius > 0 else 1.0
+                compressed_ratio = max(ratio ** (1/3), 1e-3)
+                display_radius = max(0.02, 0.1 * compressed_ratio)
+
+            sph = vedo.Sphere(pos=(x, y, z), r=display_radius, c=color, res=24)
             plotter.add(sph)
             lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
             plotter.add(lbl)
