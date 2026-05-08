@@ -103,6 +103,8 @@ def main():
                              "uniform: all bodies radius = 0.1 AU; "
                              "compress: Sun radius = 0.1 AU, others scaled by "
                              "compressed true ratio (default: compress)")
+    parser.add_argument("--no-orbits", action="store_true",
+                        help="Do not draw planetary orbital trajectories")
     args = parser.parse_args()
 
     # Parse and convert duration/step from human‑readable units
@@ -186,6 +188,7 @@ def main():
         'resolution': tuple(map(int, args.resolution.split('x'))),
         'parallel': args.parallel_projection,
         'size_strategy': args.size_strategy,
+        'orbits': not args.no_orbits,
     }
 
     # Select renderer based on flags
