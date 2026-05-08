@@ -161,6 +161,14 @@ class SimpleRenderer(Renderer):
             lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
             plotter.add(lbl)
 
+        # Draw orbital trajectories
+        for child in scene.root.children:
+            if isinstance(child, Trajectory):
+                if len(child.points) > 1:
+                    pts = child.points / unit_factor  # convert meters -> AU/LD
+                    line = vedo.Line(pts, c=child.color, lw=2)
+                    plotter.add(line)
+
         plotter.show(interactive=True, resetcam=False)
 
     # ------------------------------------------------------------------
@@ -239,6 +247,14 @@ class SimpleRenderer(Renderer):
             plotter.add(sph)
             lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
             plotter.add(lbl)
+
+        # Draw orbital trajectories
+        for child in scene.root.children:
+            if isinstance(child, Trajectory):
+                if len(child.points) > 1:
+                    pts = child.points / unit_factor  # convert meters -> AU/LD
+                    line = vedo.Line(pts, c=child.color, lw=2)
+                    plotter.add(line)
 
         filename = Path(output_dir) / f"frame_{frame_index:04d}.png"
         plotter.show(interactive=False, resetcam=False)
