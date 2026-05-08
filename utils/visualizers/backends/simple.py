@@ -78,7 +78,7 @@ class SimpleRenderer(Renderer):
         plotter.camera.SetViewUp(0.0, 1.0, 0.0)            # Y up
         # Ensure square window so that ±15 AU is visible in both X and Y
         plotter.size = (800, 800)
-        plotter.show(interactive=True)
+        plotter.show(interactive=True, resetcam=False)
 
     # ------------------------------------------------------------------
     # Vedo – save a single frame (non‑interactive)
@@ -96,7 +96,7 @@ class SimpleRenderer(Renderer):
         plotter.camera.SetViewUp(0.0, 1.0, 0.0)
         plotter.size = (800, 800)
         filename = Path(output_dir) / f"frame_{frame_index:04d}.png"
-        plotter.show(interactive=False)          # render offscreen
+        plotter.show(interactive=False, resetcam=False)          # render offscreen
         plotter.screenshot(str(filename))
         print(f"Saved {filename}", file=sys.stderr)
         plotter.close()
