@@ -245,7 +245,9 @@ class SimpleRenderer(Renderer):
             elif isinstance(node, Trajectory):
                 if len(node.points) > 1:
                     transformed = np.array([world_rot @ p + world_pos for p in node.points])
-                    line = vedo.Line(transformed)
+                    # Use trajectory's own color, default to white
+                    line_color = getattr(node, 'color', 'white')
+                    line = vedo.Line(transformed, c=line_color)
                     plotter.add(line)
 
             # Recurse

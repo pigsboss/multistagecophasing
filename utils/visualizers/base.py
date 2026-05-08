@@ -169,9 +169,10 @@ class Arrow(SceneNode):
 
 class Trajectory(SceneNode):
     """A polyline (orbit trace)."""
-    def __init__(self, name: str = "", points: np.ndarray = np.empty((0, 3))):
+    def __init__(self, name: str = "", points: np.ndarray = np.empty((0, 3)), color: str = "white"):
         super().__init__(name)
         self.points = np.array(points, dtype=float)
+        self.color = color
 
 
 class Camera(SceneNode):
@@ -387,6 +388,19 @@ class SceneBuilder:
         sun_node.transform.scale = np.array([sun_scale] * 3)
         scene.root.add_child(sun_node)
 
+        # Orbital periods (seconds) – mean sidereal periods
+        orbital_periods = {
+            "mercury": 7600521.0,   # 87.97 d
+            "venus":   19414149.0,  # 224.70 d
+            "earth":   31558149.0,  # 365.25 d
+            "mars":    59355036.0,  # 686.98 d
+            "jupiter": 374335776.0, # 11.86 yr
+            "saturn":  929292480.0, # 29.46 yr
+            "uranus":  2651376000.0,# 84.01 yr
+            "neptune": 5200416000.0,# 164.8 yr
+        }
+        n_orbit_samples = 360
+
         # Second pass: create planet nodes directly under root (bypass Group wrapper)
         # DIAGNOSTIC: if this makes all 8 planets appear, vedo ignores Group.transform
         for name, (real_pos, display_pos, data) in planet_data.items():
@@ -402,6 +416,27 @@ class SceneBuilder:
             ellip.transform.position = display_pos
             ellip.transform.scale = np.array([scale_factor] * 3)
             scene.root.add_child(ellip)
+
+            # ---- Add orbital trajectory ----
+            if name in orbital_periods:
+                period = orbital_periods[name]
+                orbit_pts = []
+                for i in range(n_orbit_samples):
+                    t = epoch + i * (period / n_orbit_samples)
+                    try:
+                        st = ephemeris_handler.get_state(
+                            name, t, observer_body="sun",
+                            frame=CoordinateFrame.J2000_ECI
+                        )
+                        op = self.scale_function.map_vector(st[:3])
+                        orbit_pts.append(op)
+                    except Exception:
+                        continue
+                if len(orbit_pts) > 1:
+                    traj = Trajectory(f"{name}_orbit",
+                                      points=np.array(orbit_pts),
+                                      color=data["color"])
+                    scene.root.add_child(traj)
 
         # --- Camera ---
         camera = Camera("Top-Down Camera")
