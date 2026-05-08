@@ -154,7 +154,7 @@ class SimpleRenderer(Renderer):
             y = pos[1] / unit_factor
             z = pos[2] / unit_factor
             # Size for visibility (not to real scale)
-            radius = 0.5 if name.lower() == 'sun' else 0.2
+            radius = 0.05 if name.lower() == 'sun' else 0.2
             sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
             plotter.add(sph)
             # Label at same depth as body
@@ -242,7 +242,7 @@ class SimpleRenderer(Renderer):
             x = pos[0] / unit_factor
             y = pos[1] / unit_factor
             z = pos[2] / unit_factor
-            radius = 0.5 if name.lower() == 'sun' else 0.2
+            radius = 0.05 if name.lower() == 'sun' else 0.2
             sph = vedo.Sphere(pos=(x, y, z), r=radius, c=color, res=24)
             plotter.add(sph)
             lbl = vedo.Text3D(name, pos=(x+0.3, y+0.3, z), s=0.3, c='white')
