@@ -257,6 +257,45 @@ def unix_to_utc_string(unixtime: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# New high-performance numeric conversions (no string intermediate)
+# ---------------------------------------------------------------------------
+def utc_smooth_to_tdb(utc_smooth_sec: float) -> float:
+    """Convert smooth UTC seconds to TDB seconds since J2000.0.
+
+    This function avoids an ISO‑string round‑trip and is suitable for
+    high‑rate calls (e.g. inside N‑body propagation).
+    """
+    dt = J2000_UTC + timedelta(seconds=utc_smooth_sec)
+    leap = leap_seconds(dt)
+    tai = utc_smooth_sec + leap - TAI_OFFSET_AT_J2000
+    tt = tai + 32.184                                   # TT = TAI + 32.184 s
+    t_tt = tt / 86400.0 / 36525.0                      # Julian centuries since J2000 TT
+    g = (357.528 + 35999.05 * t_tt) * math.radians(1)
+    tdb = tt + 0.001658 * math.sin(g + 0.0167 * math.sin(g))
+    return tdb
+
+
+def tdb_to_utc_smooth(tdb_sec: float) -> float:
+    """Inverse of `utc_smooth_to_tdb` – fixed‑point iteration followed by
+    a leap‑second loop."""
+    # fixed‑point solve for TT
+    tt = tdb_sec
+    for _ in range(5):
+        t_tt = tt / 86400.0 / 36525.0
+        g = (357.528 + 35999.05 * t_tt) * math.radians(1)
+        offset = 0.001658 * math.sin(g + 0.0167 * math.sin(g))
+        tt = tdb_sec - offset
+    tai = tt - 32.184
+    # brute‑force search for the correct leap second count
+    for leap in range(0, 60):
+        utc_smooth = tai + TAI_OFFSET_AT_J2000 - leap
+        dt = J2000_UTC + timedelta(seconds=utc_smooth)
+        if leap_seconds(dt) == leap:
+            return utc_smooth
+    raise ValueError(f"Cannot convert TDB {tdb_sec} to UTC smooth")
+
+
+# ---------------------------------------------------------------------------
 # Legacy compatibility functions (mirror aliases from astro.py)
 # ---------------------------------------------------------------------------
 def utc2tai(utc_jd: float) -> float:

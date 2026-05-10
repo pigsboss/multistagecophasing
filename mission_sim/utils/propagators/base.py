@@ -122,7 +122,7 @@ def _compute_new_h(h, err, power, fac_min=0.2, fac_max=10.0):
 # ---------------------------------------------------------------------------
 
 @njit
-def _dopri_step(f, t, y, h, rtol, atol):
+def _dopri_step(f, t, y, h, rtol, atol, args=()):
     """
     执行一个 RK 步长。返回新状态 y_new（5 阶解）以及误差估计 err。
     同时计算导数 k1..k7。
@@ -131,7 +131,7 @@ def _dopri_step(f, t, y, h, rtol, atol):
     k = np.zeros((7, n), dtype=np.float64)
 
     # 阶段 1
-    k[0] = f(t, y)
+    k[0] = f(t, y, *args)
 
     # 阶段 2..7
     for s in range(1, 7):
@@ -139,7 +139,7 @@ def _dopri_step(f, t, y, h, rtol, atol):
         y_stage = y.copy()
         for j in range(s):
             y_stage += h * _BUTCHER_A[s, j] * k[j]
-        k[s] = f(t_stage, y_stage)
+        k[s] = f(t_stage, y_stage, *args)
 
     # 5 阶解（高阶）
     y_high = y.copy()
@@ -166,14 +166,14 @@ def _dopri_step(f, t, y, h, rtol, atol):
 # ---------------------------------------------------------------------------
 
 @njit
-def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20):
+def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, args=()):
     """
     自适应步长积分，从 t0 到 t_span[1]，初始步长自动选取或由 h0 指定。
     返回 (t, y_hist) 其中 t 为时间序列，y_hist 为状态序列 (N, n)。
 
     Parameters
     ----------
-    f : callable(t, y) -> ndarray
+    f : callable(t, y, *args) -> ndarray
         动力学函数，必须可被 Numba 编译。
     t0 : float
         起始时间。
@@ -187,6 +187,8 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20):
         初始步长（0 表示自动选取）。
     hmin : float, optional
         最小步长。
+    args : tuple, optional
+        传递给 f 的额外参数（f(t, y, *args)）。
     """
     t = t0
     y = y0.copy()
@@ -207,7 +209,7 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20):
             h = tf - t
 
         # 执行一步
-        y_new, err, _ = _dopri_step(f, t, y, h, rtol, atol)
+        y_new, err, _ = _dopri_step(f, t, y, h, rtol, atol, args)
 
         # 检查步长是否接受
         if _step_accepted(err, rtol, atol):
@@ -245,13 +247,13 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20):
 # ---------------------------------------------------------------------------
 
 @njit(parallel=True)
-def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
+def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
     """
     批量自适应积分。对批次中每个样本调用 integrate_dp8 独立积分。
 
     Parameters
     ----------
-    f : callable(t, y) -> ndarray
+    f : callable(t, y, *args) -> ndarray
         动力学函数 (单样本接口，y 为 shape (n,))。
     t0 : float
     y0_batch : ndarray shape (N, n)
@@ -259,6 +261,8 @@ def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
     t_span : tuple (t0, tf)
     rtol, atol : float
     h0 : float
+    args : tuple, optional
+        传递给 f 的额外参数。
 
     Returns
     -------
@@ -273,7 +277,7 @@ def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
 
     for idx in prange(N):
         y0 = y0_batch[idx]
-        t_arr, y_arr = integrate_dp8(f, t0, y0, t_span, rtol, atol, h0)
+        t_arr, y_arr = integrate_dp8(f, t0, y0, t_span, rtol, atol, h0, args=args)
         t_batch[idx] = t_arr
         y_batch[idx] = y_arr
 
@@ -308,7 +312,7 @@ def _hermite_interp(t0, y0, f0, t1, y1, f1, t_query):
 
 
 @njit
-def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
+def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
     """
     在每一步保存 [t, y], 并且记录每一步的导数 k0（位于起点）。
     之后使用 Hermite 插值在任意查询点上给出高精度值。
@@ -323,21 +327,18 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
 
     t_list = [t]
     y_list = [y.copy()]
-    f_list = [f(t, y).copy()]
+    f_list = [f(t, y, *args).copy()]
 
     while (tf - t) * direction > 0.0:
         if (t + h - tf) * direction > 0.0:
             h = tf - t
 
-        y_new, err, k = _dopri_step(f, t, y, h, rtol, atol)
+        y_new, err, k = _dopri_step(f, t, y, h, rtol, atol, args)
 
         if _step_accepted(err, rtol, atol):
             t_next = t + h
             y_next = y_new.copy()
-            f_next = k[0].copy()  # 下一时刻的导数就是步长结束时的 k1
-            # 但是我们想要 t_next 处的函数值对应的导数，可直接计算：
-            # 由于 k[0] 是 f(t, y)，而我们需要 f(t_next, y_next)
-            f_next = f(t_next, y_next).copy()
+            f_next = f(t_next, y_next, *args).copy()
 
             t_list.append(t_next)
             y_list.append(y_next)
@@ -360,10 +361,9 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
     if t_arr[-1] != tf:
         alpha = (tf - t_arr[-2]) / (t_arr[-1] - t_arr[-2])
         y_last = y_arr[-2] + alpha * (y_arr[-1] - y_arr[-2])
-        # 也可插值导数，此处简化为端点
         t_arr[-1] = tf
         y_arr[-1] = y_last
-        f_arr[-1] = f(tf, y_last).copy()
+        f_arr[-1] = f(tf, y_last, *args).copy()
 
     return t_arr, y_arr, f_arr
 
@@ -373,7 +373,7 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0):
 # ---------------------------------------------------------------------------
 
 @njit
-def integrate_dp8_simple(f, t0, y0, tf, rtol=1e-8, atol=1e-12):
+def integrate_dp8_simple(f, t0, y0, tf, rtol=1e-8, atol=1e-12, args=()):
     """简化接口：只返回最终状态。"""
-    t_arr, y_arr = integrate_dp8(f, t0, y0, (t0, tf), rtol, atol)
+    t_arr, y_arr = integrate_dp8(f, t0, y0, (t0, tf), rtol, atol, args=args)
     return y_arr[-1]
