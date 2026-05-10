@@ -4,14 +4,13 @@
 -----------------------------------------------
 从巴黎天文台的官方文件 Leap_Second.dat 中获取最新闰秒数据，
 并与本地缓存文件 mission_sim/core/spacetime/Leap_Second.dat 比较。
-支持手动/自动更新本地文件和运行时模块。
+若有差异则自动更新本地文件。
 
 用法：
-    python tools/update_leap_second.py               # 对比并显示差异
-    python tools/update_leap_second.py --sync        # 对比后自动更新本地文件和运行时表
+    python tools/update_leap_second.py
 
 依赖：
-    仅使用 Python 标准库 (urllib, datetime, argparse, re, os)。
+    仅使用 Python 标准库 (urllib, datetime, os, re, argparse)。
 """
 
 import argparse
@@ -86,8 +85,10 @@ def save_local_data(text: str) -> None:
 # ---------------------------------------------------------------------------
 # 比较与显示
 # ---------------------------------------------------------------------------
-def compare_events(local_events: List[Tuple[str, int]], remote_events: List[Tuple[str, int]]) -> None:
-    """打印两个事件列表的差异"""
+def compare_events(local_events: List[Tuple[str, int]], remote_events: List[Tuple[str, int]]) -> bool:
+    """
+    打印两个事件列表的差异，返回 True 表示有差异，False 表示一致。
+    """
     local_dict = dict(local_events)
     remote_dict = dict(remote_events)
 
@@ -100,7 +101,7 @@ def compare_events(local_events: List[Tuple[str, int]], remote_events: List[Tupl
 
     if not (added or removed or changed):
         print("✅ 本地数据与远程数据完全一致，无需更新。")
-        return
+        return False
 
     print("\n⚠️  闰秒数据存在差异：")
     if added:
@@ -115,22 +116,7 @@ def compare_events(local_events: List[Tuple[str, int]], remote_events: List[Tupl
         print("  偏移量变更:")
         for d in sorted(changed):
             print(f"    ~ {d} : {local_dict[d]} -> {remote_dict[d]}")
-
-# ---------------------------------------------------------------------------
-# 同步到运行时模块
-# ---------------------------------------------------------------------------
-def sync_to_runtime(remote_events: List[Tuple[str, int]]) -> int:
-    """将新的闰秒日期添加到 time 模块（幂等）。"""
-    from mission_sim.core.spacetime.time import add_leap_second, _LEAP_SECONDS_DATES
-
-    existing = {dt.strftime("%Y-%m-%d") for dt in _LEAP_SECONDS_DATES}
-    added = 0
-    for date_str, _ in remote_events:
-        if date_str not in existing:
-            add_leap_second(date_str)
-            added += 1
-            existing.add(date_str)
-    return added
+    return True
 
 # ---------------------------------------------------------------------------
 # 主程序
@@ -139,10 +125,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="从巴黎天文台获取最新闰秒数据，并与本地文件进行比较。"
     )
-    parser.add_argument(
-        "--sync", action="store_true",
-        help="对比后自动更新本地文件 (Leap_Second.dat) 以及运行时模块。"
-    )
+    # 无参数，自动更新本地文件
     args = parser.parse_args()
 
     # 下载远程数据
@@ -158,31 +141,21 @@ def main():
     print(f"📂 读取本地文件 {LOCAL_PATH}...")
     local_text, local_events = load_local_data()
     if not local_events:
-        print("   本地文件不存在或为空，视为全新数据。")
+        print("   本地文件不存在或为空，将创建新文件。")
 
     # 比较并显示差异
-    compare_events(local_events, remote_events)
+    has_diff = compare_events(local_events, remote_events)
 
-    if args.sync:
+    if has_diff:
         # 更新本地文件
         print("\n🔄 正在更新本地文件...")
         save_local_data(remote_text)
         print("   本地 Leap_Second.dat 已更新。")
-
-        # 更新运行时模块
-        print("🔗 正在同步到运行时模块...")
-        try:
-            added = sync_to_runtime(remote_events)
-            if added:
-                print(f"   ✅ 已添加 {added} 条新闰秒记录到 time 模块。")
-            else:
-                print("   ✅ 运行时表已是最新，无需添加。")
-        except Exception as e:
-            print(f"   ❌ 同步运行时模块失败: {e}", file=sys.stderr)
-            sys.exit(1)
     else:
-        if local_events != remote_events:
-            print("\n💡 提示：使用 --sync 参数可自动更新本地文件及运行时表。")
+        # 即使无差异，如果本地文件不存在，也要写入
+        if not local_text:
+            save_local_data(remote_text)
+            print("\n   已将远程数据保存到本地文件。")
 
     print("\n✅ 检查完成。")
 
