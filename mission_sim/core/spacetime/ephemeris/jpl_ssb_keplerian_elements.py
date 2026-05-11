@@ -1,171 +1,256 @@
 # mission_sim/core/spacetime/ephemeris/jpl_ssb_keplerian_elements.py
 """
-Hey there! Keplerian elements for solar‑system bodies at J2000.0.
+长时段太阳系天体轨道根数 (Table 2a) 与外行星平近点角修正 (Table 2b)
 
-Data source:
+数据来源：
   JPL Solar System Dynamics Group
-  Keplerian Elements and Rates, Table 1
-  (with respect to J2000.0 mean ecliptic and equinox, valid 1800 AD – 2050 AD)
+  Orbital Ephemerides of the Sun, Moon, and Planets (Standish & Williams, 1992)
+  (相对于 J2000.0 平均黄道和春分点，有效范围 3000 BC – 3000 AD)
 
-This module converts the raw columns "long.peri." and "long.node." into standard
-longitude of ascending node Ω, argument of periapsis ω, and mean anomaly M₀.
-All angles are in radians, time unit is Julian century (36525 days).
-
-Each body dictionary contains:
-  - a0, a_dot        (au, au/cy)
-  - e0, e_dot        (—, rad/cy)
-  - i0, i_dot        (rad, rad/cy)
-  - Omega0, Omega_dot (rad, rad/cy)
-  - omega0, omega_dot (rad, rad/cy)
-  - M0, M_dot        (rad, rad/cy)
-
-For EM Bary (Earth/Moon barycenter), the longitude of ascending node Ω and
-its rate are both zero.
+本模块提供：
+- 由儒略日计算自 J2000.0 起算的儒略世纪数
+- 获取任意时刻指定天体的 6 个密切开普勒根数 (半长轴已转为米，角度为弧度)
+- 对外行星自动加入 Table 2b 的长期/周期摄动项
+- 直接计算天体在 J2000 黄道坐标系中的笛卡尔状态 (m, m/s)
+- 批量获取所有行星的笛卡尔状态 (可用于 N 体传播器初始化)
 """
 
 import numpy as np
+from mission_sim.utils.solvers.base import kepler_elements_to_cartesian_batch
 
 # ---------------------------------------------------------------------------
-# 原始表格数值 (便于日后核对)
+# 天文学常数
 # ---------------------------------------------------------------------------
-_RAW = {
+_AU = 149597870700.0          # 天文单位 (m)
+_MU_SUN = 1.32712440018e20    # 太阳引力常数 (m³/s²)
+_DEG2RAD = np.pi / 180.0
+_CENTURY_DAYS = 36525.0        # 儒略世纪 (日)
+
+# ---------------------------------------------------------------------------
+# Table 2a – 原始平均根数 (J2000.0 历元, 角度及变率单位: 度)
+# ---------------------------------------------------------------------------
+_TABLE2A = {
     "Mercury": {
-        "a": (0.38709927, 0.00000037),
-        "e": (0.20563593, 0.00001906),
-        "I": (7.00497902, -0.00594749),
-        "L": (252.25032350, 149472.67411175),
-        "long.peri.": (77.45779628, 0.16047689),
-        "long.node.": (48.33076593, -0.12534081),
+        "a0": 0.38709843,  "a_dot": 0.00000000,
+        "e0": 0.20563661,  "e_dot": 0.00002123,
+        "I0":  7.00559432, "I_dot": -0.00590158,
+        "L0": 252.25166724, "L_dot": 149472.67486623,
+        "lp0": 77.45771895, "lp_dot": 0.15940013,   # 近日点经度
+        "ln0": 48.33961819, "ln_dot": -0.12214182,  # 升交点经度
     },
     "Venus": {
-        "a": (0.72333566, 0.00000390),
-        "e": (0.00677672, -0.00004107),
-        "I": (3.39467605, -0.00078890),
-        "L": (181.97909950, 58517.81538729),
-        "long.peri.": (131.60246718, 0.00268329),
-        "long.node.": (76.67984255, -0.27769418),
+        "a0": 0.72332102,  "a_dot": -0.00000026,
+        "e0": 0.00676399,  "e_dot": -0.00005107,
+        "I0": 3.39777545,  "I_dot": 0.00043494,
+        "L0": 181.97970850, "L_dot": 58517.81560260,
+        "lp0": 131.76755713, "lp_dot": 0.05679648,
+        "ln0": 76.67261496, "ln_dot": -0.27274174,
     },
     "EM Bary": {
-        "a": (1.00000261, 0.00000562),
-        "e": (0.01671123, -0.00004392),
-        "I": (-0.00001531, -0.01294668),
-        "L": (100.46457166, 35999.37244981),
-        "long.peri.": (102.93768193, 0.32327364),
-        "long.node.": (0.0, 0.0),
+        "a0": 1.00000018,  "a_dot": -0.00000003,
+        "e0": 0.01673163,  "e_dot": -0.00003661,
+        "I0": -0.00054346, "I_dot": -0.01337178,
+        "L0": 100.46691572, "L_dot": 35999.37306329,
+        "lp0": 102.93005885, "lp_dot": 0.31795260,
+        "ln0": -5.11260389, "ln_dot": -0.24123856,
     },
     "Mars": {
-        "a": (1.52371034, 0.00001847),
-        "e": (0.09339410, 0.00007882),
-        "I": (1.84969142, -0.00813131),
-        "L": (-4.55343205, 19140.30268499),
-        "long.peri.": (-23.94362959, 0.44441088),
-        "long.node.": (49.55953891, -0.29257343),
+        "a0": 1.52371243,  "a_dot": 0.00000097,
+        "e0": 0.09336511,  "e_dot": 0.00009149,
+        "I0": 1.85181869,  "I_dot": -0.00724757,
+        "L0": -4.56813164, "L_dot": 19140.29934243,
+        "lp0": -23.91744784, "lp_dot": 0.45223625,
+        "ln0": 49.71320984, "ln_dot": -0.26852431,
     },
     "Jupiter": {
-        "a": (5.20288700, -0.00011607),
-        "e": (0.04838624, -0.00013253),
-        "I": (1.30439695, -0.00183714),
-        "L": (34.39644051, 3034.74612775),
-        "long.peri.": (14.72847983, 0.21252668),
-        "long.node.": (100.47390909, 0.20469106),
+        "a0": 5.20248019,  "a_dot": -0.00002864,
+        "e0": 0.04853590,  "e_dot": 0.00018026,
+        "I0": 1.29861416,  "I_dot": -0.00322699,
+        "L0": 34.33479152, "L_dot": 3034.90371757,
+        "lp0": 14.27495244, "lp_dot": 0.18199196,
+        "ln0": 100.29282654, "ln_dot": 0.13024619,
     },
     "Saturn": {
-        "a": (9.53667594, -0.00125060),
-        "e": (0.05386179, -0.00050991),
-        "I": (2.48599187, 0.00193609),
-        "L": (49.95424423, 1222.49362201),
-        "long.peri.": (92.59887831, -0.41897216),
-        "long.node.": (113.66242448, -0.28867794),
+        "a0": 9.54149883,  "a_dot": -0.00003065,
+        "e0": 0.05550825,  "e_dot": -0.00032044,
+        "I0": 2.49424102,  "I_dot": 0.00451969,
+        "L0": 50.07571329, "L_dot": 1222.11494724,
+        "lp0": 92.86136063, "lp_dot": 0.54179478,
+        "ln0": 113.63998702, "ln_dot": -0.25015002,
     },
     "Uranus": {
-        "a": (19.18916464, -0.00196176),
-        "e": (0.04725744, -0.00004397),
-        "I": (0.77263783, -0.00242939),
-        "L": (313.23810451, 428.48202785),
-        "long.peri.": (170.95427630, 0.40805281),
-        "long.node.": (74.01692503, 0.04240589),
+        "a0": 19.18797948, "a_dot": -0.00020455,
+        "e0": 0.04685740,  "e_dot": -0.00001550,
+        "I0": 0.77298127,  "I_dot": -0.00180155,
+        "L0": 314.20276625, "L_dot": 428.49512595,
+        "lp0": 172.43404441, "lp_dot": 0.09266985,
+        "ln0": 73.96250215, "ln_dot": 0.05739699,
     },
     "Neptune": {
-        "a": (30.06992276, 0.00026291),
-        "e": (0.00859048, 0.00005105),
-        "I": (1.77004347, 0.00035372),
-        "L": (-55.12002969, 218.45945325),
-        "long.peri.": (44.96476227, -0.32241464),
-        "long.node.": (131.78422574, -0.00508664),
+        "a0": 30.06952752, "a_dot": 0.00006447,
+        "e0": 0.00895439,  "e_dot": 0.00000818,
+        "I0": 1.77005520,  "I_dot": 0.00022400,
+        "L0": 304.22289287, "L_dot": 218.46515314,
+        "lp0": 46.68158724, "lp_dot": 0.01009938,
+        "ln0": 131.78635853, "ln_dot": -0.00606302,
     },
 }
 
 # ---------------------------------------------------------------------------
-# 转换为标准 Kepler 根数 (Ω, ω, M₀) 并全部使用弧度
+# Table 2b – 外行星平近点角附加摄动项
+#   b: 二次项系数 [度/世纪²]
+#   c: 余弦振幅 [度]
+#   s: 正弦振幅 [度]
+#   f: 频率 [度/世纪]
+# 注意：函数内部会将 f 转换为弧度/世纪，用于三角函数计算
 # ---------------------------------------------------------------------------
-_deg = np.pi / 180.0
-_CENTURY = 36525.0  # Julian 世纪 (日)
+_TABLE2B = {
+    "Jupiter": {"b": -0.00012452, "c":  0.06064060, "s": -0.35635438, "f": 38.35125000},
+    "Saturn":  {"b":  0.00025899, "c": -0.13434469, "s":  0.87320147, "f": 38.35125000},
+    "Uranus":  {"b":  0.00058331, "c": -0.97731848, "s":  0.17689245, "f":  7.67025000},
+    "Neptune": {"b": -0.00041348, "c":  0.68346318, "s": -0.10162547, "f":  7.67025000},
+}
 
-PLANETS_DATA = {}
+# ---------------------------------------------------------------------------
+# 时间转换
+# ---------------------------------------------------------------------------
+def jd_to_t(jd: float) -> float:
+    """
+    将儒略日转换为自 J2000.0 起算的儒略世纪数。
 
-for name, raw in _RAW.items():
-    a0, a_dot = raw["a"]
-    e0, e_dot = raw["e"]          # e 的变化率已经是 rad/cy
-    I_deg, I_dot_deg = raw["I"]
-    L_deg, L_dot_deg = raw["L"]
-    lp_deg, lp_dot_deg = raw["long.peri."]
-    ln_deg, ln_dot_deg = raw["long.node."]
+    Parameters
+    ----------
+    jd : float
+        儒略日 (任意尺度)。
 
-    # 角度转弧度
-    I0 = I_deg * _deg
-    I_dot = I_dot_deg * _deg
-    L0 = L_deg * _deg
-    L_dot = L_dot_deg * _deg
-    lp0 = lp_deg * _deg
-    lp_dot = lp_dot_deg * _deg
-    ln0 = ln_deg * _deg
-    ln_dot = ln_dot_deg * _deg
+    Returns
+    -------
+    t_cy : float
+        儒略世纪数。
+    """
+    return (jd - 2451545.0) / _CENTURY_DAYS
 
-    Omega0 = ln0
-    Omega_dot = ln_dot
+# ---------------------------------------------------------------------------
+# 轨道根数计算
+# ---------------------------------------------------------------------------
+def get_elements(body: str, t_cy: float) -> dict:
+    """
+    返回指定天体在儒略世纪 t_cy 时的密切开普勒根数 (Table 2a + 2b)。
 
-    omega0 = lp0 - ln0
-    omega_dot = lp_dot - ln_dot
+    Parameters
+    ----------
+    body : str
+        天体名称 ("Mercury", "Venus", "EM Bary", "Mars", "Jupiter",
+        "Saturn", "Uranus", "Neptune")
+    t_cy : float
+        自 J2000.0 起算的儒略世纪数。
 
-    M0 = L0 - lp0
-    M_dot = L_dot - lp_dot
+    Returns
+    -------
+    dict
+        包含键:
+        - 'a'   : 半长轴 (m)
+        - 'e'   : 偏心率
+        - 'i'   : 倾角 (rad)
+        - 'Omega' : 升交点经度 (rad)
+        - 'omega' : 近日点幅角 (rad)
+        - 'M'     : 平近点角 (rad), 已加修正
+    """
+    d = _TABLE2A[body]
 
-    # 确保角度在 [0, 2π) 内
-    Omega0 = Omega0 % (2.0 * np.pi)
-    omega0 = omega0 % (2.0 * np.pi)
-    M0 = M0 % (2.0 * np.pi)
+    # 1. 线性部分 (角度为度)
+    a_au   = d["a0"]   + d["a_dot"]   * t_cy
+    e      = d["e0"]   + d["e_dot"]   * t_cy
+    I_deg  = d["I0"]   + d["I_dot"]   * t_cy
+    L_deg  = d["L0"]   + d["L_dot"]   * t_cy
+    lp_deg = d["lp0"]  + d["lp_dot"]  * t_cy
+    ln_deg = d["ln0"]  + d["ln_dot"]  * t_cy
 
-    PLANETS_DATA[name] = {
-        "a0": a0, "a_dot": a_dot,
-        "e0": e0, "e_dot": e_dot,
-        "i0": I0, "i_dot": I_dot,
-        "Omega0": Omega0, "Omega_dot": Omega_dot,
-        "omega0": omega0, "omega_dot": omega_dot,
-        "M0": M0, "M_dot": M_dot,
+    # 2. 外行星附加摄动项 (Table 2b)
+    if body in _TABLE2B:
+        b2, c2, s2, f2 = (_TABLE2B[body]["b"],
+                          _TABLE2B[body]["c"],
+                          _TABLE2B[body]["s"],
+                          _TABLE2B[body]["f"])
+        # 将频率 f 转换为弧度/世纪，用于三角函数
+        f2_rad = f2 * _DEG2RAD
+        delta_M_deg = (b2 * t_cy * t_cy
+                       + c2 * np.cos(f2_rad * t_cy)
+                       + s2 * np.sin(f2_rad * t_cy))
+    else:
+        delta_M_deg = 0.0
+
+    M_deg = L_deg - lp_deg + delta_M_deg
+
+    # 3. 角度归化并计算 ω
+    # 将 M 限制在 (-180°, +180°] 区间，与参考文献一致
+    M_deg = np.fmod(M_deg + 180.0, 360.0) - 180.0
+
+    Omega_deg = np.fmod(ln_deg, 360.0)
+    omega_deg = np.fmod(lp_deg - ln_deg, 360.0)
+
+    # 4. 转换为 SI 及弧度
+    a_m    = a_au * _AU
+    i_rad  = I_deg   * _DEG2RAD
+    Omega  = Omega_deg * _DEG2RAD
+    omega  = omega_deg * _DEG2RAD
+    M      = M_deg   * _DEG2RAD
+
+    return {
+        "a": a_m, "e": e, "i": i_rad,
+        "Omega": Omega, "omega": omega, "M": M
     }
 
 
-# ---------------------------------------------------------------------------
-# 便捷查询函数
-# ---------------------------------------------------------------------------
-def get_elements(body: str, jd_j2000: float = 0.0) -> np.ndarray:
+def get_elements_cartesian(body: str, t_cy: float, mu: float = _MU_SUN) -> np.ndarray:
     """
-    返回指定天体在 J2000 后 jd_j2000 儒略世纪时刻的 6 个平均轨道根数
-    (a, e, i, Ω, ω, M)，单位为米、弧度。
+    直接返回天体在 J2000 黄道坐标系中的笛卡尔状态 (m, m/s)。
 
-    若 jd_j2000=0（默认），返回的是 J2000.0 历元的瞬时平均根数。
+    Parameters
+    ----------
+    body : str
+        天体名称。
+    t_cy : float
+        自 J2000.0 起算的儒略世纪数。
+    mu : float
+        中心天体引力常数 (默认为太阳)。
+
+    Returns
+    -------
+    state : ndarray, shape (6,)
+        [x, y, z, vx, vy, vz]  (黄道坐标系)
     """
-    d = PLANETS_DATA[body]
-    d_cy = jd_j2000 * 36525.0 / 36525.0  # 实际上 jd_j2000 应为从 J2000 起算的儒略世纪数
-    # 为保持接口简单，这里假定输入为 Julian 世纪数
-    a = d["a0"] + d["a_dot"] * jd_j2000            # AU
-    e = d["e0"] + d["e_dot"] * jd_j2000            # rad/cy 适用
-    i = d["i0"] + d["i_dot"] * jd_j2000
-    Omega = d["Omega0"] + d["Omega_dot"] * jd_j2000
-    omega = d["omega0"] + d["omega_dot"] * jd_j2000
-    M = d["M0"] + d["M_dot"] * jd_j2000
-    # 归一化角度
-    Omega = Omega % (2.0 * np.pi)
-    omega = omega % (2.0 * np.pi)
-    M = M % (2.0 * np.pi)
-    return np.array([a, e, i, Omega, omega, M])
+    el = get_elements(body, t_cy)
+    result = kepler_elements_to_cartesian_batch(
+        np.array([el["a"]]),
+        np.array([el["e"]]),
+        np.array([el["i"]]),
+        np.array([el["Omega"]]),
+        np.array([el["omega"]]),
+        np.array([el["M"]]),
+        mu,
+    )
+    return result[0]
+
+
+def get_all_planet_states(t_cy: float, mu: float = _MU_SUN) -> dict:
+    """
+    返回所有行星 (含 EM Bary) 在时刻 t_cy 的黄道笛卡尔状态。
+
+    Parameters
+    ----------
+    t_cy : float
+        儒略世纪数。
+    mu : float
+        引力常数。
+
+    Returns
+    -------
+    dict
+        键为天体名称，值为 6 元素状态数组。
+    """
+    bodies = list(_TABLE2A.keys())
+    states = {}
+    for body in bodies:
+        states[body] = get_elements_cartesian(body, t_cy, mu)
+    return states
