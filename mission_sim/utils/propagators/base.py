@@ -195,7 +195,7 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, 
     n_dim = y.shape[0]
     tf = t_span[1]
     direction = 1.0 if tf >= t0 else -1.0
-    h = h0 if h0 > 0.0 else np.sqrt(np.finfo(np.float64).eps)
+    h = h0 if h0 > 0.0 else 0.1 * abs(tf - t0)
 
     # 预分配输出数组（上限估计）
     dt_abs = abs(tf - t0)
@@ -324,7 +324,7 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, h
     n_dim = y.shape[0]
     tf = t_span[1]
     direction = 1.0 if tf >= t0 else -1.0
-    h = h0 if h0 > 0.0 else np.sqrt(np.finfo(np.float64).eps)
+    h = h0 if h0 > 0.0 else 0.1 * abs(tf - t0)
 
     # 预分配输出数组
     dt_abs = abs(tf - t0)
