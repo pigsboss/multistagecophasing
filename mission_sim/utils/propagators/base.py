@@ -199,7 +199,7 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, 
 
     # 预分配输出数组（上限估计）
     dt_abs = abs(tf - t0)
-    max_steps = max(5000, int(dt_abs / hmin) + 2000)
+    max_steps = 100000  # <-- fixed generous upper bound
     t_arr = np.empty(max_steps, dtype=np.float64)
     y_arr = np.empty((max_steps, n_dim), dtype=np.float64)
     step = 0
@@ -328,7 +328,7 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, h
 
     # 预分配输出数组
     dt_abs = abs(tf - t0)
-    max_steps = max(5000, int(dt_abs / hmin) + 2000)
+    max_steps = 100000  # <-- fixed generous upper bound
     t_hist = np.empty(max_steps, dtype=np.float64)
     y_hist = np.empty((max_steps, n_dim), dtype=np.float64)
     f_hist = np.empty((max_steps, n_dim), dtype=np.float64)
