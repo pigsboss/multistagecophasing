@@ -162,53 +162,39 @@ def _dopri_step(f, t, y, h, rtol, atol, args=()):
 
 
 # ---------------------------------------------------------------------------
-# 单样本自适应积分
+# 单样本自适应积分（方向感知）
 # ---------------------------------------------------------------------------
 
 @njit
 def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, args=()):
     """
-    自适应步长积分，从 t0 到 t_span[1]，初始步长自动选取或由 h0 指定。
-    返回 (t_arr, y_arr) 其中 t_arr 为时间序列，y_arr 为状态序列 (N_steps, n)。
-
-    Parameters
-    ----------
-    f : callable(t, y, *args) -> ndarray
-        动力学函数，必须可被 Numba 编译。
-    t0 : float
-        起始时间。
-    y0 : ndarray shape (n,)
-        初始状态。
-    t_span : tuple (t0, tf)
-        积分区间。
-    rtol, atol : float
-        相对/绝对容差。
-    h0 : float, optional
-        初始步长（0 表示自动选取）。
-    hmin : float, optional
-        最小步长。
-    args : tuple, optional
-        传递给 f 的额外参数（f(t, y, *args)）。
+    Adaptive step integration from t0 to t_span[1].
+    Supports forward *and* backward direction.
+    Returns (t_arr, y_arr) with shape (N_steps,), (N_steps, n).
     """
     t = t0
     y = y0.copy()
     n_dim = y.shape[0]
     tf = t_span[1]
     direction = 1.0 if tf >= t0 else -1.0
-    h = h0 if h0 > 0.0 else 0.1 * abs(tf - t0)
 
-    # 预分配输出数组（上限估计）
-    dt_abs = abs(tf - t0)
-    max_steps = 100000  # <-- fixed generous upper bound
+    # Signed initial step size
+    if h0 > 0.0:
+        h = direction * h0
+    else:
+        h = 0.1 * (tf - t0)   # signed
+
+    # Pre‑allocate output arrays with a generous estimate
+    max_steps = 100000
     t_arr = np.empty(max_steps, dtype=np.float64)
     y_arr = np.empty((max_steps, n_dim), dtype=np.float64)
     step = 0
     t_arr[0] = t
     y_arr[0, :] = y
 
-    while (tf - t) * direction > 0.0:
-        # 限制步长不超出终点
-        if (t + h - tf) * direction > 0.0:
+    while direction * (tf - t) > 1e-12:   # while not yet at tf
+        # Ensure the final step lands exactly on tf
+        if direction * (t + h - tf) > 0.0:
             h = tf - t
 
         y_new, err, _ = _dopri_step(f, t, y, h, rtol, atol, args)
@@ -222,22 +208,17 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, 
             t_arr[step] = t
             y_arr[step, :] = y
 
-            # PI 步长控制
-            power = 1.0 / 5.0   # DP5 误差阶
-            h = _compute_new_h(h, err, power)
+            # PI step‑size control (works equally for negative h)
+            power = 1.0 / 5.0
+            h = direction * abs(_compute_new_h(abs(h), err, power))
         else:
             power = 1.0 / 5.0
-            h = _compute_new_h(h, err, power)
+            h_new = _compute_new_h(abs(h), err, power)
+            h = direction * h_new
             if abs(h) < hmin:
-                raise ValueError(f"步长减小到 {hmin} 以下，积分被迫停止于 t={t}")
+                raise ValueError(f"Step size fell below hmin={hmin} at t={t}")
 
-    # 确保最后一点正好在 tf
-    if t_arr[step] != tf:
-        alpha = (tf - t_arr[step-1]) / (t_arr[step] - t_arr[step-1])
-        y_arr[step, :] = y_arr[step-1, :] + alpha * (y_arr[step, :] - y_arr[step-1, :])
-        t_arr[step] = tf
-
-    # 裁剪到实际步数
+    # Trim arrays
     t_arr = t_arr[:step+1].copy()
     y_arr = y_arr[:step+1, :].copy()
     return t_arr, y_arr
