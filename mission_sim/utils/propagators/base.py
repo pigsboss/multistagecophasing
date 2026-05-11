@@ -169,7 +169,7 @@ def _dopri_step(f, t, y, h, rtol, atol, args=()):
 def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, args=()):
     """
     自适应步长积分，从 t0 到 t_span[1]，初始步长自动选取或由 h0 指定。
-    返回 (t, y_hist) 其中 t 为时间序列，y_hist 为状态序列 (N, n)。
+    返回 (t_arr, y_arr) 其中 t_arr 为时间序列，y_arr 为状态序列 (N_steps, n)。
 
     Parameters
     ----------
@@ -192,53 +192,54 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, 
     """
     t = t0
     y = y0.copy()
-    n = y.shape[0]
-
+    n_dim = y.shape[0]
     tf = t_span[1]
     direction = 1.0 if tf >= t0 else -1.0
     h = h0 if h0 > 0.0 else np.sqrt(np.finfo(np.float64).eps)
 
-    # 存储结果（预分配）
-    # 我们无法提前知道点数，使用列表再转数组。
-    t_list = [t]
-    y_list = [y.copy()]
+    # 预分配输出数组（上限估计）
+    dt_abs = abs(tf - t0)
+    max_steps = max(5000, int(dt_abs / hmin) + 2000)
+    t_arr = np.empty(max_steps, dtype=np.float64)
+    y_arr = np.empty((max_steps, n_dim), dtype=np.float64)
+    step = 0
+    t_arr[0] = t
+    y_arr[0, :] = y
 
     while (tf - t) * direction > 0.0:
-        # 限制步长
+        # 限制步长不超出终点
         if (t + h - tf) * direction > 0.0:
             h = tf - t
 
-        # 执行一步
         y_new, err, _ = _dopri_step(f, t, y, h, rtol, atol, args)
 
-        # 检查步长是否接受
         if _step_accepted(err, rtol, atol):
             t += h
             y[:] = y_new
-            t_list.append(t)
-            y_list.append(y.copy())
+            step += 1
+            if step >= max_steps:
+                raise RuntimeError("Max steps exceeded in integrate_dp8")
+            t_arr[step] = t
+            y_arr[step, :] = y
 
-            # 计算下一大步的步长（PI 控制）
-            power = 1.0 / 5.0  # DP5 误差阶 5
+            # PI 步长控制
+            power = 1.0 / 5.0   # DP5 误差阶
             h = _compute_new_h(h, err, power)
         else:
-            # 减小步长重试
             power = 1.0 / 5.0
             h = _compute_new_h(h, err, power)
             if abs(h) < hmin:
                 raise ValueError(f"步长减小到 {hmin} 以下，积分被迫停止于 t={t}")
 
     # 确保最后一点正好在 tf
-    t_arr = np.array(t_list)
-    y_arr = np.array(y_list)
+    if t_arr[step] != tf:
+        alpha = (tf - t_arr[step-1]) / (t_arr[step] - t_arr[step-1])
+        y_arr[step, :] = y_arr[step-1, :] + alpha * (y_arr[step, :] - y_arr[step-1, :])
+        t_arr[step] = tf
 
-    if t_arr[-1] != tf:
-        # 线性插值到 tf
-        alpha = (tf - t_arr[-2]) / (t_arr[-1] - t_arr[-2])
-        y_last = y_arr[-2] + alpha * (y_arr[-1] - y_arr[-2])
-        t_arr[-1] = tf
-        y_arr[-1] = y_last
-
+    # 裁剪到实际步数
+    t_arr = t_arr[:step+1].copy()
+    y_arr = y_arr[:step+1, :].copy()
     return t_arr, y_arr
 
 
@@ -312,7 +313,7 @@ def _hermite_interp(t0, y0, f0, t1, y1, f1, t_query):
 
 
 @njit
-def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
+def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, hmin=1e-20, args=()):
     """
     在每一步保存 [t, y], 并且记录每一步的导数 k0（位于起点）。
     之后使用 Hermite 插值在任意查询点上给出高精度值。
@@ -320,14 +321,21 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, a
     """
     t = t0
     y = y0.copy()
-    n = y.shape[0]
+    n_dim = y.shape[0]
     tf = t_span[1]
     direction = 1.0 if tf >= t0 else -1.0
     h = h0 if h0 > 0.0 else np.sqrt(np.finfo(np.float64).eps)
 
-    t_list = [t]
-    y_list = [y.copy()]
-    f_list = [f(t, y, *args).copy()]
+    # 预分配输出数组
+    dt_abs = abs(tf - t0)
+    max_steps = max(5000, int(dt_abs / hmin) + 2000)
+    t_hist = np.empty(max_steps, dtype=np.float64)
+    y_hist = np.empty((max_steps, n_dim), dtype=np.float64)
+    f_hist = np.empty((max_steps, n_dim), dtype=np.float64)
+    step = 0
+    t_hist[0] = t
+    y_hist[0, :] = y
+    f_hist[0, :] = f(t, y, *args).copy()
 
     while (tf - t) * direction > 0.0:
         if (t + h - tf) * direction > 0.0:
@@ -340,9 +348,12 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, a
             y_next = y_new.copy()
             f_next = f(t_next, y_next, *args).copy()
 
-            t_list.append(t_next)
-            y_list.append(y_next)
-            f_list.append(f_next)
+            step += 1
+            if step >= max_steps:
+                raise RuntimeError("Max steps exceeded in integrate_dp8_trajectory")
+            t_hist[step] = t_next
+            y_hist[step, :] = y_next
+            f_hist[step, :] = f_next
 
             t = t_next
             y = y_next
@@ -353,17 +364,19 @@ def integrate_dp8_trajectory(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, a
             power = 1.0 / 5.0
             h = _compute_new_h(h, err, power)
 
-    t_arr = np.array(t_list)
-    y_arr = np.array(y_list)
-    f_arr = np.array(f_list)
+    # 裁剪到实际步数
+    t_arr = t_hist[:step+1].copy()
+    y_arr = y_hist[:step+1, :].copy()
+    f_arr = f_hist[:step+1, :].copy()
 
-    # 确保终点匹配
+    # 确保终点匹配 tf
     if t_arr[-1] != tf:
         alpha = (tf - t_arr[-2]) / (t_arr[-1] - t_arr[-2])
         y_last = y_arr[-2] + alpha * (y_arr[-1] - y_arr[-2])
+        f_last = f(tf, y_last, *args).copy()
         t_arr[-1] = tf
         y_arr[-1] = y_last
-        f_arr[-1] = f(tf, y_last, *args).copy()
+        f_arr[-1] = f_last
 
     return t_arr, y_arr, f_arr
 
