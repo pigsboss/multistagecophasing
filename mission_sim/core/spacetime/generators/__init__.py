@@ -9,7 +9,7 @@ from .keplerian import KeplerianGenerator
 from .j2_keplerian import J2KeplerianGenerator
 from .halo import HaloDifferentialCorrector
 from .crtbp import CRTBPOrbitGenerator, CRTBPOrbitType, SymmetryType, CRTBPOrbitConfig, create_crtbp_generator, generate_family
-from .attitude import NumericalAttitudeGenerator, create_numerical_attitude_generator
+# from .attitude import NumericalAttitudeGenerator, create_numerical_attitude_generator
 
 __all__ = [
     "BaseTrajectoryGenerator",
@@ -25,8 +25,8 @@ __all__ = [
     "create_generator",
     "create_generator_with_ephemeris",
     "create_high_precision_generator",
-    "NumericalAttitudeGenerator",
-    "create_numerical_attitude_generator",
+    # "NumericalAttitudeGenerator",
+    # "create_numerical_attitude_generator",
 ]
 
 def create_generator(orbit_type: str, **kwargs) -> BaseTrajectoryGenerator:
