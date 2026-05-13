@@ -39,7 +39,7 @@ def _compute_new_h(h, err, power, fac_min=0.2, fac_max=10.0):
 # ---------------------------------------------------------------------------
 # Butcher 表容器
 # ---------------------------------------------------------------------------
-RKTable = namedtuple('RKTable', ['s', 'C', 'A', 'B_high', 'B_low', 'order'])
+RKTable = namedtuple('RKTable', ['s', 'C', 'A', 'B_high', 'B_low', 'btilde', 'order'])
 
 # ---------------------------------------------------------------------------
 # 表格数据定义
@@ -57,7 +57,7 @@ _RK45_A[6,0] = 35/384;      _RK45_A[6,1] = 0.0;            _RK45_A[6,2] = 500/11
 _RK45_B_HIGH = np.array([35/384, 0.0, 500/1113, 125/192, -2187/6784, 11/84, 0.0], dtype=np.float64)
 _RK45_B_LOW  = np.array([5179/57600, 0.0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40], dtype=np.float64)
 
-TABLE_RK45 = RKTable(s=7, C=_RK45_C, A=_RK45_A, B_high=_RK45_B_HIGH, B_low=_RK45_B_LOW, order=5)
+TABLE_RK45 = RKTable(s=7, C=_RK45_C, A=_RK45_A, B_high=_RK45_B_HIGH, B_low=_RK45_B_LOW, btilde=None, order=5)
 
 # --- DOP853 (12 阶段) ---
 # 系数从 dop853.f 解析获得，均已转换为双精度
@@ -166,7 +166,7 @@ _DOP853_ER = np.array([
 _DOP853_B_LOW = _DOP853_B_HIGH - _DOP853_ER
 
 TABLE_DOP853 = RKTable(s=12, C=_DOP853_C, A=_DOP853_A,
-                       B_high=_DOP853_B_HIGH, B_low=_DOP853_B_LOW, order=8)
+                       B_high=_DOP853_B_HIGH, B_low=_DOP853_B_LOW, btilde=None, order=8)
 
 # --- DP8 (12 阶段) : Dormand‑Prince 8(7) ---
 # 系数来自 DP8ConstantCache 的精确有理版本 (Julia 文件 high_order_rk_tableaus.jl)
@@ -267,8 +267,9 @@ _DP8_B_HIGH = np.array([
     4808707937311 / 50545545388065                                       # b12
 ], dtype=np.float64)
 
-# Low‑order weights (7‑th order) – btilde
-_DP8_B_LOW = np.array([
+# btilde 向量 (er = b_high - b_low)，用于直接计算误差
+# 此向量即原 _DP8_B_LOW 的内容
+_DP8_BTILDE = np.array([
     -1124506425334925 / 15491007125698167294,          # btilde1
     0.0,
     0.0,
@@ -285,7 +286,7 @@ _DP8_B_LOW = np.array([
 ], dtype=np.float64)
 
 TABLE_DP8 = RKTable(s=12, C=_DP8_C, A=_DP8_A,
-                    B_high=_DP8_B_HIGH, B_low=_DP8_B_LOW, order=8)
+                    B_high=_DP8_B_HIGH, B_low=None, btilde=_DP8_BTILDE, order=8)
 
 # ---------------------------------------------------------------------------
 # 工厂函数：根据 Butcher 表生成专用的 @njit 步进函数
@@ -296,6 +297,7 @@ def _make_rk_step(table):
     A = table.A
     B_high = table.B_high
     B_low = table.B_low
+    btilde = table.btilde
 
     @njit
     def rk_step(f, t, y, h, rtol, atol, args=()):
@@ -317,16 +319,24 @@ def _make_rk_step(table):
         for i in range(s):
             y_high += h * B_high[i] * k[i]
 
-        # 低阶解（用于误差估计）
-        y_low = y.copy()
-        for i in range(s):
-            y_low += h * B_low[i] * k[i]
-
         # 误差估计
         err = np.zeros(n_dim, dtype=np.float64)
-        for i in range(n_dim):
-            sc = atol + rtol * max(abs(y[i]), abs(y_high[i]))
-            err[i] = abs(y_high[i] - y_low[i]) / sc
+        if btilde is not None:
+            # DP8 风格：直接应用 btilde 系数 (误差估计子)
+            for i in range(n_dim):
+                err_sum = 0.0
+                for j in range(s):
+                    err_sum += btilde[j] * k[j, i]
+                sc = atol + rtol * max(abs(y[i]), abs(y_high[i]))
+                err[i] = abs(h * err_sum) / sc
+        else:
+            # 经典方法：低阶解差异
+            y_low = y.copy()
+            for i in range(s):
+                y_low += h * B_low[i] * k[i]
+            for i in range(n_dim):
+                sc = atol + rtol * max(abs(y[i]), abs(y_high[i]))
+                err[i] = abs(y_high[i] - y_low[i]) / sc
         err_norm = _norm(err)
 
         return y_high, err_norm, k
@@ -403,17 +413,16 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
     return _integrate_generic(_step_dp8, f, t0, y0, t_span[1], rtol, atol, TABLE_DP8.order, h0, args)
 
 # ---------------------------------------------------------------------------
-# 批量并行版本（示例，略去 trajectory 以便快速搭建框架）
+# 批量并行版本（小批量测试时使用普通 Python 循环）
 # ---------------------------------------------------------------------------
-@njit(parallel=True)
 def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
-    """使用 integrate_dp8 并行积分多个初值。"""
+    """使用 integrate_dp8 对多个初值进行积分（非 JIT 版本，兼容 Numba 类型推断）。"""
     N = y0_batch.shape[0]
-    t_batch = [None] * N
-    y_batch = [None] * N
-    for idx in prange(N):
+    t_batch = []
+    y_batch = []
+    for idx in range(N):
         y0 = y0_batch[idx]
         t_arr, y_arr = integrate_dp8(f, t0, y0, t_span, rtol, atol, h0, args)
-        t_batch[idx] = t_arr
-        y_batch[idx] = y_arr
+        t_batch.append(t_arr)
+        y_batch.append(y_arr)
     return t_batch, y_batch

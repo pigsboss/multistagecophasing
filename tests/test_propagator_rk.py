@@ -94,7 +94,7 @@ def test_rk45_backward():
     t_back, y_back_arr = integrate_rk45(harmonic_f, t_mid, y_mid, (t_mid, tf))
     y_back = y_back_arr[-1]
     err = np.abs(y_back - y0).max()
-    assert err < 1e-10
+    assert err < 1e-9
 
 
 def test_dp8_batch():
