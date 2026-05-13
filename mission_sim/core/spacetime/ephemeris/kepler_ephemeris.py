@@ -9,7 +9,7 @@ from numba import njit
 
 from mission_sim.core.spacetime.ephemeris.base import Ephemeris
 from mission_sim.core.spacetime.ids import CoordinateFrame
-from mission_sim.utils.solvers.base import kepler_elements_to_cartesian_batch
+from mission_sim.utils.solvers.keplerian import kepler_elements_to_cartesian_batch
 
 
 class KeplerEphemeris(Ephemeris):
