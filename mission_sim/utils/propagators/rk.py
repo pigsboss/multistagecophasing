@@ -58,7 +58,7 @@ _RK45_A[6,0] = 35/384;      _RK45_A[6,1] = 0.0;            _RK45_A[6,2] = 500/11
 _RK45_B_HIGH = np.array([35/384, 0.0, 500/1113, 125/192, -2187/6784, 11/84, 0.0], dtype=np.float64)
 _RK45_B_LOW  = np.array([5179/57600, 0.0, 7571/16695, 393/640, -92097/339200, 187/2100, 1/40], dtype=np.float64)
 
-TABLE_RK45 = RKTable(s=7, C=_RK45_C, A=_RK45_A, B_high=_RK45_B_HIGH, B_low=_RK45_B_LOW, btilde=None, order=5)
+TABLE_RK45 = RKTable(s=7, C=_RK45_C, A=_RK45_A, B_high=_RK45_B_HIGH, B_low=_RK45_B_LOW, btilde=None, order=4)
 
 # --- DOP853 (12 阶段) ---
 # 系数从 dop853.f 解析获得，均已转换为双精度
@@ -167,7 +167,7 @@ _DOP853_ER = np.array([
 _DOP853_B_LOW = _DOP853_B_HIGH - _DOP853_ER
 
 TABLE_DOP853 = RKTable(s=12, C=_DOP853_C, A=_DOP853_A,
-                       B_high=_DOP853_B_HIGH, B_low=_DOP853_B_LOW, btilde=None, order=8)
+                       B_high=_DOP853_B_HIGH, B_low=_DOP853_B_LOW, btilde=None, order=5)
 
 # --- DP8 (13 阶段) : Dormand‑Prince 8(7) ---
 # 系数来自 prince1981tableau.py (标准 Prince & Dormand 1981)
@@ -314,7 +314,7 @@ TABLE_DP8 = RKTable(
     B_high=_DP8_B_HIGH,
     B_low=_DP8_B_LOW,
     btilde=None,
-    order=8
+    order=7
 )
 
 # ---------------------------------------------------------------------------
