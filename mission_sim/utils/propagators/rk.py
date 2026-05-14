@@ -15,6 +15,7 @@
 import numpy as np
 from numba import njit, prange
 from collections import namedtuple
+from concurrent.futures import ThreadPoolExecutor  # 新增
 
 # ---------------------------------------------------------------------------
 # 辅助函数
@@ -335,12 +336,15 @@ def _make_rk_step(table):
         # 第 1 阶段
         k[0] = f(t, y, *args)
 
+        # 预分配工作数组，避免每个阶段都进行 y.copy()
+        y_work = np.empty(n_dim, dtype=np.float64)
+
         for i in range(1, s):
             t_stage = t + C[i] * h
-            y_stage = y.copy()
+            y_work[:] = y
             for j in range(i):
-                y_stage += h * A[i, j] * k[j]
-            k[i] = f(t_stage, y_stage, *args)
+                y_work += h * A[i, j] * k[j]
+            k[i] = f(t_stage, y_work, *args)
 
         # 高阶解
         y_high = y.copy()
@@ -350,6 +354,7 @@ def _make_rk_step(table):
         # 误差估计
         err = np.zeros(n_dim, dtype=np.float64)
         if btilde is not None:
+            # btilde 方案（暂时保留原文）
             for i in range(n_dim):
                 err_sum = 0.0
                 for j in range(s):
@@ -357,13 +362,15 @@ def _make_rk_step(table):
                 sc = atol + rtol * max(abs(y[i]), abs(y_high[i]))
                 err[i] = abs(h * err_sum) / sc
         else:
-            # 经典方法：低阶解差异
-            y_low = y.copy()
+            # 经典方法：利用高低阶系数差，避免分配 y_low 数组
             for i in range(s):
-                y_low += h * B_low[i] * k[i]
-            for i in range(n_dim):
-                sc = atol + rtol * max(abs(y[i]), abs(y_high[i]))
-                err[i] = abs(y_high[i] - y_low[i]) / sc
+                coeff = h * (B_high[i] - B_low[i])
+                for d in range(n_dim):
+                    err[d] += coeff * k[i, d]
+            for d in range(n_dim):
+                sc = atol + rtol * max(abs(y[d]), abs(y_high[d]))
+                err[d] = abs(err[d]) / sc
+
         err_norm = _norm(err)
 
         return y_high, err_norm, k
@@ -440,16 +447,19 @@ def integrate_dp8(f, t0, y0, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
     return _integrate_generic(_step_dp8, f, t0, y0, t_span[1], rtol, atol, TABLE_DP8.order, h0, args)
 
 # ---------------------------------------------------------------------------
-# 批量并行版本（小批量测试时使用普通 Python 循环）
+# 批量并行版本（使用线程池并行）
 # ---------------------------------------------------------------------------
 def integrate_dp8_batch(f, t0, y0_batch, t_span, rtol=1e-8, atol=1e-12, h0=0.0, args=()):
-    """使用 integrate_dp8 对多个初值进行积分（非 JIT 版本，兼容 Numba 类型推断）。"""
+    """使用 integrate_dp8 对多个初值进行积分（多线程并行版本）."""
     N = y0_batch.shape[0]
-    t_batch = []
-    y_batch = []
-    for idx in range(N):
+
+    def task(idx):
         y0 = y0_batch[idx]
-        t_arr, y_arr = integrate_dp8(f, t0, y0, t_span, rtol, atol, h0, args)
-        t_batch.append(t_arr)
-        y_batch.append(y_arr)
+        return integrate_dp8(f, t0, y0, t_span, rtol, atol, h0, args)
+
+    with ThreadPoolExecutor() as executor:
+        results = list(executor.map(task, range(N)))
+
+    t_batch = [r[0] for r in results]
+    y_batch = [r[1] for r in results]
     return t_batch, y_batch
