@@ -256,8 +256,10 @@ def run_method_1_or_2(
         noise_pos = np.random.normal(0, sigma_pos, pos_len)
         noise_vel = np.random.normal(0, sigma_vel, pos_len)
         y_init = base_y0.copy()
-        y_init[:pos_len] += noise_pos
-        y_init[pos_len:] += noise_vel
+        # Apply noise to correct position/velocity slots
+        for i in range(len(bodies)):
+            y_init[6*i:6*i+3] += noise_pos[3*i:3*i+3]
+            y_init[6*i+3:6*i+6] += noise_vel[3*i:3*i+3]
 
         # Build initial dict
         init_dict = {}
