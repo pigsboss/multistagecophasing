@@ -327,7 +327,7 @@ class SPICECalculator:
         'sun': 10,
         'mercury': 1,           # Mercury barycenter (NAIF 1)
         'venus': 2,             # Venus barycenter (NAIF 2)
-        'earth': 399,           # Earth (NAIF 399, 行星自身)
+        'earth': 3,             # Earth-Moon Barycenter (NAIF 3)
         'moon': 301,
         'mars': 4,              # Mars barycenter (NAIF 4)
         'mars_barycenter': 4,
