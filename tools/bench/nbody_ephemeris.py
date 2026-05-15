@@ -18,6 +18,8 @@ Two test methods:
 Both methods use the same `--n-samples` and `--sigma-pos/vel`.
 No direct SPICE kernel handling is required – HighPrecisionEphemeris
 takes care of loading kernels from default locations.
+
+Uses short‑period mean elements (Table 1) for Method 1.
 """
 
 import argparse
@@ -55,6 +57,7 @@ from mission_sim.core.spacetime.ephemeris.jpl_ssb_keplerian_elements import (
     get_all_planet_states,
     get_elements_cartesian,
     get_elements,
+    get_elements_short,
 )
 from mission_sim.utils.solvers.keplerian import (
     kepler_elements_to_cartesian_batch,
@@ -272,10 +275,32 @@ def run_method_1_or_2(
 
     # Base initial state for each method
     if method == "kepler":
-        # Use JPL mean elements directly (no noise, no re-extraction)
+        # Use JPL short-period mean elements (Table 1)
         t_cy = 0.0
         mu_sun = gm_dict["SUN"]
         inv_map = {v: k for k, v in _MEAN_NAME_MAP.items()}
+
+        # ---- Temporary verification: print initial deviations ----
+        print("\nInitial heliocentric deviations (JPL - SPICE) at J2000:")
+        for bname in bodies:
+            if bname == "SUN":
+                continue
+            kep_name = inv_map[bname]
+            el = get_elements_short(kep_name, t_cy)
+            state_ecl = kepler_elements_to_cartesian_batch(
+                np.array([el["a"]]), np.array([el["e"]]), np.array([el["i"]]),
+                np.array([el["Omega"]]), np.array([el["omega"]]), np.array([el["M"]]),
+                mu_sun
+            )[0]
+            state_eq = np.concatenate([
+                _R_ECL2EQ @ state_ecl[:3],
+                _R_ECL2EQ @ state_ecl[3:6]
+            ])
+            # SPICE heliocentric state at J2000
+            spice_state = get_truth_heliocentric_state(truth_eph, 0.0, [bname])
+            dev = np.linalg.norm(state_eq[:3] - spice_state[:3])
+            print(f"  {bname}: {dev:.3f} m")
+        # -----------------------------------------------------------
 
         # Pre-compute final heliocentric equatorial state for each body
         final_states = []
@@ -284,7 +309,7 @@ def run_method_1_or_2(
                 final_states.append(np.zeros(6))
                 continue
             kep_name = inv_map[bname]
-            el = get_elements(kep_name, t_cy)
+            el = get_elements_short(kep_name, t_cy)
             a, e_orb, inc, Omega, omega, M0 = (
                 el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
             )
