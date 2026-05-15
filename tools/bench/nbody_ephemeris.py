@@ -148,14 +148,15 @@ def build_truth_provider() -> HighPrecisionEphemeris:
     return eph
 
 def get_truth_state(eph: HighPrecisionEphemeris, et_seconds: float,
+                    bodies: List[str],
                     frame: CoordinateFrame = CoordinateFrame.J2000_ECI) -> np.ndarray:
     """
-    Return concatenated state (54,) for all BODIES wrt SSB.
+    Return concatenated state for the given bodies (order preserved) wrt SSB.
     et_seconds: TDB seconds since J2000.
     """
     states = []
-    for bname in BODIES:
-        body = CelestialBody(bname.lower())  # CelestialBody values are lowercase
+    for bname in bodies:
+        body = CelestialBody(bname.lower())
         state = eph.get_state(
             target_body=body,
             epoch=et_seconds,
@@ -188,11 +189,11 @@ class Timer:
 # ----------------------------------------------------------------------
 # Error statistics for a single integration
 # ----------------------------------------------------------------------
-def compute_errors(pred: np.ndarray, truth: np.ndarray) -> Dict[str, float]:
+def compute_errors(pred: np.ndarray, truth: np.ndarray, bodies: List[str]) -> Dict[str, float]:
     """Return per‑body position error (m), RMS, and max."""
     errs = {}
     all_err = []
-    for i, name in enumerate(BODIES):
+    for i, name in enumerate(bodies):
         dpos = pred[6*i:6*i+3] - truth[6*i:6*i+3]
         e = np.linalg.norm(dpos)
         errs[name] = e
@@ -214,47 +215,57 @@ def run_method_1_or_2(
     rtol: float,
     atol: float,
     truth_eph: HighPrecisionEphemeris,
+    bodies: List[str],
+    gm_dict: Dict[str, float],
 ) -> List[Dict[str, float]]:
     """
     Generic runner for method 1 (kepler) or 2 (spice).
     Returns list of per‑sample error dicts.
+    The bodies list must contain exactly the bodies to propagate,
+    and gm_dict must contain their GM values.
     """
-    # Reference state at J2000 (0 seconds)
-    y_spice0 = get_truth_state(truth_eph, 0.0)
+    # Reference state at J2000 (0 seconds) – only needed bodies
+    y_spice0 = get_truth_state(truth_eph, 0.0, bodies)
 
     # Target end state
-    y_spice_end = get_truth_state(truth_eph, delta_sec)
+    y_spice_end = get_truth_state(truth_eph, delta_sec, bodies)
 
     # Base initial state for each method
     if method == "kepler":
-        # Get kepler initial state
+        # Get Kepler initial state for all bodies, then extract subset
         t_cy = 0.0  # J2000
         states_ecl = get_all_planet_states(t_cy)
-        base_y0 = ecliptic_dict_to_icrf_flat(states_ecl)
+        full_y0 = ecliptic_dict_to_icrf_flat(states_ecl)  # 54 elements in BODIES order
+        # Extract only needed bodies
+        base_y0 = np.empty(6 * len(bodies))
+        for idx, bname in enumerate(bodies):
+            global_idx = BODIES.index(bname)
+            base_y0[6*idx:6*idx+6] = full_y0[6*global_idx:6*global_idx+6]
     else:  # "spice"
         base_y0 = y_spice0.copy()
 
     # Prepare propagator factory
-    mu_list = [GM_DICT[b] for b in BODIES]
+    mu_list = [gm_dict[b] for b in bodies]
 
     results = []
     for sample in range(n_samples):
         # Generate noise
-        noise_pos = np.random.normal(0, sigma_pos, 27)
-        noise_vel = np.random.normal(0, sigma_vel, 27)
+        pos_len = 3 * len(bodies)
+        noise_pos = np.random.normal(0, sigma_pos, pos_len)
+        noise_vel = np.random.normal(0, sigma_vel, pos_len)
         y_init = base_y0.copy()
-        y_init[:27] += noise_pos
-        y_init[27:] += noise_vel
+        y_init[:pos_len] += noise_pos
+        y_init[pos_len:] += noise_vel
 
         # Build initial dict
         init_dict = {}
-        for idx, bname in enumerate(BODIES):
+        for idx, bname in enumerate(bodies):
             init_dict[bname] = y_init[6*idx:6*idx+6]
 
         # Propagate
         with Timer() as tmr:
             prop = NBodyPropagator(
-                bodies=BODIES,
+                bodies=bodies,
                 mu_list=mu_list,
                 initial_states_dict=init_dict,
                 epoch_tdb=0.0,
@@ -265,12 +276,12 @@ def run_method_1_or_2(
             prop.propagate_to(delta_sec)
 
         # Collect final state
-        y_final = np.empty(54)
-        for idx, bname in enumerate(BODIES):
+        y_final = np.empty(6 * len(bodies))
+        for idx, bname in enumerate(bodies):
             y_final[6*idx:6*idx+6] = prop.get_body_state(bname, delta_sec)
 
         # Compute errors
-        err = compute_errors(y_final, y_spice_end)
+        err = compute_errors(y_final, y_spice_end, bodies)
         err["_time"] = tmr.elapsed
         err["_mem"] = tmr.mem_peak if tmr.mem_peak is not None else 0.0
         results.append(err)
@@ -293,12 +304,13 @@ def aggregate_results(errors_list: List[Dict[str, float]]) -> Dict[str, Any]:
             agg[f"{k}_std"] = 0.0
     return agg
 
-def print_summary(method_name: str, integrator: str, agg: Dict[str, Any]):
+def print_summary(method_name: str, integrator: str, agg: Dict[str, Any],
+                  bodies: List[str]):
     print(f"\n{'='*60}")
     print(f"METHOD: {method_name} | INTEGRATOR: {integrator}")
     print(f"{'='*60}")
     print("Position errors (mean ± std, meters):")
-    for b in BODIES:
+    for b in bodies:
         mean = agg.get(f"{b}_mean", 0)
         std = agg.get(f"{b}_std", 0)
         print(f"  {b:10s}: {mean:12.3f} ± {std:12.3f}")
@@ -332,6 +344,9 @@ def main():
     parser.add_argument("--rtol", type=float, default=1e-9)
     parser.add_argument("--atol", type=float, default=1e-12)
     parser.add_argument("--output", type=Path, help="Save results as JSON")
+    # NEW: debug-two-body flag
+    parser.add_argument("--debug-two-body", action="store_true",
+                        help="Run Sun+Earth only for debugging")
     args = parser.parse_args()
 
     # Initialize truth
@@ -342,6 +357,15 @@ def main():
         sys.exit(1)
     print("SPICE truth provider initialized.")
 
+    # Determine bodies and gm dict based on debug flag
+    if args.debug_two_body:
+        use_bodies = ["SUN", "EARTH"]
+        use_gm = {k: GM_DICT[k] for k in use_bodies}
+        print("DEBUG: Two-body mode (Sun+Earth only)")
+    else:
+        use_bodies = BODIES
+        use_gm = GM_DICT
+
     # Time span in seconds
     delta_sec = args.delta_years * 365.25 * 86400.0
 
@@ -351,23 +375,25 @@ def main():
             print(f"\nRunning method 1 (Kepler + noise) with {integrator}...")
             errs = run_method_1_or_2(
                 "kepler", integrator, delta_sec, args.n_samples,
-                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph
+                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph,
+                bodies=use_bodies, gm_dict=use_gm
             )
             agg = aggregate_results(errs)
             key = f"kepler_{integrator}"
             all_output[key] = agg
-            print_summary("Kepler (Method 1)", integrator, agg)
+            print_summary("Kepler (Method 1)", integrator, agg, bodies=use_bodies)
 
         if args.method in ("spice", "all"):
             print(f"\nRunning method 2 (SPICE + noise) with {integrator}...")
             errs = run_method_1_or_2(
                 "spice", integrator, delta_sec, args.n_samples,
-                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph
+                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph,
+                bodies=use_bodies, gm_dict=use_gm
             )
             agg = aggregate_results(errs)
             key = f"spice_{integrator}"
             all_output[key] = agg
-            print_summary("SPICE (Method 2)", integrator, agg)
+            print_summary("SPICE (Method 2)", integrator, agg, bodies=use_bodies)
 
     if args.output:
         save_json(all_output, args.output)
