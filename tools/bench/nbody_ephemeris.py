@@ -470,7 +470,8 @@ def main():
         agg = aggregate_results(errs)
         key = f"spice_{integrator}"
         all_output[key] = agg
-        print_summary("SPICE (Method 2)", integrator, agg, bodies=spice_bodies)
+        print_summary("SPICE (Method 2)", integrator, agg, bodies=spice_bodies,
+                      unit_scale=1e-3, unit_str="km")
 
     if args.output:
         save_json(all_output, args.output)
