@@ -299,6 +299,7 @@ def run_method_1_or_2(
                 integrator=integrator,
                 rtol=rtol,
                 atol=atol,
+                max_step=86400.0,   # 强制最大步长
             )
             prop.propagate_to(delta_sec)
 

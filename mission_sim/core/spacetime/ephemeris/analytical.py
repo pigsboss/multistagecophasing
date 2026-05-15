@@ -174,6 +174,7 @@ class NBodyPropagator:
             )
         elif self.integrator.startswith('scipy:'):
             method = self.integrator.split(':', 1)[1].upper()   # 'RK45' or 'DOP853'
+            print(f"[DEBUG] scipy max_step = {self.max_step}")
             sol = _scipy_solve_ivp(
                 _nbody_derivs,
                 (self.t_current, t_tdb),
