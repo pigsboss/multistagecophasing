@@ -346,8 +346,9 @@ def run_method_1_or_2(
                 y_final = np.empty(6 * len(bodies))
                 for idx, bname in enumerate(bodies):
                     y_final[6*idx:6*idx+6] = prop.get_body_state(bname, delta_sec)
-                elapsed = tmr.elapsed
-                mem_peak = tmr.mem_peak if tmr.mem_peak is not None else 0.0
+
+            elapsed = tmr.elapsed
+            mem_peak = tmr.mem_peak if tmr.mem_peak is not None else 0.0
 
             # Compute errors
             err = compute_errors(y_final, y_spice_end, bodies)
