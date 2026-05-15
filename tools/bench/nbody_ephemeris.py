@@ -267,10 +267,6 @@ def run_method_1_or_2(
         for idx, bname in enumerate(bodies):
             init_dict[bname] = y_init[6*idx:6*idx+6]
 
-        # FIX: Force Sun state from SPICE truth
-        if "SUN" in bodies:
-            init_dict["SUN"] = get_truth_state(truth_eph, 0.0, ["SUN"])
-
         # Propagate
         with Timer() as tmr:
             prop = NBodyPropagator(
@@ -283,9 +279,6 @@ def run_method_1_or_2(
                 atol=atol,
                 max_step=max_step,   # 强制最大步长
             )
-            # Overwrite Sun state directly in propagator's buffer
-            if "SUN" in bodies:
-                prop.Y[:6] = get_truth_state(truth_eph, 0.0, ["SUN"])
             prop.propagate_to(delta_sec)
 
         # Collect final state

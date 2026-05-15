@@ -32,7 +32,7 @@ except ImportError:
 # N‑body acceleration kernel  (Numba‑compiled)
 # ---------------------------------------------------------------------------
 
-# @njit
+@njit
 def _nbody_derivs(t, Y, mu_arr, n_body):
     """
     N‑body gravitational acceleration.
