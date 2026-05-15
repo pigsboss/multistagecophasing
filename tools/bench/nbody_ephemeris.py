@@ -256,6 +256,7 @@ def run_method_1_or_2(
     truth_eph: HighPrecisionEphemeris,
     bodies: List[str],
     gm_dict: Dict[str, float],
+    kepler_use_short: bool = True,
 ) -> List[Dict[str, float]]:
     """
     Generic runner for method 1 (kepler) or 2 (spice).
@@ -285,7 +286,10 @@ def run_method_1_or_2(
                 final_states.append(np.zeros(6))
                 continue
             kep_name = inv_map[bname]
-            el = get_elements_short(kep_name, t_cy_end)
+            if kepler_use_short:
+                el = get_elements_short(kep_name, t_cy_end)
+            else:
+                el = get_elements(kep_name, t_cy_end)
             a, e_orb, inc, Omega, omega, M = (
                 el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
             )
@@ -415,6 +419,8 @@ def main():
                         help="Max integration step size in seconds (default: 86400)")
     parser.add_argument("--rtol", type=float, default=1e-9)
     parser.add_argument("--atol", type=float, default=1e-12)
+    parser.add_argument("--kepler-table", choices=["short", "long"], default="short",
+                        help="Which Kepler element table to use for method 1")
     parser.add_argument("--output", type=Path, help="Save results as JSON")
     args = parser.parse_args()
 
@@ -444,7 +450,8 @@ def main():
             "kepler", integrator, delta_sec, args.n_samples,
             args.sigma_pos, args.sigma_vel, args.rtol, args.atol,
             args.max_step, truth_eph,
-            bodies=kepler_bodies, gm_dict=kepler_gm
+            bodies=kepler_bodies, gm_dict=kepler_gm,
+            kepler_use_short=(args.kepler_table == "short")
         )
         agg = aggregate_results(errs)
         key = f"kepler_{integrator}"
