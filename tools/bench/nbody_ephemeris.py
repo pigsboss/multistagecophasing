@@ -165,12 +165,6 @@ def get_truth_state(eph: HighPrecisionEphemeris, et_seconds: float,
         )
         states.append(state)
 
-    # --- TEMPORARY DEBUG: print Sun state ---
-    if "SUN" in bodies:
-        idx = bodies.index("SUN")
-        sun_state = states[idx]
-        print(f"DEBUG get_truth_state: SUN at et={et_seconds:.0f} -> pos={sun_state[:3]}, vel={sun_state[3:6]}, |v|={np.linalg.norm(sun_state[3:6]):.2f} m/s")
-
     return np.concatenate(states)
 
 # ----------------------------------------------------------------------
@@ -221,6 +215,7 @@ def run_method_1_or_2(
     sigma_vel: float,
     rtol: float,
     atol: float,
+    max_step: float,
     truth_eph: HighPrecisionEphemeris,
     bodies: List[str],
     gm_dict: Dict[str, float],
@@ -250,11 +245,6 @@ def run_method_1_or_2(
             base_y0[6*idx:6*idx+6] = full_y0[6*global_idx:6*global_idx+6]
     else:  # "spice"
         base_y0 = y_spice0.copy()
-        # Verify that Sun velocity is small (should be ~10 m/s from SPICE)
-        idx_sun = bodies.index("SUN")
-        sun_vel_from_spice = base_y0[6*idx_sun+3:6*idx_sun+6]
-        if np.linalg.norm(sun_vel_from_spice) > 50.0:
-            raise RuntimeError(f"Sun velocity from SPICE too large: {sun_vel_from_spice} (|v|={np.linalg.norm(sun_vel_from_spice):.2f} m/s)")
 
     # Prepare propagator factory
     mu_list = [gm_dict[b] for b in bodies]
@@ -288,7 +278,7 @@ def run_method_1_or_2(
                 integrator=integrator,
                 rtol=rtol,
                 atol=atol,
-                max_step=86400.0,   # 强制最大步长
+                max_step=max_step,   # 强制最大步长
             )
             # Overwrite Sun state directly in propagator's buffer
             if "SUN" in bodies:
@@ -361,6 +351,8 @@ def main():
                         help="Position perturbation std (meters)")
     parser.add_argument("--sigma-vel", type=float, default=1e-3,
                         help="Velocity perturbation std (m/s)")
+    parser.add_argument("--max-step", type=float, default=1800.0,
+                        help="Max integration step size in seconds (default: 1800)")
     parser.add_argument("--rtol", type=float, default=1e-9)
     parser.add_argument("--atol", type=float, default=1e-12)
     parser.add_argument("--output", type=Path, help="Save results as JSON")
@@ -395,7 +387,8 @@ def main():
             print(f"\nRunning method 1 (Kepler + noise) with {integrator}...")
             errs = run_method_1_or_2(
                 "kepler", integrator, delta_sec, args.n_samples,
-                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph,
+                args.sigma_pos, args.sigma_vel, args.rtol, args.atol,
+                args.max_step, truth_eph,
                 bodies=use_bodies, gm_dict=use_gm
             )
             agg = aggregate_results(errs)
@@ -407,7 +400,8 @@ def main():
             print(f"\nRunning method 2 (SPICE + noise) with {integrator}...")
             errs = run_method_1_or_2(
                 "spice", integrator, delta_sec, args.n_samples,
-                args.sigma_pos, args.sigma_vel, args.rtol, args.atol, truth_eph,
+                args.sigma_pos, args.sigma_vel, args.rtol, args.atol,
+                args.max_step, truth_eph,
                 bodies=use_bodies, gm_dict=use_gm
             )
             agg = aggregate_results(errs)
