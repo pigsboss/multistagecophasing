@@ -1,3 +1,31 @@
+# Approximate Positions of the Planets
+
+### Introduction
+
+Lower accuracy formulae for planetary positions have a number of important applications when one doesn’t need the full accuracy of an integrated ephemeris. They are often used in observation scheduling, telescope pointing, and prediction of certain phenomena as well as in the planning and design of spacecraft missions.
+
+Approximate positions of the planets may be found by using Keplerian formulae with their associated elements and rates. Such elements are not intended to represent any sort of mean; they are simply the result of being adjusted for a best fit. As such, it must be noted that the elements are not valid outside the given time-interval over which they were fit.
+
+High precision ephemerides for the planets are available via the [Horizons system](https://ssd.jpl.nasa.gov/horizons/).
+
+### Accuracy
+
+The table below lists nominal errors in heliocentric longitude, λ, latitude, φ, and distance, ρ, using this approximation of planetary positions.
+
+|          | 1800 AD — 2050 AD | 3000 BC — 3000 AD |             |            |            |             |
+| :------- | :---------------: | :---------------: | :---------: | :--------: | :--------: | ----------- |
+|          |    λ (arcsec)     |    ϕ (arcsec)     | ρ (1000 km) | λ (arcsec) | ϕ (arcsec) | ρ (1000 km) |
+| Mercury  |        15         |         1         |      1      |     20     |     15     | 1           |
+| Venus    |        20         |         1         |      4      |     40     |     30     | 8           |
+| EM Bary† |        20         |         8         |      6      |     40     |     15     | 15          |
+| Mars     |        40         |         2         |     25      |    100     |     40     | 30          |
+| Jupiter  |        400        |        10         |     600     |    600     |    100     | 1000        |
+| Saturn   |        600        |        25         |    1500     |    1000    |    100     | 4000        |
+| Uranus   |        50         |         2         |    1000     |    2000    |     30     | 8000        |
+| Neptune  |        10         |         1         |     200     |    400     |     15     | 4000        |
+
+**† EM Bary** = Earth/Moon Barycenter
+
 ### Keplerian Elements and Rates
 
 #### Table 1
