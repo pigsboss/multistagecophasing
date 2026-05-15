@@ -69,9 +69,9 @@ from mission_sim.utils.solvers.keplerian import (
 # Rotation from J2000 ecliptic to equatorial (ICRF)
 _OBLIQUITY_J2000 = math.radians(23.4392911111)
 _R_ECL2EQ = np.array([
-    [1.0, 0.0,                       0.0                     ],
-    [0.0, math.cos(_OBLIQUITY_J2000), math.sin(_OBLIQUITY_J2000)],
-    [0.0, -math.sin(_OBLIQUITY_J2000), math.cos(_OBLIQUITY_J2000)]
+    [1.0, 0.0,                        0.0                      ],
+    [0.0, math.cos(_OBLIQUITY_J2000), -math.sin(_OBLIQUITY_J2000)],
+    [0.0, math.sin(_OBLIQUITY_J2000),  math.cos(_OBLIQUITY_J2000)]
 ])
 
 # Body ordering (kept consistent with GM list)
