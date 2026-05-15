@@ -439,13 +439,15 @@ def main():
         spice_bodies = ["SUN", "EARTH"]
         spice_gm = {k: GM_DICT[k] for k in spice_bodies}
         kepler_bodies = ["EARTH"]
-        kepler_gm = {"EARTH": GM_DICT["EARTH"]}
+        # Fix: include SUN in kepler_gm for gm_dict["SUN"]
+        kepler_gm = {"SUN": GM_DICT["SUN"], "EARTH": GM_DICT["EARTH"]}
         print("DEBUG: Two-body mode (Sun+Earth for SPICE; Earth only for Kepler)")
     else:
         spice_bodies = BODIES
         spice_gm = GM_DICT
         kepler_bodies = BODIES[1:]   # exclude Sun for heliocentric comparison
-        kepler_gm = {k: GM_DICT[k] for k in kepler_bodies}
+        # Fix: include SUN in kepler_gm for gm_dict["SUN"]
+        kepler_gm = {"SUN": GM_DICT["SUN"], **{k: GM_DICT[k] for k in kepler_bodies}}
 
     all_output = {}
     integrator = args.integrator
