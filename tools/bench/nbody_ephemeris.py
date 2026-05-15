@@ -375,52 +375,6 @@ def main():
     # Time span in seconds
     delta_sec = args.delta_years * 365.25 * 86400.0
 
-    # ------------------------------------------------------------------
-    # Debug: analytic two‑body comparison (Sun‑Earth only)
-    # ------------------------------------------------------------------
-    if args.debug_two_body:
-        mu_sun = GM_DICT["SUN"]
-        # Obtain J2000 relative state
-        sun_state = get_truth_state(truth_eph, 0.0, ["SUN"])
-        earth_state = get_truth_state(truth_eph, 0.0, ["EARTH"])
-        r_rel = earth_state[:3] - sun_state[:3]
-        v_rel = earth_state[3:6] - sun_state[3:6]
-
-        # Convert to Kepler elements (simple inverse)
-        from mission_sim.utils.solvers.keplerian import cartesian_to_kepler_elements
-        a, e, i, Omega, omega, M0 = cartesian_to_kepler_elements(
-            r_rel, v_rel, mu_sun
-        )
-
-        # ---- 重建验证 ----
-        state_rel_recon = kepler_elements_to_cartesian_batch(
-            np.array([a]), np.array([e]), np.array([i]),
-            np.array([Omega]), np.array([omega]), np.array([M0]),
-            mu_sun
-        )[0]
-        recon_err = np.linalg.norm(state_rel_recon[:3] - r_rel)
-        print(f"Reconstruction error at t0: {recon_err:.3f} m")
-
-        n = math.sqrt(mu_sun / a ** 3)
-        dt = delta_sec
-        M_end = M0 + n * dt
-
-        # Propagate analytically
-        state_rel_end = kepler_elements_to_cartesian_batch(
-            np.array([a]), np.array([e]), np.array([i]),
-            np.array([Omega]), np.array([omega]), np.array([M_end]),
-            mu_sun
-        )[0]
-
-        # SPICE end state
-        sun_end = get_truth_state(truth_eph, dt, ["SUN"])
-        earth_end = get_truth_state(truth_eph, dt, ["EARTH"])
-        r_rel_end_spice = earth_end[:3] - sun_end[:3]
-
-        pos_err = np.linalg.norm(state_rel_end[:3] - r_rel_end_spice)
-        print(f"Analytic two‑body pos error after {args.delta_years:.4f} yr: {pos_err:.3f} m")
-        sys.exit(0)
-
     # Determine bodies and gm dict based on debug flag
     if args.debug_two_body:
         use_bodies = ["SUN", "EARTH"]
