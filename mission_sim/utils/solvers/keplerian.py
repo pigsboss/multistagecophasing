@@ -18,6 +18,7 @@ from numba import njit, prange
 # 公共辅助函数
 # ---------------------------------------------------------------------------
 
+
 @njit
 def _rotate_orbital_to_inertial(x_orb, y_orb, vx_orb, vy_orb,
                                 cos_i, sin_i, cos_Omega, sin_Omega,
@@ -45,6 +46,98 @@ def _rotate_orbital_to_inertial(x_orb, y_orb, vx_orb, vy_orb,
     vz = vz1
 
     return x, y, z, vx, vy, vz
+
+
+@njit
+def cartesian_to_kepler_elements(r_vec, v_vec, mu):
+    """
+    Convert Cartesian state (relative to central body) to Kepler elements.
+    r_vec : position (m)
+    v_vec : velocity (m/s)
+    mu    : gravitational parameter (m^3/s^2)
+    Returns (a, e, i, Omega, omega, M) – all scalars in rad, m.
+    """
+    eps = 1e-30
+    r = np.linalg.norm(r_vec)
+    v = np.linalg.norm(v_vec)
+
+    # angular momentum
+    h_vec = np.cross(r_vec, v_vec)
+    h = np.linalg.norm(h_vec)
+    if h < eps:
+        return (0., 0., 0., 0., 0., 0.)
+
+    # node vector
+    k_vec = np.array([0., 0., 1.])
+    n_vec = np.cross(k_vec, h_vec)
+    n = np.linalg.norm(n_vec)
+
+    # eccentricity vector
+    e_vec = (np.cross(v_vec, h_vec) / mu) - (r_vec / r)
+    e = np.linalg.norm(e_vec)
+    if e < eps:
+        e = 0.0
+
+    # semi‑latus rectum
+    p = h * h / mu
+    # semi‑major axis from energy
+    a = 1.0 / (2.0 / r - v * v / mu)
+
+    # inclination
+    i = np.arccos(h_vec[2] / h)
+
+    # right ascension of ascending node
+    if n > eps:
+        Omega = np.arccos(n_vec[0] / n)
+        if n_vec[1] < 0.0:
+            Omega = 2.0 * np.pi - Omega
+    else:
+        Omega = 0.0
+
+    # argument of periapsis
+    if e > eps and n > eps:
+        omega = np.arccos(np.dot(n_vec, e_vec) / (n * e))
+        if e_vec[2] < 0.0:
+            omega = 2.0 * np.pi - omega
+    elif e > eps:
+        omega = np.arccos(e_vec[0] / e)
+        if e_vec[0] < 0.0:
+            omega = 2.0 * np.pi - omega
+    else:
+        omega = 0.0
+
+    # true anomaly
+    if e > eps:
+        cos_nu = np.dot(e_vec, r_vec) / (e * r)
+        # guard against rounding
+        cos_nu = max(min(cos_nu, 1.0), -1.0)
+        nu = np.arccos(cos_nu)
+        if np.dot(r_vec, v_vec) < 0.0:
+            nu = 2.0 * np.pi - nu
+    else:
+        # circular – use argument of latitude
+        if n > eps:
+            nu = np.arccos(np.dot(n_vec, r_vec) / (n * r))
+            if r_vec[2] < 0.0:
+                nu = 2.0 * np.pi - nu
+        else:
+            nu = np.arccos(r_vec[0] / r)
+            if v_vec[0] < 0.0:
+                nu = 2.0 * np.pi - nu
+
+        omega = 0.0  # not uniquely defined
+
+    # eccentric anomaly
+    cos_E = (r / a) * np.cos(nu) + e
+    sin_E = (r / (a * np.sqrt(1.0 - e * e))) * np.sin(nu)
+    E = np.arctan2(sin_E, cos_E)
+    if E < 0.0:
+        E += 2.0 * np.pi
+
+    # mean anomaly
+    M = E - e * np.sin(E)
+
+    return a, e, i, Omega, omega, M
 
 
 # ---------------------------------------------------------------------------
