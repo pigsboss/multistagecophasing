@@ -274,12 +274,14 @@ def run_method_1_or_2(
         # Get Kepler initial state for all bodies in heliocentric equatorial
         t_cy = 0.0  # J2000
         mu_sun = gm_dict["SUN"]
+        inv_map = {v: k for k, v in _MEAN_NAME_MAP.items()}
         base_y0 = np.empty(6 * len(bodies))
         for idx, bname in enumerate(bodies):
             if bname == "SUN":
                 base_y0[6*idx:6*idx+6] = 0.0
                 continue
-            state_ecl = get_elements_cartesian(bname.lower(), t_cy, mu_sun)  # (6,) in ecliptic
+            kep_name = inv_map[bname]
+            state_ecl = get_elements_cartesian(kep_name, t_cy, mu_sun)
             state_eq = np.concatenate([
                 _R_ECL2EQ @ state_ecl[:3],
                 _R_ECL2EQ @ state_ecl[3:6]
