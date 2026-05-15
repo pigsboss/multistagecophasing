@@ -274,77 +274,33 @@ def run_method_1_or_2(
 
     # Base initial state for each method
     if method == "kepler":
-        # Use JPL short-period mean elements (Table 1)
-        t_cy = 0.0
+        # Compute target epoch in Julian centuries
+        t_cy_end = delta_sec / (36525.0 * 86400.0)
         mu_sun = gm_dict["SUN"]
         inv_map = {v: k for k, v in _MEAN_NAME_MAP.items()}
 
-        # ---- Detailed JPL vs SPICE at J2000 ----
-        print("\nDetailed JPL vs SPICE at J2000 (heliocentric, equatorial):")
-        for bname in bodies:
-            if bname == "SUN":
-                continue
-            kep_name = inv_map[bname]
-            el = get_elements_short(kep_name, t_cy)
-            a, e_orb, inc, Omega, omega, M0 = (
-                el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
-            )
-            print(f"\n{bname}:")
-            print(f"  a={a:.6e} m, e={e_orb:.8f}, i={inc:.8f} rad")
-            print(f"  Omega={Omega:.8f} rad, omega={omega:.8f} rad, M={M0:.8f} rad")
-            state_ecl = kepler_elements_to_cartesian_batch(
-                np.array([a]), np.array([e_orb]), np.array([inc]),
-                np.array([Omega]), np.array([omega]), np.array([M0]),
-                mu_sun
-            )[0]
-            state_eq = np.concatenate([
-                _R_ECL2EQ @ state_ecl[:3],
-                _R_ECL2EQ @ state_ecl[3:6]
-            ])
-            # Fetch SPICE truth before reverse rotation check
-            spice_state = get_truth_heliocentric_state(truth_eph, 0.0, [bname])
-            # 临时反向旋转验证
-            _R_EQ2ECL = _R_ECL2EQ.T
-            state_eq_test = np.concatenate([
-                _R_EQ2ECL @ state_ecl[:3],
-                _R_EQ2ECL @ state_ecl[3:6]
-            ])
-            diff_rev = state_eq_test - spice_state
-            print(f"  |diff (reverse rot)| = {np.linalg.norm(diff_rev[:3]):.6e} m")
-            diff = state_eq - spice_state
-            print(f"  JPL pos  = {state_eq[:3]} m")
-            print(f"  SPICE pos= {spice_state[:3]} m")
-            print(f"  |diff|   = {np.linalg.norm(diff[:3]):.6e} m")
-        # -----------------------------------------------------------
-
-        # Pre-compute final heliocentric equatorial state for each body
         final_states = []
         for bname in bodies:
             if bname == "SUN":
                 final_states.append(np.zeros(6))
                 continue
             kep_name = inv_map[bname]
-            el = get_elements_short(kep_name, t_cy)
-            a, e_orb, inc, Omega, omega, M0 = (
+            el = get_elements_short(kep_name, t_cy_end)
+            a, e_orb, inc, Omega, omega, M = (
                 el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
             )
-            n = math.sqrt(mu_sun / (a * a * a))
-            M_end = M0 + n * delta_sec
-            # Final heliocentric equatorial state (from ecliptic)
-            state_ecl_end = kepler_elements_to_cartesian_batch(
+            state_ecl = kepler_elements_to_cartesian_batch(
                 np.array([a]), np.array([e_orb]), np.array([inc]),
-                np.array([Omega]), np.array([omega]), np.array([M_end]),
+                np.array([Omega]), np.array([omega]), np.array([M]),
                 mu_sun
             )[0]
-            state_eq_end = np.concatenate([
-                _R_ECL2EQ @ state_ecl_end[:3],
-                _R_ECL2EQ @ state_ecl_end[3:6]
+            state_eq = np.concatenate([
+                _R_ECL2EQ @ state_ecl[:3],
+                _R_ECL2EQ @ state_ecl[3:6]
             ])
-            final_states.append(state_eq_end)
+            final_states.append(state_eq)
 
         y_final = np.concatenate(final_states)
-
-        # Compare with SPICE truth once, then replicate for all samples
         y_spice_end = get_truth_heliocentric_state(truth_eph, delta_sec, bodies)
         base_err = compute_errors(y_final, y_spice_end, bodies)
         base_err["_time"] = 0.0
