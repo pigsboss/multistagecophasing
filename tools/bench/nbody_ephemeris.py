@@ -375,9 +375,13 @@ def aggregate_results(errors_list: List[Dict[str, float]]) -> Dict[str, Any]:
     return agg
 
 def print_summary(method_name: str, integrator: str, agg: Dict[str, Any],
-                  bodies: List[str], unit_scale: float = 1.0, unit_str: str = "m"):
+                  bodies: List[str], unit_scale: float = 1.0, unit_str: str = "m",
+                  show_integrator: bool = True):
     print(f"\n{'='*60}")
-    print(f"METHOD: {method_name} | INTEGRATOR: {integrator}")
+    if show_integrator:
+        print(f"METHOD: {method_name} | INTEGRATOR: {integrator}")
+    else:
+        print(f"METHOD: {method_name}")
     print(f"{'='*60}")
     print(f"Position errors (mean ± std, {unit_str}):")
     for b in bodies:
@@ -457,7 +461,7 @@ def main():
         key = f"kepler_{integrator}"
         all_output[key] = agg
         print_summary("Kepler (Method 1)", integrator, agg, bodies=kepler_bodies,
-                      unit_scale=1e-3, unit_str="km")
+                      unit_scale=1e-3, unit_str="km", show_integrator=False)
 
     if args.method in ("spice", "all"):
         print(f"\nRunning method 2 (SPICE + noise) with {integrator}...")
