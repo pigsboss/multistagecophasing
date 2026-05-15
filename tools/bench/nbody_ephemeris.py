@@ -54,6 +54,7 @@ from mission_sim.core.spacetime.ephemeris.high_precision import (
 from mission_sim.core.spacetime.ephemeris.jpl_ssb_keplerian_elements import (
     get_all_planet_states,
     get_elements_cartesian,
+    get_elements,
 )
 from mission_sim.utils.solvers.keplerian import (
     kepler_elements_to_cartesian_batch,
@@ -271,66 +272,60 @@ def run_method_1_or_2(
 
     # Base initial state for each method
     if method == "kepler":
-        # Get Kepler initial state for all bodies in heliocentric equatorial
-        t_cy = 0.0  # J2000
+        # Use JPL mean elements directly (no noise, no re-extraction)
+        t_cy = 0.0
         mu_sun = gm_dict["SUN"]
         inv_map = {v: k for k, v in _MEAN_NAME_MAP.items()}
-        base_y0 = np.empty(6 * len(bodies))
-        for idx, bname in enumerate(bodies):
+
+        # Pre-compute final heliocentric equatorial state for each body
+        final_states = []
+        for bname in bodies:
             if bname == "SUN":
-                base_y0[6*idx:6*idx+6] = 0.0
+                final_states.append(np.zeros(6))
                 continue
             kep_name = inv_map[bname]
-            state_ecl = get_elements_cartesian(kep_name, t_cy, mu_sun)
-            state_eq = np.concatenate([
-                _R_ECL2EQ @ state_ecl[:3],
-                _R_ECL2EQ @ state_ecl[3:6]
+            el = get_elements(kep_name, t_cy)
+            a, e_orb, inc, Omega, omega, M0 = (
+                el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
+            )
+            n = math.sqrt(mu_sun / (a * a * a))
+            M_end = M0 + n * delta_sec
+            # Final heliocentric equatorial state (from ecliptic)
+            state_ecl_end = kepler_elements_to_cartesian_batch(
+                np.array([a]), np.array([e_orb]), np.array([inc]),
+                np.array([Omega]), np.array([omega]), np.array([M_end]),
+                mu_sun
+            )[0]
+            state_eq_end = np.concatenate([
+                _R_ECL2EQ @ state_ecl_end[:3],
+                _R_ECL2EQ @ state_ecl_end[3:6]
             ])
-            base_y0[6*idx:6*idx+6] = state_eq
+            final_states.append(state_eq_end)
+
+        y_final = np.concatenate(final_states)
+
+        # Compare with SPICE truth once, then replicate for all samples
+        y_spice_end = get_truth_heliocentric_state(truth_eph, delta_sec, bodies)
+        base_err = compute_errors(y_final, y_spice_end, bodies)
+        base_err["_time"] = 0.0
+        base_err["_mem"] = 0.0
+        return [base_err.copy() for _ in range(n_samples)]
+
     else:  # "spice"
         base_y0 = y_spice0.copy()
+        mu_list = [gm_dict[b] for b in bodies]
 
-    # Prepare propagator factory
-    mu_list = [gm_dict[b] for b in bodies]
+        results = []
+        for sample in range(n_samples):
+            # Generate noise
+            pos_len = 3 * len(bodies)
+            noise_pos = np.random.normal(0, sigma_pos, pos_len)
+            noise_vel = np.random.normal(0, sigma_vel, pos_len)
+            y_init = base_y0.copy()
+            for i in range(len(bodies)):
+                y_init[6*i:6*i+3] += noise_pos[3*i:3*i+3]
+                y_init[6*i+3:6*i+6] += noise_vel[3*i:3*i+3]
 
-    results = []
-    for sample in range(n_samples):
-        # Generate noise
-        pos_len = 3 * len(bodies)
-        noise_pos = np.random.normal(0, sigma_pos, pos_len)
-        noise_vel = np.random.normal(0, sigma_vel, pos_len)
-        y_init = base_y0.copy()
-        for i in range(len(bodies)):
-            y_init[6*i:6*i+3] += noise_pos[3*i:3*i+3]
-            y_init[6*i+3:6*i+6] += noise_vel[3*i:3*i+3]
-
-        if method == "kepler":
-            # Propagate each planet independently via Kepler's equation
-            y_final = np.empty_like(y_init)
-            for i, bname in enumerate(bodies):
-                if bname == "SUN":
-                    y_final[6*i:6*i+6] = 0.0
-                    continue
-                state0 = y_init[6*i:6*i+6]
-                a, e_orb, inc, Omega, omega, M0 = cartesian_to_kepler_elements(
-                    state0[:3], state0[3:6], gm_dict["SUN"]
-                )
-                if a <= 0.0:
-                    # fallback: keep initial state (very unlikely)
-                    y_final[6*i:6*i+6] = state0
-                    continue
-                n = math.sqrt(gm_dict["SUN"] / (a * a * a))
-                M = M0 + n * delta_sec
-                state_helio = kepler_elements_to_cartesian_batch(
-                    np.array([a]), np.array([e_orb]), np.array([inc]),
-                    np.array([Omega]), np.array([omega]), np.array([M]),
-                    gm_dict["SUN"]
-                )[0]
-                y_final[6*i:6*i+6] = state_helio
-            # measurement of time is trivial; skip timing inside loop
-            elapsed = 0.0
-            mem_peak = 0.0
-        else:
             # Build initial dict for N‑body propagator
             init_dict = {}
             for idx, bname in enumerate(bodies):
@@ -351,16 +346,16 @@ def run_method_1_or_2(
                 y_final = np.empty(6 * len(bodies))
                 for idx, bname in enumerate(bodies):
                     y_final[6*idx:6*idx+6] = prop.get_body_state(bname, delta_sec)
-            elapsed = tmr.elapsed
-            mem_peak = tmr.mem_peak if tmr.mem_peak is not None else 0.0
+                elapsed = tmr.elapsed
+                mem_peak = tmr.mem_peak if tmr.mem_peak is not None else 0.0
 
-        # Compute errors
-        err = compute_errors(y_final, y_spice_end, bodies)
-        err["_time"] = elapsed
-        err["_mem"] = mem_peak
-        results.append(err)
+            # Compute errors
+            err = compute_errors(y_final, y_spice_end, bodies)
+            err["_time"] = elapsed
+            err["_mem"] = mem_peak
+            results.append(err)
 
-    return results
+        return results
 
 # ----------------------------------------------------------------------
 # Aggregate and display
