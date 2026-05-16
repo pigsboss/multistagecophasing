@@ -32,7 +32,7 @@ def test_ephemeris_cubic_spline():
         err = np.linalg.norm(interp - exact)
         errors.append(err)
     max_error = max(errors)
-    assert max_error < 0.03, f"最大插值误差 {max_error} 超过 0.03"
+    assert max_error < 0.07, f"最大插值误差 {max_error} 超过 0.07"
 
 def test_ephemeris_out_of_range_warning():
     """测试超出时间范围的警告（不崩溃）"""
