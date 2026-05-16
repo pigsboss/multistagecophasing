@@ -262,62 +262,46 @@ class HighPrecisionEphemeris:
                                   epoch: float,
                                   frame: Union[str, CoordinateFrame]) -> np.ndarray:
         """
-        最小分析回退：仅支持 Sun, Earth, Moon 相对于 SSB。
-        使用短周期开普勒根数。
-        对于其他天体抛出 NotImplementedError。
+        最小分析回退：支持 Sun, Earth (EM Bary), Moon 相对于任意已支持观察者。
+        使用短周期 Kepler 根数计算 SSB 状态，然后通过向量差转换到任意观察者。
         """
         target = self._normalize_body(target_body)
         observer = self._normalize_body(observer_body)
 
-        # 仅支持 observer = SSB
+        # 计算 SSB 状态的辅助函数（避免递归）
+        def _ssb_state(body: CelestialBody) -> np.ndarray:
+            if body == CelestialBody.SUN:
+                return np.zeros(6)
+            elif body in (CelestialBody.EARTH, CelestialBody.EARTH_BARYCENTER):
+                t_cy = epoch / (36525.0 * 86400.0)
+                el = get_elements_short("EM Bary", t_cy)
+                a, e, inc, Omega, omega, M = (
+                    el["a"], el["e"], el["i"], el["Omega"], el["omega"], el["M"]
+                )
+                mu_sun = 1.32712440041279419e20
+                state_ecl = kepler_elements_to_cartesian_batch(
+                    np.array([a]), np.array([e]), np.array([inc]),
+                    np.array([Omega]), np.array([omega]), np.array([M]), mu_sun
+                )[0]
+                return np.concatenate([
+                    _R_ECL2EQ @ state_ecl[:3],
+                    _R_ECL2EQ @ state_ecl[3:6]
+                ])
+            elif body == CelestialBody.MOON:
+                # Moon relative to SSB: EM Bary + fixed offset
+                em_state = _ssb_state(CelestialBody.EARTH_BARYCENTER)
+                r_moon_rel = np.array([384400e3, 0.0, 0.0])
+                return em_state + np.concatenate([r_moon_rel, np.zeros(3)])
+            else:
+                raise NotImplementedError(
+                    f"Analytical mode does not support body {body}"
+                )
+
+        # 计算相对于非 SSB 观察者的状态
         if observer != CelestialBody.SSB:
-            raise NotImplementedError(
-                f"Analytical mode only supports observer=SSB, got {observer}"
-            )
-
-        # 将 epoch 秒转换为儒略世纪 (J2000)
-        t_cy = epoch / (36525.0 * 86400.0)
-
-        if target == CelestialBody.SUN:
-            # 太阳相对于 SSB 始终为零
-            return np.zeros(6)
-        elif target == CelestialBody.EARTH or target == CelestialBody.EARTH_BARYCENTER:
-            # 使用 EM Bary 根数 (gives Earth-Moon barycenter)
-            el = get_elements_short("EM Bary", t_cy)
-            # 开普勒参数
-            a = el["a"]
-            e = el["e"]
-            inc = el["i"]
-            Omega = el["Omega"]
-            omega = el["omega"]
-            M = el["M"]
-            mu = 1.32712440041279419e20  # 太阳 GM (m^3/s^2)
-
-            # 在黄道系中计算状态
-            state_ecl = kepler_elements_to_cartesian_batch(
-                np.array([a]), np.array([e]), np.array([inc]),
-                np.array([Omega]), np.array([omega]), np.array([M]),
-                mu
-            )[0]
-
-            # 旋转到 ICRF 赤道坐标系
-            state_eq = np.concatenate([
-                _R_ECL2EQ @ state_ecl[:3],
-                _R_ECL2EQ @ state_ecl[3:6]
-            ])
-            return state_eq
-        elif target == CelestialBody.MOON:
-            # 获取 EM Bary 状态
-            earth_state = self._compute_analytical_state(
-                CelestialBody.EARTH, CelestialBody.SSB, epoch, frame
-            )
-            # 月球相对 EM Bary 的近似位置 (J2000 赤道系，粗糙但足够)
-            r_moon_rel = np.array([384400e3, 0.0, 0.0])
-            return earth_state + np.concatenate([r_moon_rel, np.zeros(3)])
+            return _ssb_state(target) - _ssb_state(observer)
         else:
-            raise NotImplementedError(
-                f"Analytical mode only supports Sun, Earth and Moon, got {target}"
-            )
+            return _ssb_state(target)
 
     def _compute_spice_state(self,
                             target: CelestialBody,
