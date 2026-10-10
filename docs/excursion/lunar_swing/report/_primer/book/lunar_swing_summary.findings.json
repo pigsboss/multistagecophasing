@@ -1,0 +1,93 @@
+{
+  "jobname": "lunar_swing_summary",
+  "findings": [
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait wrap at zihao -4 (wrapped to the text block)",
+      "location": "V1#20"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait wrap at zihao -4 (wrapped to the text block)",
+      "location": "V2#6"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait wrap at zihao -4 (wrapped to the text block)",
+      "location": "V2#16"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait wrap at zihao -4 (wrapped to the text block)",
+      "location": "V3#8"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait fit at zihao -4 (table fits the text block)",
+      "location": "V3#16"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait fit at zihao -5 (table fits the text block)",
+      "location": "V4#7"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait fit at zihao -5 (table fits the text block)",
+      "location": "V4#10"
+    },
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "message": "portrait wrap at zihao -4 (wrapped to the text block)",
+      "location": "VA#5"
+    },
+    {
+      "code": "running-head-truncated",
+      "severity": "info",
+      "message": "shortened 2 running-head mark(s) to fit the header width; the cut is marked with an ellipsis",
+      "location": ""
+    },
+    {
+      "code": "underfull-hbox",
+      "severity": "warning",
+      "message": "hbox underfull (badness 10000)",
+      "location": "page 64, line(s) 537--537"
+    },
+    {
+      "code": "undefined-font-shape",
+      "severity": "warning",
+      "message": "font shape 'OMS/TimesNewRoman(0)/m/n' is undefined; the engine substituted 'OMS/cmsy/m/n'",
+      "location": ""
+    }
+  ],
+  "summary": [
+    {
+      "code": "table-layout",
+      "severity": "info",
+      "count": 8
+    },
+    {
+      "code": "running-head-truncated",
+      "severity": "info",
+      "count": 1
+    },
+    {
+      "code": "underfull-hbox",
+      "severity": "warning",
+      "count": 1
+    },
+    {
+      "code": "undefined-font-shape",
+      "severity": "warning",
+      "count": 1
+    }
+  ]
+}

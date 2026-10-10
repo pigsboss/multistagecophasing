@@ -1,0 +1,104 @@
+FFFFFFFFFFF                                                              [100%]
+=================================== FAILURES ===================================
+______________________ test_t_as_001_continuation_family _______________________
+
+    def test_t_as_001_continuation_family():
+>       from mission_sim.core.cyber.algorithms.family_continuation import continue_family
+E       ModuleNotFoundError: No module named 'mission_sim.core.cyber.algorithms.family_continuation'
+
+tests/atmospheric_swing/test_as_solver.py:22: ModuleNotFoundError
+________________________ test_t_as_002_low_perigee_2to1 ________________________
+
+    def test_t_as_002_low_perigee_2to1():
+>       from mission_sim.core.cyber.algorithms.low_perigee import search_low_perigee
+E       ModuleNotFoundError: No module named 'mission_sim.core.cyber.algorithms.low_perigee'
+
+tests/atmospheric_swing/test_as_solver.py:52: ModuleNotFoundError
+________________________ test_t_as_003_low_perigee_3to2 ________________________
+
+    def test_t_as_003_low_perigee_3to2():
+>       from mission_sim.core.cyber.algorithms.low_perigee import search_low_perigee
+E       ModuleNotFoundError: No module named 'mission_sim.core.cyber.algorithms.low_perigee'
+
+tests/atmospheric_swing/test_as_solver.py:73: ModuleNotFoundError
+___________________ test_t_as_004_variable_step_consistency ____________________
+
+    def test_t_as_004_variable_step_consistency():
+>       from mission_sim.utils.dynamics.compiled_kernels import (
+            rk4_propagate, rk4_propagate_adaptive)
+E       ModuleNotFoundError: No module named 'mission_sim.utils.dynamics.compiled_kernels'
+
+tests/atmospheric_swing/test_as_solver.py:88: ModuleNotFoundError
+_____________________________ test_t_as_005_events _____________________________
+
+    def test_t_as_005_events():
+>       from mission_sim.utils.dynamics import events
+E       ImportError: cannot import name 'events' from 'mission_sim.utils.dynamics' (unknown location)
+
+tests/atmospheric_swing/test_as_solver.py:102: ImportError
+____________________ test_t_as_009_compiled_kernel_identity ____________________
+
+    def test_t_as_009_compiled_kernel_identity():
+>       from mission_sim.utils.dynamics import compiled_kernels as ck
+E       ImportError: cannot import name 'compiled_kernels' from 'mission_sim.utils.dynamics' (unknown location)
+
+tests/atmospheric_swing/test_as_solver.py:132: ImportError
+_________________ test_t_as_009b_mlx_screening_and_degradation _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1113ea1b0>
+
+    def test_t_as_009b_mlx_screening_and_degradation(monkeypatch):
+>       from mission_sim.utils.dynamics import mlx_screen
+E       ImportError: cannot import name 'mlx_screen' from 'mission_sim.utils.dynamics' (unknown location)
+
+tests/atmospheric_swing/test_as_solver.py:161: ImportError
+_____________________ test_t_as_010_acceleration_baseline ______________________
+
+capsys = <_pytest.capture.CaptureFixture object at 0x111cdd6a0>
+
+    def test_t_as_010_acceleration_baseline(capsys):
+>       from mission_sim.utils.dynamics import compiled_kernels as ck
+E       ImportError: cannot import name 'compiled_kernels' from 'mission_sim.utils.dynamics' (unknown location)
+
+tests/atmospheric_swing/test_as_solver.py:179: ImportError
+_____________________ test_t_as_006_energy_ledger_closure ______________________
+
+    def test_t_as_006_energy_ledger_closure():
+        from scipy.integrate import solve_ivp
+    
+>       from mission_sim.analysis.energy_ledger import ledger_closure
+E       ModuleNotFoundError: No module named 'mission_sim.analysis'
+
+tests/atmospheric_swing/test_as_tools.py:18: ModuleNotFoundError
+_______________________ test_t_as_007_sensitivity_sweep ________________________
+
+    def test_t_as_007_sensitivity_sweep():
+>       from mission_sim.analysis.sensitivity import parameter_sweep
+E       ModuleNotFoundError: No module named 'mission_sim.analysis'
+
+tests/atmospheric_swing/test_as_tools.py:53: ModuleNotFoundError
+_________________ test_t_as_008_acceptance_script_no_backdoor __________________
+
+    def test_t_as_008_acceptance_script_no_backdoor():
+        script = (pathlib.Path(__file__).resolve().parents[2]
+                  / "scripts" / "atmospheric_swing" / "acceptance_as.py")
+>       assert script.exists(), "AS 验收脚本不存在"
+E       AssertionError: AS 验收脚本不存在
+E       assert False
+E        +  where False = exists()
+E        +    where exists = PosixPath('/Users/huo/Projects/multistagecophasing/scripts/atmospheric_swing/acceptance_as.py').exists
+
+tests/atmospheric_swing/test_as_tools.py:73: AssertionError
+=========================== short test summary info ============================
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_001_continuation_family
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_002_low_perigee_2to1
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_003_low_perigee_3to2
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_004_variable_step_consistency
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_005_events - Impo...
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_009_compiled_kernel_identity
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_009b_mlx_screening_and_degradation
+FAILED tests/atmospheric_swing/test_as_solver.py::test_t_as_010_acceleration_baseline
+FAILED tests/atmospheric_swing/test_as_tools.py::test_t_as_006_energy_ledger_closure
+FAILED tests/atmospheric_swing/test_as_tools.py::test_t_as_007_sensitivity_sweep
+FAILED tests/atmospheric_swing/test_as_tools.py::test_t_as_008_acceptance_script_no_backdoor
+11 failed in 1.11s

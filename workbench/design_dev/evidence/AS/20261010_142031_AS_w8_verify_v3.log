@@ -1,0 +1,6 @@
+[W8-1] 内核一致性 max|Δrhs| = 4.44e-16  → OK
+[W8-2] 近失解半周期：adaptive(scale=2e-5, 步372410) vs DOP853(rtol 1e-13) 状态差=6.35e-08；残差差=6.35e-08（校准：DOP853@1e-11 自身误差~1.6e-6，须 1e-13） → OK
+[W8-3] 近地点事件：30s 采样 0.0000d vs 600s 0.0000d （Δt=0.0s, Δalt=0.00km）
+[W8-4] 负结果重放：found=False best_residual=1.833e+00 n_seeds=512 用时=2.0s（本次 2.0s）
+       留档对照: AS-005 记载的 smoke best_residual 应一致（同配置确定性）
+结论: PASS

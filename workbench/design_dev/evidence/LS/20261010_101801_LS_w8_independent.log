@@ -1,0 +1,13 @@
+== ① 步长敏感性（RK4，单周期全状态闭合残差） ==
+   num_steps=  5000  closure=1.019e-09
+   num_steps= 10000  closure=1.020e-09
+   num_steps= 20000  closure=1.020e-09
+   num_steps= 40000  closure=1.020e-09
+   num_steps= 80000  closure=1.020e-09
+== ② 多积分器单周期闭合（x0 = 2:1 严格解） ==
+   RK4-40000  closure=1.020e-09
+   DOP853     closure=1.022e-09
+   Radau      closure=1.020e-09
+   互差 RK4-40000 vs DOP853: 2.533e-12
+   互差 RK4-40000 vs Radau: 1.475e-13
+   互差 DOP853 vs Radau: 2.663e-12

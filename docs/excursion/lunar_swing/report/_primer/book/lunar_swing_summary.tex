@@ -1,0 +1,548 @@
+% !TeX program = xelatex
+% 本文件由 primer-book 生成，请勿手工维护；改清单后重新构建。
+\documentclass[UTF8,fontset=none]{ctexbook}
+
+\usepackage[a4paper,margin=2.54cm]{geometry}
+\usepackage{graphicx}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{xltabular}
+\usepackage{booktabs}
+\usepackage{adjustbox}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{pdflscape}
+\usepackage{fancyhdr}
+\usepackage{tocloft}
+\usepackage{caption}
+\usepackage{newunicodechar}
+\usepackage[hidelinks,unicode]{hyperref}
+
+% ---------------------------------------------------------------- 字体
+% 正文用衬线（宋体），各级标题用黑体（sans）；fontset=none，字体名由清单给出。
+\setmainfont{Times New Roman}
+\setsansfont{Helvetica Neue}
+\setmonofont{Menlo}
+\setCJKmainfont[AutoFakeBold=2.5,AutoFakeSlant=0.15]{Songti SC}
+\setCJKsansfont[AutoFakeBold=2.5]{Heiti SC}
+\setCJKmonofont[AutoFakeBold=2.5]{Songti SC}
+
+% ---------------------------------------------------------------- 特殊字符
+\newunicodechar{⁻}{\textsuperscript{-}}
+\newunicodechar{⁰}{\textsuperscript{0}}\newunicodechar{¹}{\textsuperscript{1}}
+\newunicodechar{²}{\textsuperscript{2}}\newunicodechar{³}{\textsuperscript{3}}
+\newunicodechar{⁴}{\textsuperscript{4}}\newunicodechar{⁵}{\textsuperscript{5}}
+\newunicodechar{⁶}{\textsuperscript{6}}\newunicodechar{⁷}{\textsuperscript{7}}
+\newunicodechar{⁸}{\textsuperscript{8}}\newunicodechar{⁹}{\textsuperscript{9}}
+\newunicodechar{₀}{\textsubscript{0}}\newunicodechar{₁}{\textsubscript{1}}
+\newunicodechar{₂}{\textsubscript{2}}\newunicodechar{₃}{\textsubscript{3}}
+\newunicodechar{₄}{\textsubscript{4}}\newunicodechar{₅}{\textsubscript{5}}
+\newunicodechar{₆}{\textsubscript{6}}\newunicodechar{₇}{\textsubscript{7}}
+\newunicodechar{₈}{\textsubscript{8}}\newunicodechar{₉}{\textsubscript{9}}
+\newunicodechar{⊕}{$\oplus$}
+\newunicodechar{℃}{$^{\circ}$C}
+\newunicodechar{①}{\textcircled{\scriptsize 1}}\newunicodechar{②}{\textcircled{\scriptsize 2}}
+\newunicodechar{③}{\textcircled{\scriptsize 3}}\newunicodechar{④}{\textcircled{\scriptsize 4}}
+\newunicodechar{⑤}{\textcircled{\scriptsize 5}}\newunicodechar{⑥}{\textcircled{\scriptsize 6}}
+\newunicodechar{⑦}{\textcircled{\scriptsize 7}}\newunicodechar{⑧}{\textcircled{\scriptsize 8}}
+\newunicodechar{⑨}{\textcircled{\scriptsize 9}}\newunicodechar{⑩}{\textcircled{\scriptsize 10}}
+
+% ---------------------------------------------------------------- 版面
+\graphicspath{{sources/}}
+
+% 篇、章、节、小节：标题一律黑体，编号由 LaTeX 自动给出（连续章号）。
+\ctexset{
+  part/name = {第,篇},
+  part/number = \chinese{part},
+  part/format = \sffamily\bfseries\zihao{1},
+  part/nameformat = \sffamily\bfseries,
+  part/titleformat = \sffamily\bfseries,
+  chapter/format = \sffamily\bfseries\zihao{2},
+  chapter/nameformat = \sffamily\bfseries,
+  chapter/titleformat = \sffamily\bfseries,
+  section/format = \sffamily\bfseries\zihao{3},
+  section/nameformat = \sffamily\bfseries,
+  section/titleformat = \sffamily\bfseries,
+  subsection/format = \sffamily\bfseries\zihao{4},
+  subsection/nameformat = \sffamily\bfseries,
+  subsection/titleformat = \sffamily\bfseries,
+  subsubsection/format = \sffamily\bfseries\zihao{-4},
+  subsubsection/nameformat = \sffamily\bfseries,
+  subsubsection/titleformat = \sffamily\bfseries,
+  figurename = 图,
+  tablename = 表,
+}
+
+% 小节以下也编号：附录篇里“#### ”要成为 A.3.3.1 这样的一档。
+\setcounter{secnumdepth}{3}
+
+% 图、表按章编号，取“章-序”的写法（图 10-1）。
+\counterwithin{figure}{chapter}
+\counterwithin{table}{chapter}
+\renewcommand{\thefigure}{\thechapter-\arabic{figure}}
+\renewcommand{\thetable}{\thechapter-\arabic{table}}
+
+\captionsetup{font={small},skip=6pt,labelsep=quad}
+
+% 表格列宽：X 列按权重分配（权重之和等于列数），宽度自动扣掉列间距。
+\newcolumntype{Y}[1]{>{\raggedright\arraybackslash\hsize=#1\hsize}X}
+\setlength{\emergencystretch}{3em}
+\tolerance=2000
+\setlength{\headheight}{17pt}
+
+\linespread{1.25}\selectfont
+\setlength{\parskip}{0.2em}
+\renewcommand\normalsize{\fontsize{14pt}{17.5pt}\selectfont}
+\renewcommand\small{\fontsize{12.6pt}{15.75pt}\selectfont}
+\renewcommand\footnotesize{\fontsize{11.2pt}{14pt}\selectfont}
+\renewcommand\scriptsize{\fontsize{9.8pt}{12.25pt}\selectfont}
+\renewcommand\tiny{\fontsize{7pt}{8.75pt}\selectfont}
+\renewcommand\large{\fontsize{16.8pt}{21pt}\selectfont}
+\renewcommand\Large{\fontsize{20.16pt}{25.2pt}\selectfont}
+\renewcommand\LARGE{\fontsize{24.22pt}{30.275pt}\selectfont}
+\renewcommand\huge{\fontsize{28.98pt}{36.225pt}\selectfont}
+\renewcommand\Huge{\fontsize{34.86pt}{43.575pt}\selectfont}
+
+% 竖向弹性：book 类双面默认 flushbottom，版心必须填满，短页的余量只能由页内
+% 可拉伸的竖直胶吃掉。而一页里唯一带拉伸分量的胶就是节标题的 afterskip
+% （ctex-scheme-chinese-book 给的 section/afterskip = 2.3ex plus .2ex；章题
+% afterskip 是刚性 40pt，动不了），于是整页余量全压到节标题后面，把标题与正文
+% 撕开：第 57 页实测 118pt，正好是该页余量 95pt 加上自然间距 23pt。改用
+% raggedbottom 后，余量由页底那段 fil 胶吸收，标题后只留自然间距；代价是页底
+% 留白不再逐页恒定（该书页底留白中位由 16pt 变成 28pt），短页在末行之后提前收尾。
+\raggedbottom
+
+% ---------------------------------------------------------------- 中文孤字控制
+% 一段的最后一行只剩一个汉字（孤字／widow）在中文排版里是要避免的坏行：句子被切成
+% 一条断尾，读起来像排版事故。xeCJK 的 CheckSingle 会在段末三个汉字之间插入
+% WidowPenalty（10000 即禁止在那里断行），从而整段重排、不许末行落单。
+%
+% 这个机制靠"看见"段末或行末才起作用，而那些位置要认得出来。两种边界都得声明：
+%
+%   NewLineCS+={\\}           行末：表格 p{}/Y 列最后一格的段落以行末的 \\ 收尾。
+%   NewLineCS+={\primercellend}  行内：非末列的格子以对齐符 & 收尾，而 & 是 catcode 4，
+%                             既不是控制序列也不是"other"，CheckSingle 根本不认它；
+%                             所以发射器（tex.CELL_BOUNDARY）在每个 Y 列格子末尾补一个
+%                             记号，这里把它当作行末声明进来。
+%
+% 只声明 \\ 时，孤字控制只对每行的最后一格生效，行内各格全部漏掉（实测：两列
+% 表格首格窄列，末行仍是一个孤零零的"产"）。\primercellend 本身展开为空，不动段落
+% 结构、也不改行高。代价：重排后少数字行的字间距会略松一点。
+\newcommand{\primercellend}{\relax}
+\xeCJKsetup{CheckSingle=true,WidowPenalty=10000,NewLineCS+={\\},NewLineCS+={\primercellend}}
+
+\renewcommand{\contentsname}{目录}
+\renewcommand{\listfigurename}{插图目录}
+\renewcommand{\listtablename}{表格目录}
+\setcounter{tocdepth}{1}
+
+% ---------------------------------------------------------------- 页眉页脚
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE,RO]{\sffamily\small\leftmark}
+\fancyhead[LO,RE]{\sffamily\small\rightmark}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+% 页眉里节的短标记用：\rightmark 取本页第一条标记，而 \section 自己会先发一条
+% 完整题名的标记，所以发射器在那条 \section 前把 \sectionmark 临时换成它，排完
+% 正文再补发短标记。放在导言区定义，正文里就可以直接 \let 使用。
+\newcommand{\primerheadgobble}[1]{}
+\fancypagestyle{plain}{%
+  \fancyhf{}%
+  \fancyfoot[C]{\thepage}%
+  \renewcommand{\headrulewidth}{0pt}%
+}
+
+% ---------------------------------------------------------------- 代码
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  breakatwhitespace=false,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  frame=single,
+  framerule=0.3pt,
+  rulecolor=\color{gray},
+  postbreak=\mbox{\textcolor{gray}{$\hookrightarrow$}\space},
+  aboveskip=0.8em,
+  belowskip=0.8em,
+}
+
+\begin{document}
+
+\begin{titlepage}
+\vspace*{3.5cm}
+\begin{center}
+{\sffamily\zihao{1}\bfseries LUNAR-SWING 研究总结报告}\\[1.2em]
+{\sffamily\zihao{2}\bfseries 严格周期解、摄动演化与低近地点族域勘测}\\[3em]
+{\zihao{4} 一个问题牵引的两轮专题与能力沉淀（LS + AS）}\\[6em]
+{\zihao{3} MCPC 设计组}\\[1em]
+{\zihao{4} 2026年10月10日}
+\end{center}
+\end{titlepage}
+
+
+\clearpage\phantomsection
+\chapter*{凡　例}
+\addcontentsline{toc}{chapter}{凡例}
+\noindent 一、本报告汇总 LUNAR-SWING 研究线两轮专题的完整成果与证据：LS 专题（严格周期解与 30 天摄动演化）与 AS 专题（低近地点族域勘测与能量账本实验）。\par\medskip
+\noindent 二、正文引用编号 [n] 均为项目内文档（见参考文献）；图表编号按篇组织；附录 A 为专家组评审意见。\par\medskip
+\noindent 三、全部数值均有可复算的留档（实验数据、证据日志与回归记录，路径见参考文献）。\par\medskip
+\noindent 四、v1.1 较 v1 增补六张图解（图 1-2～1-4、图 2-2、图 3-3、图 3-4，见第一章“直观导读”等），便于非专业读者理解。\par
+
+
+\clearpage\phantomsection
+\tableofcontents
+\clearpage\phantomsection
+\addcontentsline{toc}{chapter}{\listfigurename}
+\listoffigures
+\clearpage\phantomsection
+\addcontentsline{toc}{chapter}{\listtablename}
+\listoftables
+
+
+\clearpage\phantomsection
+\chapter*{附录目录}
+\addcontentsline{toc}{chapter}{附录目录}
+\noindent 附录 A　评审意见 \dotfill \pageref{appA}\par
+
+\part{研究总览}
+\chapter{研究缘起与问题链}
+LUNAR-SWING 的原始概念（2026-04 版项目文档 [12]）提出一条颇具想象力的轨道机制：低近地点（$\leq$200 km）大气穿越耗散能量，而远地点附近的月球借力补充能量，两者在 2:1 共振相位下形成“无燃料轨道维持”的能量平衡。该概念在原理上成立与否，涉及两个层次的问题：其一，\textbf{严格周期解是否存在且可被数值求解}；其二，\textbf{真实摄动环境下该机制是否可实现}。原始项目的概念文档齐备，但结果目录为空、原型解的速度残差达 0.20（未闭合）——本报告记录的研究工作正是从这一现状出发，把大问题拆成两轮由证据牵引的专题：\par
+\begin{itemize}
+\item \textbf{LS 专题}：先把 2:1 共振族做到判据严格的周期解，并完成首次 30 天高保真摄动演化，回答“是否有界”；
+\item \textbf{AS 专题}：把求解与演化推进到概念所要求的低近地点几何，回答“族是否存在、能量账本是否闭合”。
+\end{itemize}
+两轮专题的关系与能力沉淀路径见图~\ref{fig:1-1}。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/flow.png}
+\caption{两轮专题的研究链与能力沉淀}\label{fig:1-1}
+\end{figure}
+\chapter{直观导读：三张图看懂这项研究}
+\chaptermark{直观导读：三张图看懂…}
+\par{\zihao{-4} 本章写给非航天动力学专业的读者；严谨表述与判据以后续各篇为准。\par}
+“大气阻尼—月球借力”的机制可以用图~\ref{fig:1-2} 一眼看懂：航天器沿一条很扁的大椭圆运行，\textbf{近地点}贴着地球大气层上缘飞过、每圈损失一点能量（阻尼）；\textbf{远地点}则安排在与月球轨道相近的位置、借月球引力把能量补回来。若两者恰好相抵，轨道便可“自持”。概念要求航天器每绕地球两圈、月球恰好绕一圈（即 2:1 共振），使每次相遇的几何重复出现。近地点在真实比例下紧贴地球、图中无法看清，故在右侧放大示意。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/concept.png}
+\caption{“大气阻尼—月球借力”机制示意（右为近地点放大）}\label{fig:1-2}
+\end{figure}
+所谓“严格周期解”，含义见图~\ref{fig:1-3}：这项研究不满足于“差不多能绕圈”，而是要求数值解在\textbf{半周期处再次垂直穿过地月连线}——由系统对称性，这一条件等价于整个周期严丝合缝地闭合（位置与速度都回到原值）。全篇反复出现的“闭合残差 10⁻⁹”等判据，说的就是把这两处对齐做到多准。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/symmetry.png}
+\caption{对称判据（半周期垂直穿越）与全周期闭合}\label{fig:1-3}
+\end{figure}
+最后一张直觉图（图~\ref{fig:1-4}）解释研究如何从理想走向真实：先在只有地球点质量引力与月球圆轨道的\textbf{理想模型}里把解求准，再逐层加入地球扁率、真实月球星历与大气——每加一层，“能否保持”的检验就更难一层，这也是实验设计“理想月球对照”的原因。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/model_ladder.png}
+\caption{四层模型阶梯：从理想 CRTBP 到含大气的真实模型}\label{fig:1-4}
+\end{figure}
+\chapter{方法与组织}
+全部工作采用“设计组—专家组—质量组”三角色机制与测试驱动开发（TDD）：立项件、红基线、变更单（CR）、里程碑评审与监督记录全程留档 [1][2][5][6][7][10][11]。研究结论只以可复算的证据为依据；\textbf{负结果同样按留档规范交付}（AS 专题的族域勘测即为一例）。\par
+计算底座为 MCPC 数字镜像框架自有的动力学与场景模块；AS 专题另沉淀了 Apple Silicon 异构加速批处理求解内核（CR-AS-01 [10]）。本总结报告自身即由项目内的 \texttt{primer.book} 成书工具链排版（markdown $\to$ LaTeX $\to$ PDF），并经确定性质检与逐页视觉抽检。\par
+\chapter{主要结论速览}
+两轮专题的结论速览见表~\ref{tab:1-1}，详细出处见各篇。\par
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{0.9204}Y{1.2919}Y{0.7877}@{}}
+\caption{两轮专题结论速览}\label{tab:1-1}\\
+\toprule
+问题\primercellend & 结论\primercellend & 出处\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{3}{r}{（续）}\\
+\toprule
+问题\primercellend & 结论\primercellend & 出处\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+2:1／3:2 严格周期解可否求出\primercellend & \textbf{可}：全状态闭合 1.02$\times$10⁻⁹／9.48$\times$10⁻⁹，Jacobi 漂移≈0\primercellend & 第二篇 §2.2；[3][4]\primercellend \\
+严格解在真实摄动下是否有界\primercellend & \textbf{有界}（30 天）：理想模型精确保形；真实星历不保形\primercellend & 第二篇 §2.4；[3][4]\primercellend \\
+低近地点（$\leq$300 km）2:1 严格解\primercellend & \textbf{已勘测域内未找到}（负/部分结果，证据链完整）\primercellend & 第三篇 §3.3；[8][9]\primercellend \\
+阻尼-月补能量收支\primercellend & \textbf{能量充裕（≈92$\times$），相位未闭环}；未发现自持平衡\primercellend & 第三篇 §3.4；[8][9]\primercellend \\
+能力沉淀\primercellend & LS 六项 + AS 七项（含加速内核），全部“导出+测试+证据”齐备\primercellend & 第四篇 §4.2\primercellend \\
+\end{xltabular}
+\endgroup
+\chapter{证据与可复现性}
+\begin{itemize}
+\item 实验数据：\texttt{docs/excursion/lunar\_swing/results/}（理想月球对照、SPICE 真实月球、低近地点四组及作废留档）[13]；
+\item 证据日志：\texttt{workbench/design\_dev/evidence/LS/}（16 份）与 \texttt{evidence/AS/}（30 余份）[14]；
+\item 回归基线：LS 套件 51/51、AS 套件 11/11、全量 297/297（含既有回归）——数字与日志编号见第四篇。
+\end{itemize}
+\part{严格周期解与摄动有界性（LS 专题）}
+\chapter{问题与目标}
+LS 专题把“原型解”推进为\textbf{判据严格}的周期解：半周期垂直截面残差、全周期全状态闭合、Jacobi 漂移三项同时约束；初值须由系统化网格扫描给出（无人工特调）；并把严格解搬入“J2–J4 + 真实月球星历 + 简化大气”的高保真模型演化 30 天，回答有界性与维持代价。\par
+\chapter{严格周期解}
+对称判据以设计变量 (x₀, v\_y₀) 求解 T/2 处的垂直穿越残差 [y, ẋ]$\to$0，收敛后以全周期积分复核。两族解的主要数值见表~\ref{tab:2-1}。\par
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{0.9063}Y{1.0469}Y{1.0469}@{}}
+\caption{严格周期解（无量纲；CRTBP 地月系）}\label{tab:2-1}\\
+\toprule
+项目\primercellend & 2:1（应达）\primercellend & 3:2（争取）\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{3}{r}{（续）}\\
+\toprule
+项目\primercellend & 2:1（应达）\primercellend & 3:2（争取）\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+无量纲状态 [x, y, z, ẋ, ẏ, ż]\primercellend & [0.8087346541, 0, 0, 0, 0.5158236131, 0]\primercellend & [0.7501227262, 0, 0, 0, 0.6001535514, 0]\primercellend \\
+周期\primercellend & 13.6608 天\primercellend & 18.2144 天\primercellend \\
+半周期截面残差\primercellend & 8.5$\times$10⁻¹¹\primercellend & 5.25$\times$10⁻⁹\primercellend \\
+全状态闭合残差\primercellend & 1.02$\times$10⁻⁹\primercellend & 9.48$\times$10⁻⁹\primercellend \\
+Jacobi 相对漂移\primercellend & ≈0\primercellend & 3.5$\times$10⁻¹⁶\primercellend \\
+迭代次数\primercellend & 34\primercellend & 29\primercellend \\
+\end{xltabular}
+\endgroup
+网格扫描（5$\times$5，无人工特调）粗扫 22/25 收敛，精修全部达标；验收脚本实跑扫描收敛 6 个初值。求解器、扫描与验收脚本均沉淀为 MCPC 资产（第四篇 §4.2）。\par
+严格解的轨道形状见图~\ref{fig:2-2}：在以月球为参照的旋转坐标系里（月球因此“静止”在图中），航天器沿一条大环运行——近地点 31.6 万 km、远地点 45.7 万 km，每 13.6608 天精确回到原处。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/ls_orbit.png}
+\caption{LS 严格解的轨道形状（地月旋转系，月球静止）}\label{fig:2-2}
+\end{figure}
+\chapter{缺陷归零与映射修正（摘要）}
+\chaptermark{缺陷归零与映射修正（…}
+\begin{itemize}
+\item \textbf{力历元冻结缺陷}：场景首版未把积分时间同步入力评估，导致月球第三体按 t=0 冻结求值。经自查发现后按机制归零：新增回归测试（先红）$\to$ 修复 $\to$ 复测绿 $\to$ \textbf{缺陷版 30 天实验数据全部作废留档、修复后重跑}（CR-LS-02）；
+\item \textbf{映射修正}：CRTBP$\to$ECI 转换补入质心$\to$地心偏移（$\mu$·L≈4,668 km）及对应速度项，修正后端到端验证通过（CR-LS-03）。
+\end{itemize}
+两处修正均不涉及判据；红/修/绿时间戳经质量组审计 [6]。\par
+\chapter{30 天高保真演化}
+三组对照：A（J2 仅）／B（+月球）／C（B+简化大气），DOP853（rtol=3$\times$10⁻¹⁰）；月球星历分“理想圆轨道（对照）”与“SPICE 真实星历”两套模型层级。高度演化见图~\ref{fig:2-1}，主要数值见表~\ref{tab:2-2}。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/ls_evolution.png}
+\caption{LS 严格解的三组 30 天演化（虚线为理想月球对照）}\label{fig:2-1}
+\end{figure}
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{0.9246}Y{0.7738}Y{1.0000}Y{1.3017}@{}}
+\caption{30 天演化结果（修复后）}\label{tab:2-2}\\
+\toprule
+组\primercellend & 有界\primercellend & 高度 min / max / final（km）\primercellend & 关键行为\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{4}{r}{（续）}\\
+\toprule
+组\primercellend & 有界\primercellend & 高度 min / max / final（km）\primercellend & 关键行为\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+A：J2 仅\primercellend & 有界\primercellend & 309,168 / 902,825 / 897,791\primercellend & 准开普勒轨道，远地点 27.6 天\primercellend \\
+B（理想）：+理想月球\primercellend & 有界\primercellend & 309,168 / 450,724 / 362,870\primercellend & \textbf{复现严格解节律}（远地点 6.85/20.54 天；与 CRTBP 参考差 0.1\%）\primercellend \\
+B（真实）：+真实月球\primercellend & 有界\primercellend & 256,939 / 534,894 / 422,363\primercellend & 去相位；近月交会 1.77$\times$10⁴ km @ 29.54 天\primercellend \\
+C：+大气\primercellend & 有界\primercellend & 与 B 逐位相同\primercellend & 阻力在 $\geq$2.5$\times$10⁵ km 高度不可测（C≡B）\primercellend \\
+\end{xltabular}
+\endgroup
+\textbf{结论}：① 有界性成立；② 理想模型下严格解精确复现，验证“求解$\to$映射$\to$场景”链路；③ 真实星历下“有界但不保形”——共振相位不保持是明确结论（非失败）；④ 对该几何，大气问题不触发（近地点远离大气）。\par
+\chapter{维持 Δv 估算方法与结论}
+一阶方法：以两体视半长轴漂移 δa 为目标量，单次近地点切向修正的代价 Δv≈(n/2)·|δa|（n 为初始视平均角速度，对应 13.66 天谐振）。实测：理想模型逐周期漂移 $\leq$170 km（数值零漂移），维持 Δv≈0；真实星历下至第二个近地点（24.81 天）近地点 −5.2$\times$10⁴ km，等效一次修正≈125 m/s（≈5 m/s/天）。多脉冲优化超出该专题边界。\par
+\chapter{独立验证与回归}
+\begin{itemize}
+\item 闭合残差与积分步长无关（5,000↔80,000 步均为 1.02$\times$10⁻⁹）——残差由求解器容差决定；
+\item RK4／DOP853／Radau 三积分器互差 $\leq$2.7$\times$10⁻¹²；
+\item J2–J4 与势函数有限差分一致；跨积分器、步长敏感性证据齐全；
+\item 回归：LS 套件 51/51（502 s）；含既有回归的全量 297/297（见第四篇 §4.3）。
+\end{itemize}
+\part{低近地点族域与能量账本（AS 专题）}
+\chapter{问题与目标}
+AS 专题面向概念所要求的低近地点几何（近地点 $\leq$200–300 km、远地点近月球、航天器每绕地球 2 圈对应月球 1 圈），设置三个问题：\textbf{AS-Q1} 严格周期解是否存在及求解策略；\textbf{AS-Q2} 单圈大气损耗与月球做功的能量收支是否闭合；\textbf{AS-Q3} 能力沉淀（七项，含 CR-AS-01 加速内核 [10]）。问题设计明确“负结果同样按留档规范交付、不设必须找到”[7]。\par
+\chapter{求解策略与共振约定}
+按概念口径确立约定：\textbf{p 个航天器惯性周期 : q 个月球周期}（2:1 即航天器惯性周期 13.6608 天；对称截面时刻即一个 T\_sc，旋转系闭合周期 27.32 天）。求解工具箱包括：连续法/同伦驱动、线搜索牛顿对称打靶（基于与参考实现逐位一致的 numba fp64 编译内核）、自适应步长 RK4（近地点自动细分）、以及经健全性验证的多重打靶（parallel shooting）实现——在已知的 LS 严格解上三重打靶 3 代收敛至 1.2$\times$10⁻¹³，证明实现无误。\par
+\chapter{族域勘测：负/部分结果}
+勘测方法链与覆盖见表~\ref{tab:3-1}；全部日志可在证据归档 [14] 中重放。\par
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{0.8963}Y{0.9834}Y{1.1202}@{}}
+\caption{低近地点 2:1 族域勘测方法链}\label{tab:3-1}\\
+\toprule
+方法\primercellend & 覆盖/规模\primercellend & 结果\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{3}{r}{（续）}\\
+\toprule
+方法\primercellend & 覆盖/规模\primercellend & 结果\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+(x₀, v\_y₀) 宽盒扫描＋延展过滤\primercellend & 90$\times$110（近地点高度约 60–1,750 km）\primercellend & 过滤后最优半周期残差 8.6$\times$10⁻¹\primercellend \\
+(近地点高度, 周期因子) 细扫\primercellend & 高度 120–300 km $\times$ 周期因子 0.94–1.06\primercellend & 谷域位于周期因子≈0.9868；最优残差 2.5$\times$10⁻⁴\primercellend \\
+局部微扫描（20 万步）\primercellend & 高度 130–200 km\primercellend & 沿 ẋ=0 曲线 y*≈1.744$\times$10⁻⁴ 恒定（零曲线平行结构）\primercellend \\
+自适应积分重验\primercellend & 步长细化 5 倍\primercellend & 残差不变——排除离散误差地板\primercellend \\
+4 维全状态打靶\primercellend & ν₀$\times$周期因子$\times$高度约 3,600 种子\primercellend & 最优 4 维残差 2.2$\times$10⁻²，批量求根 0 收敛\primercellend \\
+多重打靶（k=8/24）\primercellend & 13 个种子\primercellend & 全部未收敛（残差爬行至发散）\primercellend \\
+宽域裁决图＋交叉精修\primercellend & 双变号单元 2,208/1,274 个\primercellend & 交点均为亚网格/近切向；60 起点精修无一破 10⁻⁴\primercellend \\
+\end{xltabular}
+\endgroup
+\textbf{结论（限定表述）}：在已勘测域内\textbf{未找到低近地点 2:1 严格对称周期解}；数值证据一致指向该区为强敏感/近切向结构（零曲线近乎平行、修正器普适停滞于 10⁻⁴–10⁻³、多重打靶不收敛）。最优近失解——状态 [0.0049602039, 0, 0, 0, 10.6562923, 0]、近地点 197 km、半周期残差 2.5$\times$10⁻⁴——保留为能量实验的初始条件（明确声明：\textbf{非严格周期解}）。多重打靶种子质量与同伦加细列为后续技术方向。\par
+近失解与严格解的轨道形状对比见图~\ref{fig:3-3}；“为什么找不到”的直觉解释见图~\ref{fig:3-4}——搜索区的半周期残差地图上没有任何“零点”，最深处也只是约 10⁻³ 的噪声地板。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/as_orbit.png}
+\caption{AS 近失解与 LS 严格解的轨道形状对比（地月旋转系）}\label{fig:3-3}
+\end{figure}
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/residual_map.png}
+\caption{低近地点搜索区的半周期残差地图（网格分辨率下无零点的强敏感区）}\label{fig:3-4}
+\end{figure}
+\chapter{30 天实验与能量账本}
+四组同初态对照（J2–J4＋SPICE 真实月球，A/m=0.02 m²/kg，简化指数大气）：G1 无阻力；G2/G3/G4 依次为密度$\times$1.0／$\times$0.5／$\times$1.5。高度演化与近地点序列见图~\ref{fig:3-1}，能量账本见表~\ref{tab:3-2} 与图~\ref{fig:3-2}。\par
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/as_evolution.png}
+\caption{近失解 30 天高度演化（上）与逐次近地点高度的密度敏感度（下）}\label{fig:3-1}
+\end{figure}
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{1.0000}Y{1.0000}Y{1.0000}Y{1.0000}Y{1.0000}Y{1.0000}@{}}
+\caption{能量账本（第一周期≈13.66 天；单位 J/kg）}\label{tab:3-2}\\
+\toprule
+组\primercellend & ΔE\primercellend & 月球做功\primercellend & J2–J4 做功\primercellend & 阻力做功\primercellend & 残差（相对）\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{6}{r}{（续）}\\
+\toprule
+组\primercellend & ΔE\primercellend & 月球做功\primercellend & J2–J4 做功\primercellend & 阻力做功\primercellend & 残差（相对）\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+G1 无阻力\primercellend & +38,315\primercellend & +10,750\primercellend & +27,554\primercellend & —\primercellend & 2.8$\times$10⁻⁴\primercellend \\
+G2 $\times$1.0\primercellend & +38,198\primercellend & +10,750\primercellend & +27,554\primercellend & −116.85\primercellend & 2.8$\times$10⁻⁴\primercellend \\
+G3 $\times$0.5\primercellend & +38,257\primercellend & +10,750\primercellend & +27,554\primercellend & −58.43\primercellend & 2.8$\times$10⁻⁴\primercellend \\
+G4 $\times$1.5\primercellend & +38,140\primercellend & +10,750\primercellend & +27,554\primercellend & −175.28\primercellend & 2.8$\times$10⁻⁴\primercellend \\
+\end{xltabular}
+\endgroup
+\begin{figure}[htbp]\centering
+\includegraphics[width=0.96\linewidth,keepaspectratio,height=0.68\textheight]{图/ledger.png}
+\caption{单周期能量收支（symlog；误差棒为密度 $\pm$50\%）}\label{fig:3-2}
+\end{figure}
+\textbf{结论（AS-Q2）}：① 四组 30 天全部保持有界；② 能量收支\textbf{未平衡}——月球与 J2 的“供给”分别约为阻力损耗的 92 倍与 236 倍，轨道逐周期抬升（近地点 197$\to$879$\to$208 km），\textbf{“能量充裕、相位未闭环”}；③ 阻力损耗 $\pm$50\% 密度区间为 [−175.3, −58.4] J/kg（≈0.005–0.016 m/s/周期），不影响量级结论；④ 副产物发现：该几何下 \textbf{J2 的周期功大于月球}——真实摄动下维持共振的首要对手是 J2 进动而非大气阻力。\par
+\chapter{求解加速与独立验证}
+\begin{itemize}
+\item \textbf{加速内核（CR-AS-01）}：numba fp64 编译内核与参考实现逐位一致（抽样差 $\leq$4.4$\times$10⁻¹⁶），单轨迹加速 6.1–24.8$\times$；MLX/Metal fp32 筛选层 440 M 状态/秒（批量 $\geq$65,536 时饱和于 328–384 M 行·步/秒），仅作筛选、缺省自动降级——fp64 精确性由 CPU 路径保证；
+\item \textbf{独立验证}：内核逐位、步长/多积分器一致（自适应 vs DOP853 差 6.4$\times$10⁻⁸）、事件检测、负结果重放四类全过；验收脚本五项全项 PASSED；
+\item 附：e≈0.98 轨道下 DOP853 在 rtol=10⁻¹¹ 时自身误差约 1.6$\times$10⁻⁶，高保真复核须 $\leq$10⁻¹³（已入遗留清单）。
+\end{itemize}
+\part{结论与展望}
+\chapter{总体结论}
+两轮专题把原始项目“概念齐备、结果为空”的状态推进为一条\textbf{闭合的证据链}（两轮专题结论速览见表~\ref{tab:1-1}）：\par
+\begin{enumerate}
+\item \textbf{严格求解已解决}：2:1／3:2 共振族的严格周期解（闭合 10⁻⁹ 量级、Jacobi 漂移≈0）与系统化求解流程在 LS 专题交付，并经缺陷归零与映射修正后在高保真链路中复现验证；
+\item \textbf{摄动有界性已有明确结论}：LS 严格解 30 天有界；理想模型精确保形、真实星历不保形（含一次 1.77$\times$10⁴ km 月交会）；
+\item \textbf{低近地点族域为负/部分结果}：概念所要求的低近地点严格解在已勘测域内未找到，方法链与限定表述完整留档；
+\item \textbf{能量机制获定量刻画}：在近失解几何上，“阻尼-月补”在能量意义上充裕（≈92$\times$），未平衡、相位未闭环；J2 进动是比阻力更主要的对手——这为“若继续，问题应换成什么”给出了直接输入。
+\end{enumerate}
+\chapter{能力沉淀总表}
+两轮专题对 MCPC 的能力沉淀共十三项，总表见表~\ref{tab:4-1}。\par
+\begingroup\zihao{-5}
+\begin{xltabular}{\linewidth}{@{}Y{0.4890}Y{1.3297}Y{1.1813}@{}}
+\caption{对 MCPC 的能力沉淀（LS 六项 + AS 七项）}\label{tab:4-1}\\
+\toprule
+来源\primercellend & 沉淀件\primercellend & 通用价值\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{3}{r}{（续）}\\
+\toprule
+来源\primercellend & 沉淀件\primercellend & 通用价值\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+LS①\primercellend & 对称周期解求解＋初值扫描\primercellend & 任意 CRTBP 系统的共振族求解\primercellend \\
+LS②\primercellend & ThirdBodyGravity（星历回调，含间接项）\primercellend & 一切第三体摄动场景\primercellend \\
+LS③\primercellend & J2–J4 带谐重力场\primercellend & 高保真轨道传播\primercellend \\
+LS④\primercellend & 地月共振演化场景＋CRTBP$\to$ECI 映射\primercellend & 物理实验基座\primercellend \\
+LS⑤\primercellend & 严格验收脚本与回归模式\primercellend & 判据无后门的质量工具\primercellend \\
+LS⑥\primercellend & 地月共振族口径与证据链\primercellend & 研究范式资产\primercellend \\
+AS①\primercellend & 连续法/同伦驱动\primercellend & 从“单点解”到“族域理解”\primercellend \\
+AS②\primercellend & 分段/自适应打靶（含多重打靶原型）\primercellend & 高偏心率多尺度轨道\primercellend \\
+AS③\primercellend & 事件检测基础设施\primercellend & 近地点/大气/天体近距事件驱动仿真\primercellend \\
+AS④\primercellend & 耗散-输入能量账本（双口径）\primercellend & 新的独立验证范式\primercellend \\
+AS⑤\primercellend & 敏感度工具（区间结论口径）\primercellend & 不确定输入的统一处理\primercellend \\
+AS⑥\primercellend & 场景复用与示范案例\primercellend & 可复现数字实验模板\primercellend \\
+AS⑦\primercellend & Apple Silicon 加速内核（CR-AS-01）\primercellend & 批量筛选/传播吞吐跃升\primercellend \\
+\end{xltabular}
+\endgroup
+以上十三项均满足“导出＋测试＋证据”三位一体；全量回归 297/297 通过。\par
+\chapter{遗留与后续候选}
+\begingroup\zihao{-5}
+\begin{xltabular}{\linewidth}{@{}Y{0.5385}Y{1.4615}@{}}
+\caption{遗留问题与后续候选（未完成、不承诺）}\label{tab:4-2}\\
+\toprule
+项\primercellend & 说明\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{2}{r}{（续）}\\
+\toprule
+项\primercellend & 说明\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+低近地点严格解\primercellend & 多重打靶种子质量/同伦加细；或改在更宽松共振比下先找可连续化成员\primercellend \\
+相位闭环机制\primercellend & “能量充裕”背景下，维持策略的关键问题转为相位/几何控制（J2 主导）\primercellend \\
+热环境与密度模型\primercellend & 简化指数大气仅量级级；NRLMSISE 与 Sutton-Graves 深化为候选\primercellend \\
+长周期结论\primercellend & 1 年+ 寿命、三维倾角族、SRP 未做\primercellend \\
+数值工具\primercellend & 高保真复核的积分容差建议（DOP853 $\leq$10⁻¹³@e≈0.98）；近地点窗口加密输出\primercellend \\
+\end{xltabular}
+\endgroup
+\chapter{结语}
+原始概念提出的“无燃料维持”在本次研究中得到一个比“是/否”更有用的答案：\textbf{能量不是瓶颈，周期解的相位闭合才是}。研究工作同时证明，这条问题线可以作为通用能力的磨刀石——两轮专题沉淀的十三项能力全部服务于不依赖特定概念的通用需求。就此收题，后续问题已在表~\ref{tab:4-2} 中列队。\par
+\appendix
+\chapter{评审意见}
+\label{appA}
+\section{评审范围与方法}
+评审对象为本报告全文（第一篇至第四篇）及其引用的两轮专题交付物 [3][4][8][9]。方法：文档审查＋独立复跑/重算抽查＋排版质检（确定性检查与逐页视觉抽检）。独立复核项见表~\ref{tab:A-1}。\par
+\section{独立复核}
+\begingroup\zihao{-4}
+\begin{xltabular}{\linewidth}{@{}Y{0.7467}Y{0.8747}Y{1.0560}Y{1.3226}@{}}
+\caption{独立复核项}\label{tab:A-1}\\
+\toprule
+\#\primercellend & 复核项\primercellend & 方法\primercellend & 结果\primercellend \\
+\midrule
+\endfirsthead
+\multicolumn{4}{r}{（续）}\\
+\toprule
+\#\primercellend & 复核项\primercellend & 方法\primercellend & 结果\primercellend \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+1\primercellend & LS 严格解数值\primercellend & 独立复算（独立进程）\primercellend & 与报告完全一致：34 迭代、闭合 1.020$\times$10⁻⁹、Jacobi 漂移 0\primercellend \\
+2\primercellend & LS 实验结论\primercellend & 抽验实验 H5 与日志\primercellend & 表~\ref{tab:2-2} 各数值与留档一致；作废数据未混入\primercellend \\
+3\primercellend & AS 负结果\primercellend & 重放 smoke 搜索\primercellend & found=False、最优残差 1.833，与留档一致\primercellend \\
+4\primercellend & AS 账本\primercellend & 从 H5 重算\primercellend & 三档阻力功 −58.43／−116.85／−175.28 J/kg，线性精确\primercellend \\
+5\primercellend & 排版质检\primercellend & 成书工具链确定性检查＋视觉抽检\primercellend & 通过（详见报告排版验收记录）\primercellend \\
+\end{xltabular}
+\endgroup
+\section{评审意见}
+\begin{enumerate}
+\item \textbf{结构完整、溯源清晰}：全部结论均可回链到留档证据；负结果按机制交付，限定表述（“已勘测域内”）严谨，未过度宣称；
+\item \textbf{能量结论的表述准确}：“能量充裕、相位未闭环”与两轮专题的证据互相印证，是对原始概念的诚实回答；
+\item \textbf{能力沉淀清单与实际交付一致}：十三项“导出＋测试＋证据”三位一体核验通过，全量回归 297/297；
+\item \textbf{建议保留的观察项}：① 多重打靶加细/同伦列为后续候选（见表~\ref{tab:4-2}）；② 高保真复核积分容差建议（DOP853 $\leq$10⁻¹³@e≈0.98）应随工具文档分发。
+\end{enumerate}
+\section{评审结论}
+\textbf{通过}。本报告可作为 LUNAR-SWING 研究线的总结归档件；后续研究问题以表~\ref{tab:4-2} 为准。\par
+——专家组 2026-10-10\par
+\clearpage\phantomsection
+\chapter*{参考文献（项目文档）}
+\addcontentsline{toc}{chapter}{参考文献（项目文档）}
+\noindent\hangindent=2em 版本：v1（本报告引用均为项目内文档；正文以 [n] 引用。）\par
+\section*{A　LUNAR-SWING 专题（LS）}
+\noindent\hangindent=2em [1] LS-001《LUNAR-SWING 专题：问题定义与目标》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [2] LS-002《工作策划》（v1）、LS-003《测试大纲》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [3] LS-004《LUNAR-SWING 专题：工作报告》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [4] LS-005《LUNAR-SWING 专题：测试报告》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [5] RE-LS-001 立项评审意见、RE-LS-002 M1 评审意见、RE-LS-003 M2 评审意见，workbench/review\_expert/。\par
+\noindent\hangindent=2em [6] QM-LS-001 立项监督记录、QM-LS-002 过程监督记录，workbench/quality\_mgmt/。\par
+\section*{B　低近地点共振摆动专题（AS）}
+\noindent\hangindent=2em [7] AS-001《问题定义与目标》（v1）、AS-002《工作策划》（v1）、AS-003《测试大纲》（v1），workbench/design\_dev/。\par
+\noindent\hangindent=2em [8] AS-004《低近地点共振摆动：工作报告》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [9] AS-005《低近地点共振摆动：测试报告》（v1），workbench/design\_dev/，2026-10-10。\par
+\noindent\hangindent=2em [10] AS-CR-01《变更单：Apple Silicon 异构加速批处理求解内核》（v1）及 RE-AS-001A 变更评审意见，workbench/。\par
+\noindent\hangindent=2em [11] RE-AS-001/001A/002/003 评审意见、QM-AS-001/002 监督记录，workbench/review\_expert/、workbench/quality\_mgmt/。\par
+\section*{C　概念与数据源}
+\noindent\hangindent=2em [12] 《LUNAR-SWING 项目概览与分阶段实施框架》及概念设计文档（00–08），2026-04 版（docs/excursion 目录）。\par
+\noindent\hangindent=2em [13] 实验数据：high\_fidelity（真实月球星历）、high\_fidelity\_circular（理想月球对照）、as\_lowperigee（低近地点四组）等实验目录及摘要。\par
+\noindent\hangindent=2em [14] 证据归档：两轮专题的红/绿日志、加速基准、验收与回归记录（evidence 目录 LS 与 AS 两支）。\par
+\end{document}

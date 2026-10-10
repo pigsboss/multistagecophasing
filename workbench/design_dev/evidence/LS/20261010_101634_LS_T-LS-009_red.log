@@ -1,0 +1,39 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+___________________ test_t_ls_009_scenario_force_epoch_sync ____________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1235/test_t_ls_009_scenario_force_e0')
+
+    def test_t_ls_009_scenario_force_epoch_sync(tmp_path):
+        from mission_sim.simulation.threebody.earth_moon import EarthMoonResonanceSimulation
+    
+        def moon_provider(t):
+            # 快速线性移动的玩具月球：力对历元强敏感（防"冻结历元"缺陷回归）
+            r = np.array([3.0e8 + 1.0e6 * t, 1.0e8, 0.0])
+            return np.concatenate([r, np.array([1.0e6, 0.0, 0.0])])
+    
+        MU_E, MU_M = 3.986004418e14, 4.9048695e12
+        init = np.array([7.0e6, 0.0, 0.0, 0.0, 7.5e3, 0.0])
+        sim = EarthMoonResonanceSimulation(dict(
+            mission_name="LS_epoch", simulation_days=0.01, time_step=60.0,
+            data_dir=str(tmp_path), initial_state=init.tolist(),
+            moon_provider=moon_provider, enable_moon=True, enable_j2=False,
+            enable_drag=False, verbose=False))
+        accel = sim._build_accel()
+    
+        for t in [100.0, 1000.0]:
+            a = np.asarray(accel(t, init), dtype=np.float64)
+            r3 = moon_provider(t)[:3]
+            d = r3 - init[:3]
+            a_ref = (-MU_E * init[:3] / np.linalg.norm(init[:3]) ** 3
+                     + MU_M * (d / np.linalg.norm(d) ** 3 - r3 / np.linalg.norm(r3) ** 3))
+>           assert np.allclose(a, a_ref, rtol=1e-9, atol=1e-12), f"t={t} 处时间相关力未按当前历元求值"
+E           AssertionError: t=100.0 处时间相关力未按当前历元求值
+E           assert False
+E            +  where False = <function allclose at 0x10c970630>(array([-8.13470100e+00,  1.01842165e-06,  0.00000000e+00]), array([-8.13470198e+00,  3.57284910e-07,  0.00000000e+00]), rtol=1e-09, atol=1e-12)
+E            +    where <function allclose at 0x10c970630> = np.allclose
+
+tests/lunar_swing/test_ls_strict.py:302: AssertionError
+=========================== short test summary info ============================
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_009_scenario_force_epoch_sync
+1 failed in 1.09s

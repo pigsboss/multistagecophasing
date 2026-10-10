@@ -1,0 +1,6 @@
+# 回归执行: level=AS note=as_green
+# 命令: python3 -m pytest tests/atmospheric_swing/ -q
+# 开始: 2026-10-10 14:20:34
+...........                                                              [100%]
+11 passed in 13.35s
+# 结束: 2026-10-10 14:20:48  exit=0

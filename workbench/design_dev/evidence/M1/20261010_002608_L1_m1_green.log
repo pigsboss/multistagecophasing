@@ -1,0 +1,24 @@
+# 回归执行: level=L1 note=m1_green
+# 命令: python3 -m pytest tests/test_central_gravity.py tests/test_l1_physical_baseline.py -q
+# 开始: 2026-10-10 00:26:08
+............                                                             [100%]
+=============================== warnings summary ===============================
+tests/test_l1_physical_baseline.py: 15540 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/core/cyber/platform_gnc/gnc_subsystem.py:162: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    target_state = self.ref_ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py: 2723 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/base.py:227: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom_state = self.ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py::test_t_l1_004_tracking_error_channel_consistency
+  /Users/huo/Projects/multistagecophasing/tests/test_l1_physical_baseline.py:90: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    ref_last = sim.ephemeris.get_interpolated_state(t_last)
+
+tests/test_l1_physical_baseline.py::test_t_l1_006_crtbp_end_to_end_regression
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/threebody/base.py:46: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom0_phys = self.ephemeris.get_interpolated_state(0.0)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+12 passed, 18265 warnings in 8.90s
+# 结束: 2026-10-10 00:26:18  exit=0

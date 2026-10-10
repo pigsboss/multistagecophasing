@@ -1,0 +1,6 @@
+# 回归执行: level=L4 note=m4_final
+# 命令: python3 -m pytest tests/test_l4_engineering.py -q
+# 开始: 2026-10-10 07:31:56
+.......                                                                  [100%]
+7 passed in 17.65s
+# 结束: 2026-10-10 07:32:14  exit=0

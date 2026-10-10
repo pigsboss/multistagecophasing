@@ -1,0 +1,4 @@
+[RE-LS-002 独立复算] success=True iters=34
+  state_nd = [0.8087346541 0.           0.           0.           0.5158236131
+ 0.          ]
+  half=8.464e-11 full=1.020e-09 jacobi_drift=0.000e+00 period_days=13.660830

@@ -1,0 +1,24 @@
+== (a) mu=0 极限：种子构造是否自洽（f=1.0, alt=200km, 双侧） ==
+  side=+1: residual(y, xdot)=(5.752e-01, 3.336e-01)  |r|end=0.5793 DU
+  side=-1: residual(y, xdot)=(-5.752e-01, -3.336e-01)  |r|end=0.5793 DU
+== (b) 宽参数盒残差图（真实月球; 240x80x2 种子, 6000 步） ==
+  seeds: (9600, 6)
+  == top 15 ==
+   res=1.1671e+00 side=-1 alt= 30000.0km f=0.8500
+   res=1.1740e+00 side=-1 alt= 30000.0km f=0.8538
+   res=1.1809e+00 side=-1 alt= 30000.0km f=0.8576
+   res=1.1847e+00 side=+1 alt= 30000.0km f=0.8500
+   res=1.1860e+00 side=-1 alt= 27319.8km f=0.8500
+   res=1.1877e+00 side=-1 alt= 30000.0km f=0.8614
+   res=1.1916e+00 side=+1 alt= 30000.0km f=0.8538
+   res=1.1930e+00 side=-1 alt= 27319.8km f=0.8538
+   res=1.1944e+00 side=-1 alt= 30000.0km f=0.8652
+   res=1.1984e+00 side=+1 alt= 30000.0km f=0.8576
+   res=1.1998e+00 side=-1 alt= 27319.8km f=0.8576
+   res=1.2011e+00 side=-1 alt= 30000.0km f=0.8690
+   res=1.2035e+00 side=+1 alt= 27319.8km f=0.8500
+   res=1.2038e+00 side=-1 alt= 24879.1km f=0.8500
+   res=1.2052e+00 side=+1 alt= 30000.0km f=0.8614
+  best=1.1671e+00 median=1.6035e+00
+  side=+1: best=1.1847e+00 med=1.6093e+00
+  side=-1: best=1.1671e+00 med=1.5975e+00

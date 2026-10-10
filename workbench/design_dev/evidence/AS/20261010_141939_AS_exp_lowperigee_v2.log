@@ -1,0 +1,22 @@
+ECI 初态: [-4.764263e+06 -4.357560e+06 -1.243343e+06  7.490690e+03 -7.243447e+03
+ -3.316752e+03]
+[G1_nodrag] ok=True bounded=True alt_min=197.0 km alt_max=486573.6 km alt_final=233407.8 km
+[G2_drag1.0] ok=True bounded=True alt_min=197.0 km alt_max=486527.8 km alt_final=233954.8 km
+[G3_drag0.5] ok=True bounded=True alt_min=197.0 km alt_max=486550.7 km alt_final=233681.3 km
+[G4_drag1.5] ok=True bounded=True alt_min=197.0 km alt_max=486504.9 km alt_final=234228.3 km
+
+== 事件检测 ==
+[G1_nodrag] 近地点 3 次: 0.00d@197km, 14.33d@879km, 28.72d@208km
+          月球<6万km 区间 0 段; 最低距月 197538 km @ 15.72 d
+          大气 300km 阈值穿越: 进入 1 次 / 退出 2 次
+[G2_drag1.0] 近地点 3 次: 0.00d@197km, 14.33d@881km, 28.72d@212km
+          月球<6万km 区间 0 段; 最低距月 197369 km @ 15.72 d
+          大气 300km 阈值穿越: 进入 1 次 / 退出 2 次
+
+== 能量账本（第一周期 ≈ 13.66 d；扰动力 = J2–J4 + 月球 + 阻力） ==
+[G1_nodrag] ΔE=+3.8315e+04 J/kg; W_moon=+1.0750e+04; W_drag=+0.0000e+00; W_J2J4=+2.7554e+04; 残差(rel)=2.8e-04
+[G2_drag1.0] ΔE=+3.8198e+04 J/kg; W_moon=+1.0750e+04; W_drag=-1.1685e+02; W_J2J4=+2.7554e+04; 残差(rel)=2.8e-04
+[G3_drag0.5] ΔE=+3.8257e+04 J/kg; W_moon=+1.0750e+04; W_drag=-5.8427e+01; W_J2J4=+2.7554e+04; 残差(rel)=2.8e-04
+[G4_drag1.5] ΔE=+3.8140e+04 J/kg; W_moon=+1.0750e+04; W_drag=-1.7528e+02; W_J2J4=+2.7554e+04; 残差(rel)=2.8e-04
+
+✅ 完成: /Users/huo/Projects/multistagecophasing/docs/excursion/lunar_swing/results/as_lowperigee

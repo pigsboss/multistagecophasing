@@ -1,0 +1,6 @@
+# 回归执行: level=L3 note=m3_final
+# 命令: python3 -m pytest tests/test_l3_payload_phasing.py -q
+# 开始: 2026-10-10 07:17:33
+......                                                                   [100%]
+6 passed in 3.35s
+# 结束: 2026-10-10 07:17:37  exit=0

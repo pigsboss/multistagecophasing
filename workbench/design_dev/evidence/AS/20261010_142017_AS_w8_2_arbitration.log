@@ -1,0 +1,7 @@
+uniform N=4M: 0.83s
+adaptive scale=2e-5: 372410 步, 0.08s
+DOP853 rtol=1e-11: 0.01s
+   vs uniform: 1.590e-06   vs adaptive: 1.617e-06
+DOP853 rtol=1e-13: 0.01s
+   vs uniform: 3.585e-08   vs adaptive: 6.353e-08
+uniform vs adaptive: 2.768e-08

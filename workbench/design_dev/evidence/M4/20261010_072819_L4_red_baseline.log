@@ -1,0 +1,125 @@
+FFFFFFF                                                                  [100%]
+=================================== FAILURES ===================================
+___________________ test_t_l4_007_attitude_package_repaired ____________________
+
+    def test_t_l4_007_attitude_package_repaired():
+        import importlib
+>       pkg = importlib.import_module("mission_sim.core.spacetime.attitude")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_l4_engineering.py:34: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+/opt/homebrew/Cellar/python@3.12/3.12.14/Frameworks/Python.framework/Versions/3.12/lib/python3.12/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+<frozen importlib._bootstrap>:1387: in _gcd_import
+    ???
+<frozen importlib._bootstrap>:1360: in _find_and_load
+    ???
+<frozen importlib._bootstrap>:1331: in _find_and_load_unlocked
+    ???
+<frozen importlib._bootstrap>:935: in _load_unlocked
+    ???
+<frozen importlib._bootstrap_external>:999: in exec_module
+    ???
+<frozen importlib._bootstrap>:488: in _call_with_frames_removed
+    ???
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+    """Attitude models package."""
+    from .base import AttitudeModel
+>   from .config import AttitudeConfig
+E   ModuleNotFoundError: No module named 'mission_sim.core.spacetime.attitude.config'
+
+mission_sim/core/spacetime/attitude/__init__.py:3: ModuleNotFoundError
+______________________ test_t_l4_001_sixdof_conservation _______________________
+
+    def test_t_l4_001_sixdof_conservation():
+>       from mission_sim.core.physics.attitude_dynamics import RigidBody6DOF
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.attitude_dynamics'
+
+tests/test_l4_engineering.py:71: ModuleNotFoundError
+________________ test_t_l4_002_actuator_nonlinearity_boundaries ________________
+
+    def test_t_l4_002_actuator_nonlinearity_boundaries():
+        from mission_sim.core.physics.components.actuators.thruster import Thruster
+        from mission_sim.core.physics.components.actuators.impulse_smoother import ImpulseSmoother
+    
+        # 死区边界（噪声关闭，确定性）
+        thr = Thruster(max_thrust_n=1.0, min_thrust_n=0.01, noise_std_n=0.0)
+        f_below, _ = thr.execute(np.array([0.009, 0.0, 0.0]))
+        assert np.allclose(f_below, 0.0), "死区边界内应输出零"
+        f_at, _ = thr.execute(np.array([0.01, 0.0, 0.0]))
+        assert abs(np.linalg.norm(f_at) - 0.01) < 1e-12, "死区边界上应正常通过"
+    
+        # 饱和边界
+        f_sat, _ = thr.execute(np.array([1.5, 0.0, 0.0]))
+        assert abs(np.linalg.norm(f_sat) - 1.0) < 1e-12, "饱和应限幅到上限"
+    
+        # MIB 边界（冲量平滑器：累计到恰好 MIB 时开火）
+        sm = ImpulseSmoother(mib_ns=0.01, max_thrust_n=100.0)
+        out1 = sm.smooth(np.array([0.0095, 0.0, 0.0]), dt=1.0)
+        assert np.allclose(out1, 0.0), "未达 MIB 不应输出"
+        out2 = sm.smooth(np.array([0.0006, 0.0, 0.0]), dt=1.0)
+        assert abs(np.linalg.norm(out2) * 1.0 - 0.01) < 1e-12, "恰好达到 MIB 应输出一个脉冲"
+    
+        # 命令延迟边界（纯传输延迟，按步长量化）
+>       thr_d = Thruster(max_thrust_n=1.0, min_thrust_n=0.0, noise_std_n=0.0, command_delay_s=0.05)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: Thruster.__init__() got an unexpected keyword argument 'command_delay_s'
+
+tests/test_l4_engineering.py:122: TypeError
+_____________________ test_t_l4_003_allan_spectrum_slopes ______________________
+
+    def test_t_l4_003_allan_spectrum_slopes():
+>       from mission_sim.core.physics.components.sensors.noise_spectrum import AllanNoiseGenerator
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.components.sensors.noise_spectrum'
+
+tests/test_l4_engineering.py:136: ModuleNotFoundError
+_____________________ test_t_l4_004_monte_carlo_robustness _____________________
+
+    def test_t_l4_004_monte_carlo_robustness():
+        from mission_sim.core.physics.payload.phasing_loop import PhasingLoop
+        from mission_sim.core.cyber.payload_ctrl.hierarchical_controller import HierarchicalPhasingController
+    
+        rng = np.random.default_rng(20261010)
+        n_runs = 50
+        passed = 0
+        for i in range(n_runs):
+            scale = float(rng.uniform(0.8, 1.2))      # 扰动幅值散布 ±20%
+            wn_mul = float(rng.uniform(0.95, 1.05))   # FSM 带宽散布 ±5%
+            gain_mul = float(rng.uniform(0.9, 1.1))   # 控制增益散布 ±10%
+            ctrl = HierarchicalPhasingController(
+                dt=1e-4, kp_fsm=2.5 * gain_mul, ki_fsm=800.0 * gain_mul, kd_fsm=2.0e-4)
+>           loop = PhasingLoop(lever_arm_m=2.5, seed=1000 + i,
+                               disturbance_scale=scale, fsm_wn_hz=500.0 * wn_mul,
+                               controller=ctrl)
+E           TypeError: PhasingLoop.__init__() got an unexpected keyword argument 'disturbance_scale'
+
+tests/test_l4_engineering.py:168: TypeError
+________________________ test_t_l4_005_opd_pointing_p95 ________________________
+
+    def test_t_l4_005_opd_pointing_p95():
+        from mission_sim.core.physics.payload.phasing_loop import PhasingLoop
+>       from mission_sim.core.physics.ids import OPDMeasurement
+E       ImportError: cannot import name 'OPDMeasurement' from 'mission_sim.core.physics.ids' (/Users/huo/Projects/multistagecophasing/mission_sim/core/physics/ids.py)
+
+tests/test_l4_engineering.py:184: ImportError
+_________________________ test_t_l4_006_hitl_contract __________________________
+
+    def test_t_l4_006_hitl_contract():
+>       from mission_sim.simulation.hitl import (
+            HITLInterface, HITLMessage, MockEchoTransport,
+            HITLHandshakeError, HITLTimeoutError, PROTOCOL_VERSION)
+E       ModuleNotFoundError: No module named 'mission_sim.simulation.hitl'
+
+tests/test_l4_engineering.py:206: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_l4_engineering.py::test_t_l4_007_attitude_package_repaired
+FAILED tests/test_l4_engineering.py::test_t_l4_001_sixdof_conservation - Modu...
+FAILED tests/test_l4_engineering.py::test_t_l4_002_actuator_nonlinearity_boundaries
+FAILED tests/test_l4_engineering.py::test_t_l4_003_allan_spectrum_slopes - Mo...
+FAILED tests/test_l4_engineering.py::test_t_l4_004_monte_carlo_robustness - T...
+FAILED tests/test_l4_engineering.py::test_t_l4_005_opd_pointing_p95 - ImportE...
+FAILED tests/test_l4_engineering.py::test_t_l4_006_hitl_contract - ModuleNotF...
+7 failed in 1.11s

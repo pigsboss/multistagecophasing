@@ -1,0 +1,28 @@
+fine scan 2880 seeds: 5.4s  best=4.6937e-01
+== top 12 ==
+  res=4.6937e-01 rmax=1.2390 rend=0.0188 side=+1 alt= 300.0km f=0.986899
+  res=5.1783e-01 rmax=1.2391 rend=0.0188 side=+1 alt= 288.0km f=0.986899
+  res=5.6671e-01 rmax=1.2391 rend=0.0187 side=+1 alt= 276.0km f=0.986899
+  res=6.1599e-01 rmax=1.2392 rend=0.0187 side=+1 alt= 264.0km f=0.986899
+  res=6.4082e-01 rmax=1.2394 rend=0.0183 side=+1 alt= 120.0km f=0.986697
+  res=6.6568e-01 rmax=1.2392 rend=0.0187 side=+1 alt= 252.0km f=0.986899
+  res=6.8997e-01 rmax=1.2394 rend=0.0183 side=+1 alt= 132.0km f=0.986697
+  res=7.1576e-01 rmax=1.2392 rend=0.0187 side=+1 alt= 240.0km f=0.986899
+  res=7.3846e-01 rmax=1.2394 rend=0.0184 side=+1 alt= 144.0km f=0.986697
+  res=7.6622e-01 rmax=1.2393 rend=0.0186 side=+1 alt= 228.0km f=0.986899
+  res=7.8628e-01 rmax=1.2393 rend=0.0184 side=+1 alt= 156.0km f=0.986697
+  res=8.1707e-01 rmax=1.2393 rend=0.0186 side=+1 alt= 216.0km f=0.986899
+== Newton 精修（shot period=27.32d；tol 1e-8） ==
+   seed(side=+1,alt=300,f=0.98690): success=False res=4.694e-01 iters=1
+   seed(side=+1,alt=288,f=0.98690): success=False res=5.178e-01 iters=1
+   seed(side=+1,alt=276,f=0.98690): success=False res=5.667e-01 iters=1
+   seed(side=+1,alt=264,f=0.98690): success=False res=6.160e-01 iters=1
+   seed(side=+1,alt=120,f=0.98670): success=False res=2.810e-02 iters=4
+   seed(side=+1,alt=252,f=0.98690): success=False res=6.657e-01 iters=1
+   seed(side=+1,alt=132,f=0.98670): success=False res=5.788e-01 iters=3
+   seed(side=+1,alt=240,f=0.98690): success=False res=7.158e-01 iters=1
+   seed(side=+1,alt=144,f=0.98670): success=False res=5.271e-02 iters=4
+   seed(side=+1,alt=228,f=0.98690): success=False res=7.662e-01 iters=1
+   seed(side=+1,alt=156,f=0.98670): success=False res=7.266e-01 iters=2
+   seed(side=+1,alt=216,f=0.98690): success=False res=8.171e-01 iters=1
+成功 0/12

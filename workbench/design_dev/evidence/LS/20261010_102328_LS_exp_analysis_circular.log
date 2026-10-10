@@ -1,0 +1,25 @@
+# docs/excursion/lunar_swing/results/high_fidelity_circular
+# mode=keplerian  days=30.0  闭合残差=1.020e-09
+# ECI 初态 = [3.155e+08 0.000e+00 0.000e+00 0.000e+00 1.369e+03 0.000e+00]
+
+[A_j2only]
+  alt: init=309168 min=309168@0.00d max=902825@27.60d final=897791 km
+  apogees(d): [np.float64(27.6)]
+  perigees(d): []
+  a_osc(km): init=612374 min=612374 max=612374 final=612374  Δ(首末)=+1
+
+[B_plus_moon]
+  alt: init=309168 min=309168@0.00d max=450724@20.54d final=362870 km
+  apogees(d): [np.float64(6.85), np.float64(20.54)]
+  perigees(d): [np.float64(13.69), np.float64(27.4)]
+  moon: min=68687 km @ 13.69 d (init 68854 km)
+  a_osc(km): init=612374 min=321481 max=614163 final=444761  Δ(首末)=-167612
+
+[C_plus_drag]
+  alt: init=309168 min=309168@0.00d max=450724@20.54d final=362870 km
+  apogees(d): [np.float64(6.85), np.float64(20.54)]
+  perigees(d): [np.float64(13.69), np.float64(27.4)]
+  moon: min=68687 km @ 13.69 d (init 68854 km)
+  a_osc(km): init=612374 min=321481 max=614163 final=444761  Δ(首末)=-167612
+
+B vs C: max|Δstate|=0.000e+00 (alt 0.000e+00 m)

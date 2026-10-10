@@ -1,0 +1,35 @@
+scan 14400 seeds x 24000 steps: 8.9s
+filtered (r_max_geo >= 0.9 DU): 6109/14400
+== top 20（过滤后按半周期残差） ==
+  res=8.5655e-01 rmin=0.0207 rmax=0.9028 rend=0.6888 side=-1 x0=-0.032805 vy0=-9.64790
+  res=8.5950e-01 rmin=0.0192 rmax=0.9033 rend=0.6878 side=-1 x0=-0.031388 vy0=-10.00672
+  res=8.6152e-01 rmin=0.0185 rmax=0.9038 rend=0.6875 side=-1 x0=-0.030642 vy0=-10.21176
+  res=8.6725e-01 rmin=0.0201 rmax=0.9057 rend=0.6959 side=-1 x0=-0.032283 vy0=-9.77605
+  res=8.8083e-01 rmin=0.0311 rmax=0.9098 rend=0.7298 side=+1 x0=0.018982 vy0=7.80252
+  res=8.8387e-01 rmin=0.0227 rmax=0.9095 rend=0.7151 side=+1 x0=0.010581 vy0=9.18655
+  res=8.8857e-01 rmin=0.0181 rmax=0.9100 rend=0.7082 side=+1 x0=0.005998 vy0=10.31429
+  res=8.9590e-01 rmin=0.0263 rmax=0.9136 rend=0.7318 side=+1 x0=0.014145 vy0=8.52017
+  res=8.9591e-01 rmin=0.0304 rmax=0.9142 rend=0.7398 side=+1 x0=0.018218 vy0=7.90504
+  res=8.9865e-01 rmin=0.0237 rmax=0.9140 rend=0.7286 side=+1 x0=0.011599 vy0=8.98151
+  res=9.0730e-01 rmin=0.0189 rmax=0.9167 rend=0.7236 side=-1 x0=-0.031015 vy0=-10.10924
+  res=9.1273e-01 rmin=0.0174 rmax=0.9179 rend=0.7241 side=-1 x0=-0.029524 vy0=-10.54496
+  res=9.1522e-01 rmin=0.0195 rmax=0.9192 rend=0.7312 side=-1 x0=-0.031686 vy0=-9.92983
+  res=9.1666e-01 rmin=0.0198 rmax=0.9197 rend=0.7330 side=-1 x0=-0.031985 vy0=-9.85294
+  res=9.1682e-01 rmin=0.0209 rmax=0.9200 rend=0.7355 side=-1 x0=-0.033029 vy0=-9.59664
+  res=9.1847e-01 rmin=0.0291 rmax=0.9209 rend=0.7544 side=+1 x0=0.016945 vy0=8.08445
+  res=9.2076e-01 rmin=0.0174 rmax=0.9189 rend=0.7309 side=+1 x0=0.005235 vy0=10.54496
+  res=9.2310e-01 rmin=0.0230 rmax=0.9210 rend=0.7455 side=+1 x0=0.010835 vy0=9.13529
+  res=9.2935e-01 rmin=0.0235 rmax=0.9230 rend=0.7513 side=+1 x0=0.011344 vy0=9.03277
+  res=9.3503e-01 rmin=0.0276 rmax=0.9256 rend=0.7639 side=+1 x0=0.015418 vy0=8.31513
+== Newton 精修（top 10；80000 步） ==
+  seed(side=-1, x0=-0.032805, vy0=-9.64790) → success=False res=4.246e-01 iters=2
+  seed(side=-1, x0=-0.031388, vy0=-10.00672) → success=False res=8.314e-01 iters=2
+  seed(side=-1, x0=-0.030642, vy0=-10.21176) → success=False res=2.314e-01 iters=2
+  seed(side=-1, x0=-0.032283, vy0=-9.77605) → success=False res=5.201e-01 iters=3
+  seed(side=+1, x0=0.018982, vy0=7.80252) → success=False res=4.372e-01 iters=2
+  seed(side=+1, x0=0.010581, vy0=9.18655) → success=False res=1.571e-01 iters=3
+  seed(side=+1, x0=0.005998, vy0=10.31429) → success=False res=6.591e-01 iters=2
+  seed(side=+1, x0=0.014145, vy0=8.52017) → success=False res=1.818e-01 iters=3
+  seed(side=+1, x0=0.018218, vy0=7.90504) → success=False res=4.771e-01 iters=3
+  seed(side=+1, x0=0.011599, vy0=8.98151) → success=False res=2.915e-01 iters=3
+精修成功 0/10

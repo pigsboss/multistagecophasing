@@ -1,0 +1,127 @@
+EFFFFFFEF                                                                [100%]
+==================================== ERRORS ====================================
+_________ ERROR at setup of test_t_ls_001_symmetric_2to1_full_closure __________
+
+    @pytest.fixture(scope="module")
+    def solution_2to1():
+        crtbp = _crtbp()
+        tg = _targeter(crtbp)
+>       res = tg.find_symmetric_periodic_orbit(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            resonance_ratio=(2, 1), x0_guess=0.85, vy0_guess=0.95,
+            tol=1e-8, max_iter=50, char_period=CHAR_PERIOD)
+E       AttributeError: 'LunarSwingTargeter' object has no attribute 'find_symmetric_periodic_orbit'
+
+tests/lunar_swing/test_ls_strict.py:38: AttributeError
+_________ ERROR at setup of test_t_ls_007_cross_integrator_consistency _________
+
+    @pytest.fixture(scope="module")
+    def solution_2to1():
+        crtbp = _crtbp()
+        tg = _targeter(crtbp)
+>       res = tg.find_symmetric_periodic_orbit(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            resonance_ratio=(2, 1), x0_guess=0.85, vy0_guess=0.95,
+            tol=1e-8, max_iter=50, char_period=CHAR_PERIOD)
+E       AttributeError: 'LunarSwingTargeter' object has no attribute 'find_symmetric_periodic_orbit'
+
+tests/lunar_swing/test_ls_strict.py:38: AttributeError
+=================================== FAILURES ===================================
+____________________ test_t_ls_001_variational_matrix_check ____________________
+
+    def test_t_ls_001_variational_matrix_check():
+        crtbp = _crtbp()
+        rng = np.random.default_rng(20261010)
+        ok = 0
+        while ok < 10:
+            x = np.concatenate([rng.uniform(-0.8, 0.8, 3), rng.uniform(-1.0, 1.0, 3)])
+            r1 = np.linalg.norm(x[:2] + [crtbp.mu, 0.0]) if False else np.linalg.norm(x[:3] - np.array([-crtbp.mu, 0, 0]))
+            r2 = np.linalg.norm(x[:3] - np.array([1 - crtbp.mu, 0, 0]))
+            if min(r1, r2) < 0.05:
+                continue
+            ok += 1
+>           A = crtbp.variational_matrix_nd(x)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E           AttributeError: 'UniversalCRTBP' object has no attribute 'variational_matrix_nd'
+
+tests/lunar_swing/test_ls_strict.py:67: AttributeError
+_________________________ test_t_ls_002_symmetric_3to2 _________________________
+
+    def test_t_ls_002_symmetric_3to2():
+        tg = _targeter()
+        ok = None
+        for x0, vy0 in [(0.80, 0.95), (0.75, 1.00), (0.85, 1.05)]:
+>           res = tg.find_symmetric_periodic_orbit(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                resonance_ratio=(3, 2), x0_guess=x0, vy0_guess=vy0,
+                tol=1e-8, max_iter=60, char_period=CHAR_PERIOD)
+E           AttributeError: 'LunarSwingTargeter' object has no attribute 'find_symmetric_periodic_orbit'
+
+tests/lunar_swing/test_ls_strict.py:85: AttributeError
+____________________ test_t_ls_003_scan_multiple_solutions _____________________
+
+    def test_t_ls_003_scan_multiple_solutions():
+        tg = _targeter()
+        xs = np.linspace(0.75, 0.95, 5)
+        vys = np.linspace(0.85, 1.05, 5)
+>       found = tg.scan_resonant_orbits(
+                ^^^^^^^^^^^^^^^^^^^^^^^
+            resonance_ratio=(2, 1), x0_grid=xs, vy0_grid=vys,
+            tol=1e-6, max_iter=20, num_steps=3000,
+            polish_tol=1e-9, polish_num_steps=40000, char_period=CHAR_PERIOD)
+E       AttributeError: 'LunarSwingTargeter' object has no attribute 'scan_resonant_orbits'. Did you mean: 'find_resonant_orbit'?
+
+tests/lunar_swing/test_ls_strict.py:103: AttributeError
+_______________________ test_t_ls_004_third_body_gravity _______________________
+
+    def test_t_ls_004_third_body_gravity():
+>       from mission_sim.core.physics.models.third_body import ThirdBodyGravity
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.models.third_body'
+
+tests/lunar_swing/test_ls_strict.py:116: ModuleNotFoundError
+_______________________ test_t_ls_005_zonal_geopotential _______________________
+
+    def test_t_ls_005_zonal_geopotential():
+        from mission_sim.core.physics.models.gravity.high_order_geopotential import HighOrderGeopotential
+        from mission_sim.core.physics.models.j2_gravity import J2Gravity
+    
+        MU = 3.986004418e14; RE = 6378137.0
+        J2, J3, J4 = 1.08262668e-3, -2.53215306e-6, -1.61098761e-6
+    
+>       m_full = HighOrderGeopotential(mu_earth=MU, j2=J2, j3=J3, j4=J4, r_earth=RE)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: HighOrderGeopotential.__init__() got an unexpected keyword argument 'mu_earth'
+
+tests/lunar_swing/test_ls_strict.py:153: TypeError
+_________________ test_t_ls_006_scenario_smoke_and_conversion __________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1232/test_t_ls_006_scenario_smoke_a0')
+
+    def test_t_ls_006_scenario_smoke_and_conversion(tmp_path):
+>       from mission_sim.simulation.threebody.earth_moon import (
+            EarthMoonResonanceSimulation, crtbp_state_to_eci)
+E       ModuleNotFoundError: No module named 'mission_sim.simulation.threebody.earth_moon'
+
+tests/lunar_swing/test_ls_strict.py:191: ModuleNotFoundError
+______________ test_t_ls_008_strict_acceptance_script_no_backdoor ______________
+
+    def test_t_ls_008_strict_acceptance_script_no_backdoor():
+        script = pathlib.Path(__file__).resolve().parents[2] / "scripts" / "lunar_swing" / "acceptance_strict.py"
+>       assert script.exists(), "验收脚本 v2 不存在"
+E       AssertionError: 验收脚本 v2 不存在
+E       assert False
+E        +  where False = exists()
+E        +    where exists = PosixPath('/Users/huo/Projects/multistagecophasing/scripts/lunar_swing/acceptance_strict.py').exists
+
+tests/lunar_swing/test_ls_strict.py:265: AssertionError
+=========================== short test summary info ============================
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_001_variational_matrix_check
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_002_symmetric_3to2 - At...
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_003_scan_multiple_solutions
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_004_third_body_gravity
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_005_zonal_geopotential
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_006_scenario_smoke_and_conversion
+FAILED tests/lunar_swing/test_ls_strict.py::test_t_ls_008_strict_acceptance_script_no_backdoor
+ERROR tests/lunar_swing/test_ls_strict.py::test_t_ls_001_symmetric_2to1_full_closure
+ERROR tests/lunar_swing/test_ls_strict.py::test_t_ls_007_cross_integrator_consistency
+7 failed, 2 errors in 1.25s

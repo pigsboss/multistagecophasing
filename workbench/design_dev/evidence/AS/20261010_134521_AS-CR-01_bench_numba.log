@@ -1,0 +1,6 @@
+numba threads = 12
+等价性: RHS 0.00e+00 | Jac 0.00e+00 | RK4(2000步) 0.00e+00 | RK4-aug(500步) 0.00e+00
+RHS x100000: numpy 0.311s | numba 0.038s | 加速 8.3x
+RK4-state 40000 步: numpy 0.773s | numba 0.007s | 加速 103.7x
+RK4-aug42 40000 步: numpy 1.357s | numba 0.055s | 加速 24.8x
+批量 16 种子 x40000 步: 单线程 0.119s | 多核prange 0.017s | 加速 7.0x (一致性 0.0e+00)

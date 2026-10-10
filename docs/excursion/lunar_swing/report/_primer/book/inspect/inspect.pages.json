@@ -1,0 +1,56 @@
+{
+  "jobname": "lunar_swing_summary",
+  "pdf": "_primer/book/lunar_swing_summary.pdf",
+  "resolution": 110,
+  "images_bytes": 759880,
+  "pages": [
+    {
+      "page": 15,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0015.png",
+      "bytes": 232445
+    },
+    {
+      "page": 16,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0016.png",
+      "bytes": 162099
+    },
+    {
+      "page": 17,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0017.png",
+      "bytes": 63521
+    },
+    {
+      "page": 30,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0030.png",
+      "bytes": 74627
+    },
+    {
+      "page": 46,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0046.png",
+      "bytes": 113726
+    },
+    {
+      "page": 47,
+      "reasons": [
+        "explicitly selected with --pages"
+      ],
+      "image": "_primer/book/inspect/pages/page-0047.png",
+      "bytes": 113462
+    }
+  ]
+}

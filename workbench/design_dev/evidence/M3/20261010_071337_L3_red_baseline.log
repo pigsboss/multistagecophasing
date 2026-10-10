@@ -1,0 +1,54 @@
+FFFFFF                                                                   [100%]
+=================================== FAILURES ===================================
+_________________ test_t_l3_001_stewart_kinematics_round_trip __________________
+
+    def test_t_l3_001_stewart_kinematics_round_trip():
+>       from mission_sim.core.physics.components.mechanisms.stewart_platform import StewartPlatform
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.components.mechanisms.stewart_platform'
+
+tests/test_l3_payload_phasing.py:30: ModuleNotFoundError
+___________________ test_t_l3_001_stewart_stroke_consistency ___________________
+
+    def test_t_l3_001_stewart_stroke_consistency():
+        """零位：逆解长度与名义构型一致；小位姿下长度变化连续。"""
+>       from mission_sim.core.physics.components.mechanisms.stewart_platform import StewartPlatform
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.components.mechanisms.stewart_platform'
+
+tests/test_l3_payload_phasing.py:49: ModuleNotFoundError
+______________________ test_t_l3_005_decoupling_boundary _______________________
+
+    def test_t_l3_005_decoupling_boundary():
+>       from mission_sim.core.physics.payload.platform_payload import (
+            PlatformPayloadModel, PayloadDecouplingError)
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.payload'
+
+tests/test_l3_payload_phasing.py:63: ModuleNotFoundError
+________________________ test_t_l3_002_opd_closed_loop _________________________
+
+    def test_t_l3_002_opd_closed_loop():
+>       from mission_sim.core.physics.payload.phasing_loop import PhasingLoop
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.payload'
+
+tests/test_l3_payload_phasing.py:79: ModuleNotFoundError
+______________________ test_t_l3_003_error_budget_closure ______________________
+
+    def test_t_l3_003_error_budget_closure():
+>       from mission_sim.core.physics.payload.error_budget import ErrorBudget
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.payload'
+
+tests/test_l3_payload_phasing.py:116: ModuleNotFoundError
+___________________ test_t_l3_004_hierarchical_step_response ___________________
+
+    def test_t_l3_004_hierarchical_step_response():
+>       from mission_sim.core.physics.payload.phasing_loop import PhasingLoop
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.payload'
+
+tests/test_l3_payload_phasing.py:146: ModuleNotFoundError
+=========================== short test summary info ============================
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_001_stewart_kinematics_round_trip
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_001_stewart_stroke_consistency
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_005_decoupling_boundary - ...
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_002_opd_closed_loop - Modu...
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_003_error_budget_closure
+FAILED tests/test_l3_payload_phasing.py::test_t_l3_004_hierarchical_step_response
+6 failed in 1.43s

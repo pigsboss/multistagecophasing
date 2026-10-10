@@ -1,0 +1,36 @@
+======================================================================
+LUNAR-SWING Strict Acceptance (v2)
+======================================================================
+  [sym] iter 0: residual=8.907e-01, damping=0.50
+  [sym] iter 5: residual=2.272e-02, damping=0.50
+  [sym] iter 10: residual=7.098e-04, damping=0.50
+  [sym] iter 15: residual=2.219e-05, damping=0.50
+  [sym] iter 20: residual=6.933e-07, damping=0.50
+  [sym] iter 21: residual=3.467e-07, damping=0.50
+  [sym] iter 22: residual=1.733e-07, damping=0.50
+  [sym] iter 23: residual=8.666e-08, damping=0.50
+  [sym] iter 24: residual=4.333e-08, damping=0.50
+  [sym] iter 25: residual=2.167e-08, damping=0.50
+  [sym] iter 26: residual=1.083e-08, damping=0.50
+  [sym] iter 27: residual=5.417e-09, damping=0.50
+  [sym] iter 28: residual=2.708e-09, damping=0.50
+  [sym] iter 29: residual=1.354e-09, damping=0.50
+  [sym] iter 30: residual=6.770e-10, damping=0.50
+  [sym] iter 31: residual=3.385e-10, damping=0.50
+  [sym] iter 32: residual=1.693e-10, damping=0.50
+  [sym] iter 33: residual=8.464e-11, damping=0.50
+   [1] 收敛迭代: 34
+   [2] 半周期残差: 8.464e-11
+   [3] 全状态闭合: 1.020e-09
+   [4] Jacobi 漂移: 0.000e+00
+   [5] 扫描收敛: 6 个初值
+   [6] 跨积分器: RK4=1.020e-09, DOP853=1.022e-09, 互差=2.533e-12
+----------------------------------------------------------------------
+   ✅ 对称 2:1 收敛
+   ✅ 半周期截面残差≤1e-8
+   ✅ 全状态闭合≤1e-8
+   ✅ Jacobi 漂移≤1e-10
+   ✅ 扫描收敛初值≥3
+   ✅ 跨积分器（RK4/DOP853）
+======================================================================
+Overall: 🎉 PASSED

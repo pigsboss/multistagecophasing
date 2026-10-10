@@ -1,0 +1,31 @@
+======================================================================
+LUNAR-SWING High-Fidelity Evolution Experiment
+======================================================================
+  [sym] iter 0: residual=8.907e-01, damping=0.50
+  [sym] iter 5: residual=2.272e-02, damping=0.50
+  [sym] iter 10: residual=7.098e-04, damping=0.50
+  [sym] iter 15: residual=2.219e-05, damping=0.50
+  [sym] iter 20: residual=6.933e-07, damping=0.50
+  [sym] iter 21: residual=3.467e-07, damping=0.50
+  [sym] iter 22: residual=1.733e-07, damping=0.50
+  [sym] iter 23: residual=8.666e-08, damping=0.50
+  [sym] iter 24: residual=4.333e-08, damping=0.50
+  [sym] iter 25: residual=2.167e-08, damping=0.50
+  [sym] iter 26: residual=1.083e-08, damping=0.50
+  [sym] iter 27: residual=5.417e-09, damping=0.50
+  [sym] iter 28: residual=2.708e-09, damping=0.50
+  [sym] iter 29: residual=1.354e-09, damping=0.50
+  [sym] iter 30: residual=6.770e-10, damping=0.50
+  [sym] iter 31: residual=3.385e-10, damping=0.50
+  [sym] iter 32: residual=1.693e-10, damping=0.50
+  [sym] iter 33: residual=8.464e-11, damping=0.50
+2:1 严格解: 闭合残差=1.02e-09, Jacobi 漂移=0.00e+00
+state_nd = [0.8087346541 0.           0.           0.           0.5158236131
+ 0.          ]
+月球星历: 确定性圆形（离线）
+ECI 初态: [3.155460e+08 0.000000e+00 0.000000e+00 0.000000e+00 1.369491e+03
+ 0.000000e+00]
+[A_j2only] ok=True bounded=True alt_min=309167.9 km decay=-19620.785 km/day
+[B_plus_moon] ok=True bounded=True alt_min=309167.9 km decay=-1790.074 km/day
+[C_plus_drag] ok=True bounded=True alt_min=309167.9 km decay=-1790.074 km/day
+✅ 完成，结果目录: /Users/huo/Projects/multistagecophasing/docs/excursion/lunar_swing/results/high_fidelity_circular

@@ -1,0 +1,67 @@
+FF.FF                                                                    [100%]
+=================================== FAILURES ===================================
+________ TestHighOrderGeopotentialInterface.test_initialization_default ________
+
+self = <tests.lunar_swing.test_geopotential_stub.TestHighOrderGeopotentialInterface object at 0x113915c70>
+
+    def test_initialization_default(self):
+        """测试默认初始化"""
+        model = HighOrderGeopotential()
+>       assert model.degree == 10
+               ^^^^^^^^^^^^
+E       AttributeError: 'HighOrderGeopotential' object has no attribute 'degree'
+
+tests/lunar_swing/test_geopotential_stub.py:40: AttributeError
+________ TestHighOrderGeopotentialInterface.test_initialization_custom _________
+
+self = <tests.lunar_swing.test_geopotential_stub.TestHighOrderGeopotentialInterface object at 0x10ced08c0>
+
+    def test_initialization_custom(self):
+        """测试自定义参数初始化"""
+>       model = HighOrderGeopotential(
+            degree=20,
+            order=20,
+            coeff_file='data/egm2008.gfc'
+        )
+E       TypeError: HighOrderGeopotential.__init__() got an unexpected keyword argument 'degree'
+
+tests/lunar_swing/test_geopotential_stub.py:46: TypeError
+__________ TestHighOrderGeopotentialInterface.test_method_signatures ___________
+
+self = <tests.lunar_swing.test_geopotential_stub.TestHighOrderGeopotentialInterface object at 0x11333b2c0>
+
+    def test_method_signatures(self):
+        """测试方法签名"""
+        model = HighOrderGeopotential()
+    
+        import inspect
+    
+        # 测试 compute_accel 签名
+        sig = inspect.signature(model.compute_accel)
+        params = list(sig.parameters.keys())
+        assert 'state' in params
+        assert 'epoch' in params
+    
+        # 测试 set_max_degree 签名
+>       sig = inspect.signature(model.set_max_degree)
+                                ^^^^^^^^^^^^^^^^^^^^
+E       AttributeError: 'HighOrderGeopotential' object has no attribute 'set_max_degree'
+
+tests/lunar_swing/test_geopotential_stub.py:73: AttributeError
+____________ TestHighOrderGeopotentialInterface.test_example_usage _____________
+
+self = <tests.lunar_swing.test_geopotential_stub.TestHighOrderGeopotentialInterface object at 0x113c38530>
+
+    def test_example_usage(self):
+        """测试接口使用示例"""
+>       model = HighOrderGeopotential(degree=15, order=15)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E       TypeError: HighOrderGeopotential.__init__() got an unexpected keyword argument 'degree'
+
+tests/lunar_swing/test_geopotential_stub.py:79: TypeError
+=========================== short test summary info ============================
+FAILED tests/lunar_swing/test_geopotential_stub.py::TestHighOrderGeopotentialInterface::test_initialization_default
+FAILED tests/lunar_swing/test_geopotential_stub.py::TestHighOrderGeopotentialInterface::test_initialization_custom
+FAILED tests/lunar_swing/test_geopotential_stub.py::TestHighOrderGeopotentialInterface::test_method_signatures
+FAILED tests/lunar_swing/test_geopotential_stub.py::TestHighOrderGeopotentialInterface::test_example_usage
+4 failed, 1 passed in 1.08s

@@ -1,0 +1,22 @@
+t_half = 3.146207 TU = 13.6608 d
+== (a'') mu=0 极限：惯性周期 13.66d 的椭圆，在 t=13.66d 应闭合 ==
+  f=1.000: y=2.679e-02 xdot=-2.267e-01 |r|end=0.639107 DU
+  f=1.010: y=2.229e-02 xdot=-1.909e-01 |r|end=0.645066 DU
+  f=0.990: y=3.133e-02 xdot=-2.639e-01 |r|end=0.632443 DU
+== (b'') 真实月球：正确种子网格（alt 120-300 km × f 0.94-1.06）×2侧 ==
+  seeds=1200  best=3.3452e-02  median=2.0419e+00
+   res=3.3452e-02 rmax=1.2394 rend=0.0183 side=+1 alt= 160.0km f=0.98678
+   res=5.2471e-02 rmax=1.2394 rend=0.0183 side=+1 alt= 140.0km f=0.98678
+   res=1.1783e-01 rmax=1.2393 rend=0.0184 side=+1 alt= 180.0km f=0.98678
+   res=1.3992e-01 rmax=1.2395 rend=0.0182 side=+1 alt= 120.0km f=0.98678
+   res=2.0064e-01 rmax=1.2392 rend=0.0184 side=+1 alt= 200.0km f=0.98678
+   res=2.8187e-01 rmax=1.2392 rend=0.0185 side=+1 alt= 220.0km f=0.98678
+   res=3.6152e-01 rmax=1.2391 rend=0.0186 side=+1 alt= 240.0km f=0.98678
+   res=4.3959e-01 rmax=1.2391 rend=0.0186 side=+1 alt= 260.0km f=0.98678
+   res=5.1606e-01 rmax=1.2390 rend=0.0187 side=+1 alt= 280.0km f=0.98678
+   res=5.9094e-01 rmax=1.2389 rend=0.0188 side=+1 alt= 300.0km f=0.98678
+   res=1.3123e+00 rmax=1.3018 rend=0.5435 side=+1 alt= 120.0km f=1.06000
+   res=1.3124e+00 rmax=1.3017 rend=0.5434 side=+1 alt= 140.0km f=1.06000
+   res=1.3124e+00 rmax=1.3016 rend=0.5433 side=+1 alt= 160.0km f=1.06000
+   res=1.3124e+00 rmax=1.3016 rend=0.5432 side=+1 alt= 180.0km f=1.06000
+   res=1.3125e+00 rmax=1.3015 rend=0.5431 side=+1 alt= 200.0km f=1.06000

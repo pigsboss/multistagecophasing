@@ -1,0 +1,25 @@
+# docs/excursion/lunar_swing/results/high_fidelity
+# mode=spice  days=30.0  闭合残差=1.020e-09
+# ECI 初态 = [-2.286e+08 -2.091e+08 -5.967e+07  9.381e+02 -9.071e+02 -4.154e+02]
+
+[A_j2only]
+  alt: init=309168 min=309168@0.00d max=902825@27.60d final=897791 km
+  apogees(d): [np.float64(27.6)]
+  perigees(d): []
+  a_osc(km): init=612374 min=612374 max=612374 final=612374  Δ(首末)=+0
+
+[B_plus_moon]
+  alt: init=309168 min=256938@24.81d max=534894@11.03d final=422363 km
+  apogees(d): [np.float64(11.03)]
+  perigees(d): [np.float64(24.81)]
+  moon: min=17727 km @ 29.54 d (init 86869 km)
+  a_osc(km): init=612374 min=228469 max=612374 final=229554  Δ(首末)=-382820
+
+[C_plus_drag]
+  alt: init=309168 min=256938@24.81d max=534894@11.03d final=422363 km
+  apogees(d): [np.float64(11.03)]
+  perigees(d): [np.float64(24.81)]
+  moon: min=17727 km @ 29.54 d (init 86869 km)
+  a_osc(km): init=612374 min=228469 max=612374 final=229554  Δ(首末)=-382820
+
+B vs C: max|Δstate|=0.000e+00 (alt 0.000e+00 m)

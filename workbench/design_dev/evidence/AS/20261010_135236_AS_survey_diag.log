@@ -1,0 +1,16 @@
+seeds: (14400, 6)
+screen(6000步) time 2.04s
+== 残差最小 12 个种子 ==
+  res=1.6125e+00 side=-1 alt= 300.0 km period_factor=0.97000
+  res=1.6125e+00 side=-1 alt= 296.9 km period_factor=0.97000
+  res=1.6125e+00 side=-1 alt= 293.9 km period_factor=0.97000
+  res=1.6126e+00 side=-1 alt= 290.8 km period_factor=0.97000
+  res=1.6126e+00 side=-1 alt= 287.8 km period_factor=0.97000
+  res=1.6126e+00 side=-1 alt= 284.7 km period_factor=0.97000
+  res=1.6127e+00 side=-1 alt= 281.7 km period_factor=0.97000
+  res=1.6127e+00 side=-1 alt= 278.6 km period_factor=0.97000
+  res=1.6128e+00 side=-1 alt= 275.6 km period_factor=0.97000
+  res=1.6128e+00 side=-1 alt= 272.5 km period_factor=0.97000
+  res=1.6128e+00 side=-1 alt= 269.5 km period_factor=0.97000
+  res=1.6129e+00 side=-1 alt= 266.4 km period_factor=0.97000
+best=1.6125e+00  median=1.6568e+00  p10=1.6260e+00

@@ -1,0 +1,64 @@
+# 回归执行: level=ALL note=m1_final_all
+# 命令: python3 -m pytest tests/ -q
+# 开始: 2026-10-10 00:28:51
+........................................................................ [ 28%]
+........................................................................ [ 56%]
+........................................................................ [ 85%]
+.....................................                                    [100%]
+=============================== warnings summary ===============================
+tests/test_ephemeris.py::test_ephemeris_linear_interpolation
+  /Users/huo/Projects/multistagecophasing/tests/test_ephemeris.py:15: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    state_mid = eph.get_interpolated_state(0.5)
+
+tests/test_ephemeris.py: 100 warnings
+  /Users/huo/Projects/multistagecophasing/tests/test_ephemeris.py:30: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    interp = eph.get_interpolated_state(t)
+
+tests/test_ephemeris.py::test_ephemeris_out_of_range_warning
+  /Users/huo/Projects/multistagecophasing/tests/test_ephemeris.py:43: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    eph.get_interpolated_state(-1.0)
+
+tests/test_ephemeris.py::test_ephemeris_out_of_range_warning
+  /Users/huo/Projects/multistagecophasing/tests/test_ephemeris.py:44: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    eph.get_interpolated_state(11.0)
+
+tests/test_generators.py::TestKeplerianGenerator::test_generate_circular_orbit
+  /Users/huo/Projects/multistagecophasing/tests/test_generators.py:88: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    state_1period = ephemeris.get_interpolated_state(t_period)
+
+tests/test_generators.py::TestKeplerianGenerator::test_generate_circular_orbit
+  /Users/huo/Projects/multistagecophasing/tests/test_generators.py:93: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    state_2period = ephemeris.get_interpolated_state(t_2period)
+
+tests/test_generators.py::TestKeplerianGenerator::test_generate_circular_orbit
+  /Users/huo/Projects/multistagecophasing/tests/test_generators.py:121: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    state_half = ephemeris.get_interpolated_state(t_half_period)
+
+tests/test_generators.py::TestEphemerisIntegration::test_ephemeris_interface
+tests/test_generators.py::TestEphemerisIntegration::test_ephemeris_interface
+  /Users/huo/Projects/multistagecophasing/tests/test_generators.py:712: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    state = ephemeris.get_interpolated_state(t_mid)
+
+tests/test_gnc.py: 3 warnings
+tests/test_integration.py: 11520 warnings
+tests/test_l1_physical_baseline.py: 15540 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/core/cyber/platform_gnc/gnc_subsystem.py:162: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    target_state = self.ref_ephemeris.get_interpolated_state(epoch)
+
+tests/test_integration.py::test_short_simulation_sun_earth_l2
+tests/test_l1_physical_baseline.py::test_t_l1_006_crtbp_end_to_end_regression
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/threebody/base.py:46: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom0_phys = self.ephemeris.get_interpolated_state(0.0)
+
+tests/test_integration.py: 1152 warnings
+tests/test_l1_physical_baseline.py: 2723 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/base.py:227: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom_state = self.ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py::test_t_l1_004_tracking_error_channel_consistency
+  /Users/huo/Projects/multistagecophasing/tests/test_l1_physical_baseline.py:90: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    ref_last = sim.ephemeris.get_interpolated_state(t_last)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+253 passed, 31049 warnings in 46.45s
+# 结束: 2026-10-10 00:29:39  exit=0

@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "<stdin>", line 24, in <module>
+  File "/Users/huo/python3_12/lib/python3.12/site-packages/scipy/integrate/_ivp/ivp.py", line 623, in solve_ivp
+    solver = method(fun, t0, y0, tf, vectorized=vectorized, **options)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/huo/python3_12/lib/python3.12/site-packages/scipy/integrate/_ivp/rk.py", line 505, in __init__
+    super().__init__(fun, t0, y0, t_bound, max_step, rtol, atol,
+  File "/Users/huo/python3_12/lib/python3.12/site-packages/scipy/integrate/_ivp/rk.py", line 96, in __init__
+    self.h_abs = select_initial_step(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/huo/python3_12/lib/python3.12/site-packages/scipy/integrate/_ivp/common.py", line 118, in select_initial_step
+    d1 = norm(f0 / scale)
+              ~~~^~~~~~~
+ValueError: operands could not be broadcast together with shapes (9,) (6,) 

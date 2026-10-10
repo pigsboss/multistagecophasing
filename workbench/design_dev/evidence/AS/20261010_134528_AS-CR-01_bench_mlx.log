@@ -1,0 +1,7 @@
+mlx 0.32.3 | default device: Device(gpu, 0)
+device: Apple M2 Max | memory(GB): 96.0
+fp64 on GPU: 不支持（ValueError: float64 is not supported on the GPU）
+批量 RHS N=1000000: 2.28 ms/次 → 440 M 状态/s
+批量 RK4: K=65536 x 2000 步 (chunk=292): 0.400s → 327.9 M seed·步/s
+批量 RK4: K=262144 x 2000 步 (chunk=292): 1.366s → 383.9 M seed·步/s
+fp32 半周期 2000 步 vs fp64: |Δr|max=1.17e-06 DU (≈0.45 km)

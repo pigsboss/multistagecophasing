@@ -1,0 +1,9 @@
+{
+  "verify": {
+    "kernel_dmax": 4.440892098500626e-16,
+    "half_cycle_dstate": 6.352776775356531e-08,
+    "residual_mismatch": 6.352545628508884e-08,
+    "smoke_best_residual": 1.8334266747405068,
+    "smoke_found": false
+  }
+}

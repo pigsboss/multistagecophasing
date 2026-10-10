@@ -1,0 +1,7 @@
+[QM 抽查] 缩短版复跑（2 天，理想月球）与归档 30 天运行前缀对比
+  A_j2only: 对比 289 个采样点（0–2.00 d），max|Δstate| = 4.904e-02
+  B_plus_moon: 对比 289 个采样点（0–2.00 d），max|Δstate| = 8.061e-02
+  导出核验 OK: mission_sim.core.cyber.algorithms.lunar_swing_targeter.LunarSwingTargeter
+  导出核验 OK: mission_sim.core.physics.models.ThirdBodyGravity
+  导出核验 OK: mission_sim.core.physics.models.gravity.HighOrderGeopotential
+  导出核验 OK: mission_sim.simulation.threebody.EarthMoonResonanceSimulation

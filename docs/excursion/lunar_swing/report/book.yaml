@@ -1,0 +1,64 @@
+book:
+  title: LUNAR-SWING 研究总结报告
+  subtitle: 严格周期解、摄动演化与低近地点族域勘测
+  tagline: 一个问题牵引的两轮专题与能力沉淀（LS + AS）
+  institution: MCPC 设计组
+  date: 2026年10月10日
+
+source_root: sources
+
+bibliography:
+  file: refs.md
+  section_title: 参考文献（项目文档）
+
+output:
+  jobname: lunar_swing_summary
+  engine: xelatex
+  engine_runs: 3
+  min_pdf_bytes: 10000
+  emit_markdown: true
+
+fonts:
+  cjk_main: Songti SC
+  main: Times New Roman
+
+typography:
+  body_font_size: "4"
+
+volumes:
+  - id: V1
+    title: 第一篇　研究总览
+    standalone: true
+    sources:
+      - file: 00_overview.md
+  - id: V2
+    title: 第二篇　严格周期解与摄动有界性（LS 专题）
+    sources:
+      - file: 01_ls.md
+  - id: V3
+    title: 第三篇　低近地点族域与能量账本（AS 专题）
+    sources:
+      - file: 02_as.md
+  - id: V4
+    title: 第四篇　结论与展望
+    sources:
+      - file: 03_conclusion.md
+  - id: VA
+    title: 附录 A　评审意见
+    part_label: appA
+    appendix: true
+    sources:
+      - file: 04_review.md
+
+body_order: [V1, V2, V3, V4, VA, "@bibliography"]
+
+front_matter:
+  foreword_heading: 凡　例
+  foreword:
+    - '一、本报告汇总 LUNAR-SWING 研究线两轮专题的完整成果与证据：LS 专题（严格周期解与 30 天摄动演化）与 AS 专题（低近地点族域勘测与能量账本实验）。'
+    - '二、正文引用编号 [n] 均为项目内文档（见参考文献）；图表编号按篇组织；附录 A 为专家组评审意见。'
+    - '三、全部数值均有可复算的留档（实验数据、证据日志与回归记录，路径见参考文献）。'
+    - '四、v1.1 较 v1 增补六张图解（图 1-2～1-4、图 2-2、图 3-3、图 3-4，见第一章“直观导读”等），便于非专业读者理解。'
+  appendix_catalog:
+    - title: 附录 A　评审意见
+      label: appA

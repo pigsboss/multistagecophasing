@@ -1,0 +1,6 @@
+# 回归执行: level=L2 note=m2_green
+# 命令: python3 -m pytest tests/test_l2_formation_wiring.py -q
+# 开始: 2026-10-10 00:38:49
+.........                                                                [100%]
+9 passed in 44.56s
+# 结束: 2026-10-10 00:39:34  exit=0

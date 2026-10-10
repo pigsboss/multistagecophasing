@@ -1,0 +1,233 @@
+FFFFFFF.FFFF                                                             [100%]
+=================================== FAILURES ===================================
+________________ test_t_l1_001_central_gravity_matches_analytic ________________
+
+    def test_t_l1_001_central_gravity_matches_analytic():
+        """100 组随机状态：|a - (-mu*r/|r|^3)| 相对误差 < 1e-12。"""
+>       from mission_sim.core.physics.models.central_gravity import CentralGravity
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.models.central_gravity'
+
+tests/test_central_gravity.py:36: ModuleNotFoundError
+___________________ test_t_l1_001_vectorized_matches_scalar ____________________
+
+    def test_t_l1_001_vectorized_matches_scalar():
+        """向量化接口与标量接口一致（绝对 <1e-18）。"""
+>       from mission_sim.core.physics.models.central_gravity import CentralGravity
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.models.central_gravity'
+
+tests/test_central_gravity.py:54: ModuleNotFoundError
+________________________ test_t_l1_001_r_min_protection ________________________
+
+    def test_t_l1_001_r_min_protection():
+        """r→0 数值保护：不产生 NaN/Inf。"""
+>       from mission_sim.core.physics.models.central_gravity import CentralGravity
+E       ModuleNotFoundError: No module named 'mission_sim.core.physics.models.central_gravity'
+
+tests/test_central_gravity.py:70: ModuleNotFoundError
+____________ test_t_l1_002_leo_environment_includes_central_gravity ____________
+
+    def test_t_l1_002_leo_environment_includes_central_gravity():
+        """修复后：LEO 注册表含中心引力；环境合力与"中心+J2"理论值相对误差 <1e-6。"""
+        sim = LEOL1Simulation(_leo_sim_config())
+        assert sim._generate_nominal_orbit()
+        sim._initialize_physical_domain()
+    
+        state = sim.spacecraft.state
+        r0 = state[:3]
+        acc, _ = sim.environment.get_total_acceleration(state, sim.spacecraft.frame)
+    
+        a_central = -MU_EARTH * r0 / np.linalg.norm(r0) ** 3
+        a_j2 = np.asarray(J2Gravity(mu_earth=MU_EARTH).compute_accel(state, 0.0))
+        a_ref = a_central + a_j2  # 该高度阻力项量级 ~1e-26 m/s²，可忽略
+    
+        rel = np.linalg.norm(np.asarray(acc) - a_ref) / np.linalg.norm(a_ref)
+>       assert rel < 1e-6, (
+            f"LEO 环境合力与理论不符：|a_env|={np.linalg.norm(acc):.6e} m/s², "
+            f"|a_ref|={np.linalg.norm(a_ref):.6e} m/s², 相对差={rel:.3e}"
+        )
+E       AssertionError: LEO 环境合力与理论不符：|a_env|=1.096739e-02 m/s², |a_ref|=8.123736e+00 m/s², 相对差=1.001e+00
+E       assert np.float64(1.001350042722943) < 1e-06
+
+tests/test_central_gravity.py:96: AssertionError
+__________________ test_t_l1_003_leo_one_day_station_keeping ___________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_003_leo_one_day_stat0')
+
+    def test_t_l1_003_leo_one_day_station_keeping(tmp_path):
+        sim = _run_leo(tmp_path, 1.0)
+        data = _load_datasets(sim.h5_file)
+    
+        r = np.linalg.norm(data["true_states"][:, 0:3], axis=1)
+>       assert r.max() < 7000e3 * 1.05, f"轨道半径失控（可能飞离）：r_max={r.max():.3e} m"
+E       AssertionError: 轨道半径失控（可能飞离）：r_max=7.352e+16 m
+E       assert np.float64(7.351866968767736e+16) < (7000000.0 * 1.05)
+E        +  where np.float64(7.351866968767736e+16) = <built-in method max of numpy.ndarray object at 0x11345c0f0>()
+E        +    where <built-in method max of numpy.ndarray object at 0x11345c0f0> = array([7.00040727e+06, 7.04617333e+06, 7.15556112e+06, 7.31000611e+06,\n       7.49080747e+06, 7.68058639e+06, 7.864313...7.30506126e+11, 7.45873567e+11, 7.48135066e+11,\n       7.35152917e+11, 7.07483100e+11, 6.68113140e+11, 6.22179405e+11]).max
+
+tests/test_l1_physical_baseline.py:61: AssertionError
+_______________ test_t_l1_004_tracking_error_channel_consistency _______________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_004_tracking_error_c0')
+
+    def test_t_l1_004_tracking_error_channel_consistency(tmp_path):
+        injection = np.array([100.0, 0.0, 0.0, 0.0, 0.1, 0.0])
+        sim = _run_leo(tmp_path, 0.3, injection_error=injection)
+        data = _load_datasets(sim.h5_file)
+    
+        logged = data["tracking_errors"]
+        err_from_logs = data["nav_states"] - data["nominal_states"]
+>       assert np.allclose(logged, err_from_logs, rtol=0.0, atol=1e-9), \
+            "HDF5 tracking_errors 与 nav-nominal 不一致（误差链路未接通）"
+E       AssertionError: HDF5 tracking_errors 与 nav-nominal 不一致（误差链路未接通）
+E       assert False
+E        +  where False = <function allclose at 0x10b65ff70>(array([[0., 0., 0., 0., 0., 0.],\n       [0., 0., 0., 0., 0., 0.],\n       [0., 0., 0., 0., 0., 0.],\n       ...,\n       [0., 0., 0., 0., 0., 0.],\n       [0., 0., 0., 0., 0., 0.],\n       [0., 0., 0., 0., 0., 0.]], shape=(260, 6)), array([[ 9.33071879e+01, -1.28003014e+00,  4.21394763e-01,\n        -4.67827191e-03,  1.03345804e-01, -4.31484502e-03],...7,  6.89258075e+06, -4.52733093e+00,\n        -1.55120938e+04, -2.09799665e+04,  3.89648510e-03]],\n      shape=(260, 6)), rtol=0.0, atol=1e-09)
+E        +    where <function allclose at 0x10b65ff70> = np.allclose
+
+tests/test_l1_physical_baseline.py:80: AssertionError
+__________________ test_t_l1_005_geo_one_day_station_keeping ___________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_005_geo_one_day_stat0')
+
+    def test_t_l1_005_geo_one_day_station_keeping(tmp_path):
+        config = {
+            "mission_name": "L1_GeoBaseline",
+            "simulation_days": 1.0,
+            "time_step": 60.0,
+            "data_dir": str(tmp_path),
+            "verbose": False,
+        }
+        sim = GEOL1Simulation(config)
+        assert sim.run()
+        data = _load_datasets(sim.h5_file)
+    
+        r0 = GEOL1Simulation.GEO_RADIUS
+        r = np.linalg.norm(data["true_states"][:, 0:3], axis=1)
+>       assert np.max(np.abs(r - r0)) < 5.0e3, f"GEO 半径漂移异常：max|Δr|={np.max(np.abs(r - r0)):.1f} m"
+E       AssertionError: GEO 半径漂移异常：max|Δr|=431459.8 m
+E       assert np.float64(431459.7989974171) < 5000.0
+E        +  where np.float64(431459.7989974171) = <function max at 0x10b657bf0>(array([4.03589318e+02, 3.98792227e+04, 1.16534752e+05, 2.02039236e+05,\n       2.79661173e+05, 3.41394147e+05, 3.851732...4.08608454e+05, 4.08608439e+05, 4.08608190e+05,\n       4.08607043e+05, 4.08606986e+05, 4.08607628e+05, 4.08607925e+05]))
+E        +    where <function max at 0x10b657bf0> = np.max
+E        +    and   array([4.03589318e+02, 3.98792227e+04, 1.16534752e+05, 2.02039236e+05,\n       2.79661173e+05, 3.41394147e+05, 3.851732...4.08608454e+05, 4.08608439e+05, 4.08608190e+05,\n       4.08607043e+05, 4.08606986e+05, 4.08607628e+05, 4.08607925e+05]) = <ufunc 'absolute'>((array([42164403.58931752, 42203879.22273707, 42280534.75150607,\n       42366039.23631285, 42443661.17298571, 42505394....572608.43934658, 42572608.1895287 , 42572607.0433038 ,\n       42572606.98575307, 42572607.62832031, 42572607.92504694]) - 42164000.0))
+E        +      where <ufunc 'absolute'> = np.abs
+
+tests/test_l1_physical_baseline.py:114: AssertionError
+----------------------------- Captured stdout call -----------------------------
+   使用备用轨道生成方案（开普勒圆轨道，标准 GEO）...
+✅ 备用轨道生成完成，周期: 1.00 天
+________________________ test_t_l1_007_cli_level_gating ________________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_007_cli_level_gating0')
+
+    def test_t_l1_007_cli_level_gating(tmp_path):
+        r1 = subprocess.run(
+            [sys.executable, "run.py", "--scene", "leo", "--level", "1",
+             "--simulation_days", "0.002", "--time_step", "10", "--quiet",
+             "--data_dir", str(tmp_path)],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=180,
+        )
+        assert r1.returncode == 0, f"LEO L1 合法运行失败：\n{r1.stdout}\n{r1.stderr}"
+    
+        r2 = subprocess.run(
+            [sys.executable, "run.py", "--scene", "sun_earth_l2", "--level", "2", "--quiet"],
+            cwd=REPO_ROOT, capture_output=True, text=True, timeout=120,
+        )
+        out2 = r2.stdout + r2.stderr
+>       assert r2.returncode == 1 and "暂无 L2 实现" in out2, \
+            f"L2 分级未显式报错：rc={r2.returncode}, out={out2[-400:]}"
+E       AssertionError: L2 分级未显式报错：rc=1, out=❌ 仿真启动失败: 模块 mission_sim.simulation.threebody.sun_earth_l2 中没有找到类 SunEarthL2L2Simulation
+E         
+E       assert (1 == 1 and '暂无 L2 实现' in '❌ 仿真启动失败: 模块 mission_sim.simulation.threebody.sun_earth_l2 中没有找到类 SunEarthL2L2Simulation\n')
+E        +  where 1 = CompletedProcess(args=['/Users/huo/python3_12/bin/python3', 'run.py', '--scene', 'sun_earth_l2', '--level', '2', '--qu...code=1, stdout='❌ 仿真启动失败: 模块 mission_sim.simulation.threebody.sun_earth_l2 中没有找到类 SunEarthL2L2Simulation\n', stderr='').returncode
+
+tests/test_l1_physical_baseline.py:161: AssertionError
+_____________________ test_t_l1_008_gain_domain_legal_scan _____________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_008_gain_domain_lega0')
+
+    def test_t_l1_008_gain_domain_legal_scan(tmp_path):
+        """合法域 {0.1, 1, 10}：无飞离；报表-数据一致；控制力积分与 ΔV 一致 <1%。"""
+        injection = np.array([100.0, 0.0, 0.0, 0.0, 0.1, 0.0])
+        for gain in (0.1, 1.0, 10.0):
+            sim = _run_leo(tmp_path / f"g{gain}", 0.05,
+                           injection_error=injection, control_gain_scale=gain)
+            data = _load_datasets(sim.h5_file)
+    
+            r = np.linalg.norm(data["true_states"][:, 0:3], axis=1)
+>           assert r.max() < 7000e3 * 1.05, f"gain={gain} 组合出现飞离（防调参违规）"
+E           AssertionError: gain=0.1 组合出现飞离（防调参违规）
+E           assert np.float64(16824022.433579978) < (7000000.0 * 1.05)
+E            +  where np.float64(16824022.433579978) = <built-in method max of numpy.ndarray object at 0x114ce5350>()
+E            +    where <built-in method max of numpy.ndarray object at 0x114ce5350> = array([ 7000507.27417498,  7048902.80891626,  7175070.43507189,\n        7372912.69055874,  7634276.6037331 ,  7949823....29620854,\n       13582794.35532319, 12792685.24278811, 11927686.8038219 ,\n       10995679.45221325, 10006262.7391138 ]).max
+
+tests/test_l1_physical_baseline.py:185: AssertionError
+______________ test_t_l1_008_out_of_domain_must_warn_and_not_mask ______________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_008_out_of_domain_mu0')
+capsys = <_pytest.capture.CaptureFixture object at 0x1148410a0>
+
+    def test_t_l1_008_out_of_domain_must_warn_and_not_mask(tmp_path, capsys):
+        """非法域 {1e-8, 1e-5}：必须显式告警；且日志如实反映未收敛（不掩盖）。"""
+        injection = np.array([500.0, 0.0, 0.0, 0.0, 0.2, 0.0])
+        for gain in (1e-8, 1e-5):
+            sim = _run_leo(tmp_path / f"bad_g{gain}", 0.05,
+                           injection_error=injection, control_gain_scale=gain)
+    
+            captured = capsys.readouterr().out
+>           assert "超出设计域" in captured, f"gain={gain} 未显式告警"
+E           AssertionError: gain=1e-08 未显式告警
+E           assert '超出设计域' in ''
+
+tests/test_l1_physical_baseline.py:206: AssertionError
+_____________________ test_t_l1_009_step_size_sensitivity ______________________
+
+tmp_path = PosixPath('/private/var/folders/f0/clry5qn53j1_tc4b6m5vjlm00000gn/T/pytest-of-huo/pytest-1187/test_t_l1_009_step_size_sensit0')
+
+    def test_t_l1_009_step_size_sensitivity(tmp_path):
+        """1 小时短弧：dt=60s 与 dt=10s 的位置相对差 ≤ 校准门限。"""
+        sim60 = _run_leo(tmp_path / "dt60", 1.0 / 24.0, time_step=60.0)
+        sim10 = _run_leo(tmp_path / "dt10", 1.0 / 24.0, time_step=10.0)
+    
+        s60 = sim60.spacecraft.state
+        s10 = sim10.spacecraft.state
+        rel = np.linalg.norm(s60[0:3] - s10[0:3]) / np.linalg.norm(s10[0:3])
+>       assert rel <= STEP_SENSITIVITY_REL_LIMIT, \
+            f"步长敏感性 {rel:.3e} 超出校准门限 {STEP_SENSITIVITY_REL_LIMIT:.0e}"
+E       AssertionError: 步长敏感性 9.951e-01 超出校准门限 1e-04
+E       assert np.float64(0.9951371416302602) <= 0.0001
+
+tests/test_l1_physical_baseline.py:226: AssertionError
+=============================== warnings summary ===============================
+tests/test_l1_physical_baseline.py: 12516 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/twobody/leo.py:135: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    target_state = self.ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py: 1427 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/base.py:227: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom_state = self.ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py: 1440 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/twobody/geo.py:95: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    target_state = self.ephemeris.get_interpolated_state(epoch)
+
+tests/test_l1_physical_baseline.py::test_t_l1_006_crtbp_end_to_end_regression
+  /Users/huo/Projects/multistagecophasing/mission_sim/simulation/threebody/base.py:46: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    nom0_phys = self.ephemeris.get_interpolated_state(0.0)
+
+tests/test_l1_physical_baseline.py: 288 warnings
+  /Users/huo/Projects/multistagecophasing/mission_sim/core/cyber/platform_gnc/gnc_subsystem.py:173: DeprecationWarning: get_interpolated_state is deprecated, use get_state instead
+    target_state = self.ref_ephemeris.get_interpolated_state(epoch)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_central_gravity.py::test_t_l1_001_central_gravity_matches_analytic
+FAILED tests/test_central_gravity.py::test_t_l1_001_vectorized_matches_scalar
+FAILED tests/test_central_gravity.py::test_t_l1_001_r_min_protection - Module...
+FAILED tests/test_central_gravity.py::test_t_l1_002_leo_environment_includes_central_gravity
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_003_leo_one_day_station_keeping
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_004_tracking_error_channel_consistency
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_005_geo_one_day_station_keeping
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_007_cli_level_gating - A...
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_008_gain_domain_legal_scan
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_008_out_of_domain_must_warn_and_not_mask
+FAILED tests/test_l1_physical_baseline.py::test_t_l1_009_step_size_sensitivity
+11 failed, 1 passed, 15672 warnings in 8.18s

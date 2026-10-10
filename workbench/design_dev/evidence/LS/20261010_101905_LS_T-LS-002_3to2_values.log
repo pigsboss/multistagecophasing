@@ -1,0 +1,4 @@
+seed=(0.80,0.95) success=True iters=29 half=5.245e-09 full=9.477e-09 jacobi_drift=3.494e-16
+  state_nd = [0.7501227262 0.           0.           0.           0.6001535514
+ 0.          ]
+  period_days = 18.214441  T_nd = 4.194943
