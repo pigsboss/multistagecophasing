@@ -132,10 +132,12 @@ class TestISLRouter:
     @pytest.fixture
     def router(self):
         """Default router with moderate latency and 5% packet loss."""
+        # 固定种子（DD-003 §5 可复现性）：避免 5% 丢包导致 test_transmit_basic 随机失败
         return ISLRouter(
             base_latency_s=0.05,
             jitter_s=0.01,
-            packet_loss_rate=0.05
+            packet_loss_rate=0.05,
+            random_seed=20261010
         )
 
     @pytest.fixture

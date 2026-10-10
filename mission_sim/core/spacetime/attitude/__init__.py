@@ -1,63 +1,13 @@
-"""Attitude models package."""
+"""Attitude models package（最小收缩重建，DD-001 D-09 / R-L4-06）。
+
+- 本包仅保留通用接口 `AttitudeModel`；
+- 天体指向/参考系姿态：使用 `spice_interface`（pxform 等）；
+- 航天器姿态动力学（四元数）：见 `mission_sim/core/physics/attitude_dynamics.py`。
+
+历史说明：原 `__init__` 引用的 config/models/interpolated 子模块不存在（断链导入），
+按 R-L4-06 决策收缩重建（不复活旧职责）。
+"""
+
 from .base import AttitudeModel
-from .config import AttitudeConfig
-from .models import AnalyticalEarthAttitude, SPICEAttitude
-from .interpolated import InterpolatedAttitude
 
-__all__ = [
-    "AttitudeModel",
-    "AttitudeConfig",
-    "AnalyticalEarthAttitude",
-    "SPICEAttitude",
-    "InterpolatedAttitude",
-    "create_attitude_model",
-]
-
-
-def create_attitude_model(config: AttitudeConfig) -> AttitudeModel:
-    """Factory function that returns the appropriate AttitudeModel based on config.
-
-    Priority:
-        1. mode == "spice" or ("auto" and SPICE is available): SPICEAttitude
-        2. mode == "analytical" (or fallback): AnalyticalEarthAttitude (only for Earth)
-        3. mode == "interpolated": InterpolatedAttitude
-
-    Args:
-        config: AttitudeConfig instance.
-
-    Returns:
-        AttitudeModel instance.
-
-    Raises:
-        ValueError: If mode is unsupported or body has no analytical model.
-    """
-    mode = config.mode.lower()
-
-    # ---- SPICE mode ----
-    if mode in ("spice", "auto"):
-        try:
-            return SPICEAttitude(config)
-        except (ImportError, RuntimeError):
-            if mode == "spice":
-                raise
-            # fall through to analytical if auto
-
-    # ---- Interpolated mode ----
-    if mode == "interpolated":
-        if config.times is None or config.quaternions is None:
-            raise ValueError("Interpolated mode requires 'times' and 'quaternions' in config.")
-        return InterpolatedAttitude(
-            times=config.times,
-            quaternions=config.quaternions,
-            frame_from=config.frame_from,
-            frame_to=config.frame_to,
-        )
-
-    # ---- Analytical mode ----
-    if config.body.lower() == "earth":
-        return AnalyticalEarthAttitude()
-    else:
-        raise ValueError(
-            f"No analytical attitude model available for body '{config.body}'. "
-            f"Use mode='spice' or mode='interpolated'."
-        )
+__all__ = ["AttitudeModel"]

@@ -1,12 +1,18 @@
 """
-MCPC Cyber Domain: Formation Controller (L2)
---------------------------------------------
-Implements three-stage formation control:
-    - GENERATION: Initial acquisition (reduce large errors)
-    - KEEPING: Steady-state maintenance (LQR with STM prediction)
-    - RECONFIGURATION: Trajectory tracking for configuration change
+MCPC Cyber Domain: Formation Controller (L2) — v2（接通修订）
+------------------------------------------------------------
+三段式编队控制状态机：
+    - GENERATION: 初始获取（大误差收敛）
+    - KEEPING: 稳态保持（LQR + STM 时延预测）
+    - RECONFIGURATION: 外部任务指令触发的构型重构（RE-001 I-1 闭合）
 
-Consumes delayed network frames and outputs thrust commands in LVLH frame.
+消费（可能延迟的）ISL 网络帧，输出 LVLH 加速度指令（Telecommand）。
+
+v2 修订（WP-2.1，对应 DD-001 v1.1 R-L2-01/02/08）：
+- 支持目标相对状态（target_state），状态机与 LQR 均基于“相对目标的误差”；
+- 新增 command_reconfiguration() 外部触发（KEEPING→RECONFIGURATION）；
+- 测量处理：球坐标→笛卡尔后，用连续测量有限差分估计 LVLH 相对速度
+  （原实现将速度置零，属占位；现按旋转系相对速度口径近似，DD-001 R-L2-02）。
 """
 
 import numpy as np
@@ -22,6 +28,9 @@ from mission_sim.utils.math_tools import get_lqr_gain
 class FormationController:
     """
     L2 Formation Controller with three-stage state machine and LQR control.
+
+    输出语义：Telecommand.force_vector 为 **LVLH 加速度指令**（设计矩阵 B=I 口径），
+    由仿真编排层换算为推力（×质量）并送入执行器。
     """
 
     def __init__(
@@ -40,21 +49,6 @@ class FormationController:
         Q: np.ndarray = None,
         R: np.ndarray = None,
     ):
-        """
-        Initialize formation controller.
-
-        Args:
-            deputy_id: ID of this deputy spacecraft
-            chief_id: ID of the chief/reference spacecraft
-            dynamics: Relative dynamics model (e.g., CWDynamics)
-            K_lqr: Precomputed LQR gain matrix (3x6). If None, compute from Q,R.
-            generation_threshold_pos: Position error below which GENERATION considered converged
-            generation_threshold_vel: Velocity error below which GENERATION considered converged
-            keeping_threshold_pos: Position error threshold for KEEPING mode
-            keeping_threshold_vel: Velocity error threshold for KEEPING mode
-            Q: State weighting matrix (6x6) for LQR (if K_lqr not provided)
-            R: Control weighting matrix (3x3) for LQR (if K_lqr not provided)
-        """
         self.deputy_id = deputy_id
         self.chief_id = chief_id
         self.dynamics = dynamics
@@ -84,27 +78,47 @@ class FormationController:
 
         # Internal state
         self.mode = FormationMode.GENERATION
-        self.last_estimated_state = np.zeros(6)  # Relative state [dx,dy,dz,dvx,dvy,dvz]
+        self.last_estimated_state = np.zeros(6)  # 相对主星状态 [dx,dy,dz,dvx,dvy,dvz]（LVLH）
         self.control_force = np.zeros(3)
+
+        # v2 新增状态
+        self.target_state = np.zeros(6)          # LVLH 目标相对状态
+        self.update_calls = 0                    # 接通性计数（T-L2-001）
+        self._prev_meas_pos: Optional[np.ndarray] = None
+        self._prev_meas_time: Optional[float] = None
+
+    # ------------------------------------------------------------------
+    # v2：外部重构指令（三态机第三态触发）
+    # ------------------------------------------------------------------
+    def command_reconfiguration(self, new_target_state: np.ndarray) -> None:
+        """外部任务指令：进入 RECONFIGURATION 并设定新目标（RE-001 I-1）。"""
+        self.target_state = np.asarray(new_target_state, dtype=np.float64)
+        self.mode = FormationMode.RECONFIGURATION
 
     def update(
         self,
         current_time: float,
         frames: List[ISLNetworkFrame],
-        dt: float
+        dt: float,
+        target_state: Optional[np.ndarray] = None,
     ) -> Telecommand:
         """
         Update controller: process received frames, estimate current relative state,
-        determine mode, compute control force.
+        determine mode, compute control acceleration command.
 
         Args:
             current_time: Current simulation time (s)
             frames: List of received network frames (may be delayed or stale)
             dt: Time step for prediction (s)
+            target_state: LVLH 目标相对状态 (6,)；若提供则更新内部目标（外部任务序列）
 
         Returns:
-            Telecommand: Force command in LVLH frame
+            Telecommand: 加速度指令（LVLH 系）
         """
+        self.update_calls += 1
+        if target_state is not None:
+            self.target_state = np.asarray(target_state, dtype=np.float64)
+
         # 1. Extract valid measurements (not stale, destined for this deputy)
         valid_meas = []
         for frame in frames:
@@ -116,72 +130,66 @@ class FormationController:
 
         # 2. If no valid measurement, use last state and predict
         if not valid_meas:
-            # Predict forward using STM
             stm = self.dynamics.compute_discrete_stm(dt)
             self.last_estimated_state = self.dynamics.predict_state(self.last_estimated_state, stm)
         else:
-            # Use most recent measurement (by timestamp)
+            # Use most recent measurement (by payload timestamp)
             latest = max(valid_meas, key=lambda f: f.payload.phys_timestamp)
-            # Extract relative position from measurement payload
-            # Assumes payload is MicrowaveISLMeasurement (range, azimuth, elevation)
-            # Convert to Cartesian in LVLH frame
             meas = latest.payload
-            # Simplified: assume measurement directly provides Cartesian? For now, placeholder.
-            # In real implementation, convert spherical to Cartesian.
-            # Placeholder: assume measurement contains relative position vector
-            # For L2, we'll assume the frame already provides relative position in LVLH.
-            # Here we directly use the relative state from the measurement.
-            # For simplicity, we treat the measurement as relative position (m) and zero velocity.
-            # A more complete implementation would use a relative navigation filter.
-            # For Sprint 3, we assume the measurement gives relative position directly.
-            # TODO: integrate with relative navigation filter.
+            t_meas = meas.phys_timestamp
+
             if hasattr(meas, 'range_m'):
-                # Spherical to Cartesian conversion
+                # 球坐标 → 笛卡尔（LVLH）
                 r = meas.range_m
                 az = meas.azimuth_rad
                 el = meas.elevation_rad
-                dx = r * np.cos(el) * np.cos(az)
-                dy = r * np.cos(el) * np.sin(az)
-                dz = r * np.sin(el)
-                measured_state = np.array([dx, dy, dz, 0.0, 0.0, 0.0])
+                pos = np.array([
+                    r * np.cos(el) * np.cos(az),
+                    r * np.cos(el) * np.sin(az),
+                    r * np.sin(el),
+                ])
             else:
-                # Assume direct Cartesian vector (for testing)
-                measured_state = np.array(meas) if hasattr(meas, '__len__') else np.zeros(6)
+                pos = np.asarray(meas[:3], dtype=np.float64) if hasattr(meas, '__len__') else np.zeros(3)
+
+            # v2：连续测量有限差分估计速度（LVLH 内差分 ≈ 旋转系相对速度）
+            v_est = np.zeros(3)
+            if self._prev_meas_pos is not None and (t_meas - self._prev_meas_time) > 1e-6:
+                v_est = (pos - self._prev_meas_pos) / (t_meas - self._prev_meas_time)
+            self._prev_meas_pos = pos.copy()
+            self._prev_meas_time = t_meas
+
+            measured_state = np.concatenate([pos, v_est])
 
             # Simple complementary filter: update with measurement (weighted)
             alpha = 0.7  # Tuning parameter
             self.last_estimated_state = alpha * measured_state + (1 - alpha) * self.last_estimated_state
 
             # Predict forward to current time (if measurement is older)
-            age = current_time - meas.phys_timestamp
+            age = current_time - t_meas
             if age > 1e-6:
                 stm = self.dynamics.compute_discrete_stm(age)
                 self.last_estimated_state = self.dynamics.predict_state(self.last_estimated_state, stm)
 
-        # 3. State machine mode transition
-        pos_err_norm = np.linalg.norm(self.last_estimated_state[0:3])
-        vel_err_norm = np.linalg.norm(self.last_estimated_state[3:6])
+        # 3. State machine mode transition（基于“相对目标的误差”）
+        error_state = self.last_estimated_state - self.target_state
+        pos_err_norm = np.linalg.norm(error_state[0:3])
+        vel_err_norm = np.linalg.norm(error_state[3:6])
 
         if self.mode == FormationMode.GENERATION:
             if pos_err_norm < self.gen_thresh_pos and vel_err_norm < self.gen_thresh_vel:
                 self.mode = FormationMode.KEEPING
         elif self.mode == FormationMode.KEEPING:
-            # Stay in KEEPING unless commanded to reconfigure (external trigger)
-            # For now, no auto-transition from KEEPING to RECONFIGURATION
+            # 等待外部 command_reconfiguration() 触发（不做自动迁移）
             pass
         elif self.mode == FormationMode.RECONFIGURATION:
-            # Check if reconfiguration target achieved (target would be set externally)
-            # For simplicity, if error small, go back to KEEPING
             if pos_err_norm < self.keep_thresh_pos and vel_err_norm < self.keep_thresh_vel:
                 self.mode = FormationMode.KEEPING
 
-        # 4. Compute control force using LQR
-        # For GENERATION mode, use same LQR but with higher gains? Use same for now.
-        # For RECONFIGURATION, could use different gains, but same for simplicity.
-        u = -self.K @ self.last_estimated_state  # u = -K * x (force in LVLH)
+        # 4. Compute control acceleration command（u = -K e，LVLH）
+        u = -self.K @ error_state
         self.control_force = u
 
-        # 5. Create telecommand
+        # 5. Create telecommand（LVLH 加速度指令）
         cmd = Telecommand(
             force_vector=self.control_force,
             frame=CoordinateFrame.LVLH,
@@ -199,3 +207,6 @@ class FormationController:
         self.mode = FormationMode.GENERATION
         self.last_estimated_state = np.zeros(6)
         self.control_force = np.zeros(3)
+        self.target_state = np.zeros(6)
+        self._prev_meas_pos = None
+        self._prev_meas_time = None

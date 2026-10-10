@@ -13,6 +13,7 @@ from mission_sim.simulation.base import BaseSimulation
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.physics.environment import CelestialEnvironment
 from mission_sim.core.physics.models.j2_gravity import J2Gravity
+from mission_sim.core.physics.models.central_gravity import CentralGravity
 from mission_sim.core.cyber.platform_gnc.ground_station import GroundStation
 from mission_sim.core.cyber.platform_gnc.gnc_subsystem import GNCSubsystem
 from mission_sim.core.physics.spacecraft import SpacecraftPointMass
@@ -97,6 +98,9 @@ class TwoBodyBaseSimulation(BaseSimulation):
             initial_epoch=0.0,
             verbose=self.verbose
         )
+
+        # 注册中心二体引力（DD-001 R-L1-01 / D-01：与 J2 摄动分离，独立模型）
+        self.environment.register_force(CentralGravity(mu=self.mu_earth))
 
         # 注册 J2 摄动（若启用）
         if self.enable_j2:

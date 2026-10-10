@@ -12,7 +12,7 @@ def test_ephemeris_linear_interpolation():
         [2.0, 0.0, 0.0, 1.0, 0.0, 0.0]
     ])
     eph = Ephemeris(times, states, CoordinateFrame.J2000_ECI)
-    state_mid = eph.get_interpolated_state(0.5)
+    state_mid = eph.get_state(0.5)
     expected = np.array([0.5, 0.0, 0.0, 1.0, 0.0, 0.0])
     assert np.allclose(state_mid, expected, rtol=1e-10)
 
@@ -27,7 +27,7 @@ def test_ephemeris_cubic_spline():
     test_times = np.linspace(0, 2*np.pi, 100)
     errors = []
     for t in test_times:
-        interp = eph.get_interpolated_state(t)
+        interp = eph.get_state(t)
         exact = np.array([np.sin(t), 0.0, 0.0, np.cos(t), 0.0, 0.0])
         err = np.linalg.norm(interp - exact)
         errors.append(err)
@@ -40,5 +40,5 @@ def test_ephemeris_out_of_range_warning():
     states = np.zeros((2, 6))
     eph = Ephemeris(times, states, CoordinateFrame.J2000_ECI)
     # 应产生警告但不崩溃
-    eph.get_interpolated_state(-1.0)
-    eph.get_interpolated_state(11.0)
+    eph.get_state(-1.0)
+    eph.get_state(11.0)

@@ -18,6 +18,7 @@ config = {
     "deputy_mass_kg": 500.0,
     "orbit_angular_rate": 0.001071,  # 根据轨道计算
     "thruster_min_thrust_n": 0.0,
+    "thruster_max_thrust_n": 50.0,   # 与闭环设计量级匹配（WP-2.1 接通）
     "control_gain_scale": 1e5,
 }
 

@@ -8,6 +8,7 @@ It strictly separates universal traits from L2-specific assumptions.
 from dataclasses import dataclass
 import numpy as np
 from enum import Enum, auto
+from mission_sim.core.spacetime.ids import CoordinateFrame
 
 # =============================================================================
 # [ABSTRACT / MCPC UNIVERSAL]
@@ -62,3 +63,30 @@ class MicrowaveISLMeasurement(PhysicalMeasurementBase):
     
     # [NOTE] In L3/L4, this may be replaced by specific Sensor Models 
     # (e.g., LiDAR, Vision) which will inherit from PhysicalMeasurementBase.
+
+
+# =============================================================================
+# [L4-SPECIFIC / 数据契约]（DD-001 §7 最小新增，L4 启用）
+# =============================================================================
+
+@dataclass
+class AttitudeState:
+    """航天器姿态状态（四元数 + 角速度 + 坐标系，L4 契约）。"""
+    quaternion: np.ndarray        # [w, x, y, z]（body→inertial，v_in = R·v_body）
+    angular_velocity: np.ndarray  # (3,) rad/s（体坐标系）
+    frame: CoordinateFrame
+
+    def as_dict(self) -> dict:
+        return {
+            "quaternion": [float(v) for v in np.asarray(self.quaternion).ravel()],
+            "angular_velocity": [float(v) for v in np.asarray(self.angular_velocity).ravel()],
+            "frame": self.frame.name,
+        }
+
+
+@dataclass
+class OPDMeasurement:
+    """光程差测量（L4 契约，DD-001 §7）。"""
+    opd_m: float
+    epoch: float
+    quality: str = "valid"

@@ -51,7 +51,7 @@ A_cont = temp_dynamics._linearized_matrix(chief0)
 B = np.zeros((6, 3))
 B[3:6, 0:3] = np.eye(3)
 
-Q = np.diag([1e-6, 1e-6, 1e-6, 1.0, 1.0, 1.0]) 
+Q = np.diag([1e-4, 1e-4, 1e-4, 1.0, 1.0, 1.0]) 
 R = np.diag([1e8, 1e8, 1e8])                    
 K = get_lqr_gain(A_cont, B, Q, R)
 

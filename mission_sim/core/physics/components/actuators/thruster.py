@@ -21,7 +21,9 @@ class Thruster:
         max_thrust_n: float = 1.0,           # Maximum thrust capacity (Newtons)
         min_thrust_n: float = 0.0,           # Minimum thrust (deadband)
         noise_std_n: float = 0.005,          # 5 mN execution noise (1-sigma)
-        specific_impulse_s: float = 3000.0   # Specific Impulse (Isp) for electric propulsion (Seconds)
+        specific_impulse_s: float = 3000.0,  # Specific Impulse (Isp) for electric propulsion (Seconds)
+        random_seed=None,                    # 固定种子（可复现性；None 使用全局随机源）
+        command_delay_s: float = 0.0         # 命令传输延迟 (s)（0 = 无延迟；L4 硬件非线性）
     ):
         """
         Initialize the physical constraints of the thruster hardware.
@@ -31,14 +33,19 @@ class Thruster:
             min_thrust_n: The minimum force required to turn the thruster on (Deadband limit).
             noise_std_n: Standard deviation of the Gaussian noise added to the thrust output.
             specific_impulse_s: Efficiency of the thruster, used to calculate mass depletion.
+            random_seed: Optional seed for reproducible noise (DD-003 §5).
+            command_delay_s: 命令传输延迟 (s)，execute(..., dt) 时按步长量化为纯延迟。
         """
         self.max_thrust_n = float(max_thrust_n)
         self.min_thrust_n = float(min_thrust_n)
         self.noise_std_n = float(noise_std_n)
         self.isp = float(specific_impulse_s)
         self.g0 = 9.80665  # Standard gravity (m/s^2) for Isp calculations
+        self._rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
+        self.command_delay_s = float(command_delay_s)
+        self._delay_buffer = []
 
-    def execute(self, commanded_force: np.ndarray) -> Tuple[np.ndarray, float]:
+    def execute(self, commanded_force: np.ndarray, dt: float = None) -> Tuple[np.ndarray, float]:
         """
         [CYBER -> PHYSICS]
         Transform an ideal GNC commanded force into an actual physical force 
@@ -53,6 +60,15 @@ class Thruster:
                 - Actual applied force vector [Fx, Fy, Fz] (N) after saturation and noise.
                 - Mass flow rate (kg/s) representing fuel consumed during this step.
         """
+        # 0. 命令延迟（L4 硬件非线性：纯传输延迟，按步长量化；需 dt 推算步数）
+        if self.command_delay_s > 0.0 and dt is not None and dt > 0.0:
+            delay_steps = int(np.ceil(self.command_delay_s / dt))
+            self._delay_buffer.append(np.asarray(commanded_force, dtype=np.float64).copy())
+            if len(self._delay_buffer) > delay_steps:
+                commanded_force = self._delay_buffer.pop(0)
+            else:
+                commanded_force = np.zeros(3, dtype=np.float64)
+
         # 1. Compute commanded magnitude and direction
         commanded_mag = np.linalg.norm(commanded_force)
         
@@ -73,7 +89,7 @@ class Thruster:
 
         # 3. Inject Execution Noise (Gaussian)
         # Noise is added to the magnitude, but we ensure thrust never goes negative
-        noisy_mag = actual_mag + np.random.normal(0.0, self.noise_std_n)
+        noisy_mag = actual_mag + self._rng.normal(0.0, self.noise_std_n)
         noisy_mag = max(0.0, noisy_mag)
         noisy_mag = min(self.max_thrust_n, noisy_mag) # Re-saturate if noise pushes it over
 

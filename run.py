@@ -72,6 +72,13 @@ def get_simulation_class(scene: str, level: int):
     except ImportError as e:
         raise ImportError(f"无法导入模块 {module_path}: {e}")
 
+    # 分级门禁（R-L1-06）：当前基线仅交付 L1；L2+ 编队仿真走独立入口
+    if level != 1:
+        raise ValueError(
+            f"场景 {scene} 暂无 L{level} 实现（当前基线为 L1）；"
+            f"L2+ 编队仿真请使用 run_formation.py / run_formation_crtbp.py（见 DD-001）。"
+        )
+
     # 特殊处理：对于特定场景，使用特定的类名
     if scene == "leo":
         class_name = "LEOL1Simulation"
@@ -83,7 +90,7 @@ def get_simulation_class(scene: str, level: int):
         class_name = ''.join(p.capitalize() for p in parts) + f"L{level}Simulation"
 
     if not hasattr(module, class_name):
-        raise AttributeError(f"模块 {module_path} 中没有找到类 {class_name}")
+        raise ValueError(f"模块 {module_path} 中没有找到类 {class_name}（分级/场景未实现）")
 
     return getattr(module, class_name)
 

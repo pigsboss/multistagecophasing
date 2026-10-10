@@ -230,6 +230,139 @@ class LunarSwingTargeter:
             'final_residual': residual
         }
 
+    # ==================================================================
+    # LS 专题沉淀（LS-001 G5-①）：对称周期解 + 初值扫描
+    # ==================================================================
+    def _propagate(self, state0, tf, num_steps=None, jacobian=None):
+        return self._stm_calc.propagate_with_stm(
+            dynamics=self._get_dynamics_func(),
+            initial_state=np.asarray(state0, dtype=np.float64),
+            t0=0.0, tf=tf, method=self.integrator_type,
+            jacobian=jacobian, num_steps=int(num_steps or self.num_steps))
+
+    def _analytic_jacobian(self):
+        """若动力学对象提供解析变分矩阵则返回 J(t,x)；否则 None（数值差分回退）。"""
+        if hasattr(self.dynamics, "variational_matrix_nd"):
+            return lambda t, x: self.dynamics.variational_matrix_nd(x)
+        return None
+
+    def find_symmetric_periodic_orbit(self, resonance_ratio, x0_guess, vy0_guess,
+                                      tol=1e-8, max_iter=50, damping=0.5,
+                                      adaptive_damping=True, char_period=None,
+                                      num_steps=None, verbose=False) -> Dict:
+        """
+        对称周期轨道求解（垂直截面判据）。
+
+        设计变量 (x0, vy0)；在 t = T/2 处要求以垂直方式穿越 x 轴：
+            残差 r = [y(T/2), vx(T/2)]
+        由平面 CRTBP 的对称性，半周期垂直穿越 ⇒ 全周期完整闭合（位置+速度）。
+        收敛后以全周期积分复核 full_state_residual 与 Jacobi 漂移。
+
+        Returns: dict(success, state, period, period_nd, half_period_residual,
+                      full_state_residual, jacobi, jacobi_drift, iterations, history)
+        """
+        n, m = resonance_ratio
+        if char_period is None:
+            char_period = 4.342 * 86400.0
+        T_moon = 27.321661 * 24 * 3600
+        period = (m / n) * T_moon
+        T_nd = period / char_period
+        half_T_nd = 0.5 * T_nd
+        ns = int(num_steps or self.num_steps)
+        jac = self._analytic_jacobian()
+
+        x0 = np.zeros(6)
+        x0[0] = float(x0_guess)
+        x0[4] = float(vy0_guess)
+
+        history = []
+        current_damping = float(damping)
+        prev_norm = float("inf")
+        last_norm = float("nan")
+
+        for i in range(max_iter):
+            x_f, stm = self._propagate(x0, half_T_nd, num_steps=ns, jacobian=jac)
+            if not (np.all(np.isfinite(x_f)) and np.all(np.isfinite(stm))):
+                if history:
+                    x0 = history[-1]["state"].copy()
+                current_damping *= 0.5
+                if current_damping < 0.05:
+                    return dict(success=False, state=x0.copy(), period=period, period_nd=T_nd,
+                                half_period_residual=last_norm, full_state_residual=np.nan,
+                                jacobi=np.nan, jacobi_drift=np.nan, iterations=i, history=history,
+                                error="numerical_overflow")
+                continue
+
+            res = np.array([x_f[1], x_f[3]])  # [y(T/2), vx(T/2)]
+            rn = float(np.linalg.norm(res))
+            last_norm = rn
+            history.append(dict(iteration=i, residual_norm=rn, state=x0.copy(),
+                                damping=current_damping))
+            if verbose and (i % 5 == 0 or rn < 1e-6):
+                print(f"  [sym] iter {i}: residual={rn:.3e}, damping={current_damping:.2f}")
+
+            if rn < tol:
+                x_full, _ = self._propagate(x0, T_nd, num_steps=ns * 2, jacobian=jac)
+                full_res = float(np.linalg.norm(x_full - x0))
+                if hasattr(self.dynamics, "jacobi_constant"):
+                    c0 = float(self.dynamics.jacobi_constant(x0))
+                    c1 = float(self.dynamics.jacobi_constant(x_full))
+                    drift = abs(c1 - c0) / max(abs(c0), 1e-30)
+                else:
+                    c0, drift = np.nan, np.nan
+                return dict(success=True, state=x0.copy(), period=period, period_nd=T_nd,
+                            half_period_residual=rn, full_state_residual=full_res,
+                            jacobi=c0, jacobi_drift=float(drift),
+                            iterations=i + 1, history=history)
+
+            if adaptive_damping and rn > prev_norm * 1.1 and i > 2:
+                current_damping = max(0.1, current_damping * 0.7)
+            prev_norm = rn
+
+            J = np.array([[stm[1, 0], stm[1, 4]],
+                          [stm[3, 0], stm[3, 4]]])
+            U, s, Vt = la.svd(J, full_matrices=False)
+            if s[-1] < 1e-12:
+                ds = np.array([-0.01, -0.01])
+            else:
+                ds = Vt.T @ np.diag(1.0 / s) @ U.T @ (-res)
+            ds *= current_damping
+            nrm = float(la.norm(ds))
+            if nrm > 0.2:
+                ds = ds / nrm * 0.2
+            x0[0] += ds[0]
+            x0[4] += ds[1]
+
+        return dict(success=False, state=x0.copy(), period=period, period_nd=T_nd,
+                    half_period_residual=last_norm, full_state_residual=np.nan,
+                    jacobi=np.nan, jacobi_drift=np.nan, iterations=max_iter, history=history,
+                    error="max_iter")
+
+    def scan_resonant_orbits(self, resonance_ratio, x0_grid, vy0_grid,
+                             tol=1e-6, max_iter=20, num_steps=3000,
+                             polish_tol=1e-9, polish_num_steps=40000,
+                             char_period=None, max_polish=None) -> List[Dict]:
+        """网格扫描 + 多分辨率精修：粗扫收敛候选 → 高精度 polish；返回收敛解列表。"""
+        coarse = []
+        for x0g in np.asarray(x0_grid, dtype=np.float64):
+            for vy0g in np.asarray(vy0_grid, dtype=np.float64):
+                r = self.find_symmetric_periodic_orbit(
+                    resonance_ratio, x0g, vy0g, tol=tol, max_iter=max_iter,
+                    char_period=char_period, num_steps=num_steps, verbose=False)
+                if r.get("success"):
+                    coarse.append((float(x0g), float(vy0g)))
+        out = []
+        for j, (x0g, vy0g) in enumerate(coarse):
+            if max_polish is not None and j >= max_polish:
+                break
+            p = self.find_symmetric_periodic_orbit(
+                resonance_ratio, x0g, vy0g, tol=polish_tol, max_iter=40,
+                char_period=char_period, num_steps=polish_num_steps, verbose=False)
+            if p.get("success"):
+                p["seed"] = (x0g, vy0g)
+                out.append(p)
+        return out
+
     def _get_dynamics_func(self) -> Callable:
         """获取适用于 STM 计算器的动力学函数 f(t, x) -> [vx, vy, vz, ax, ay, az]"""
         if hasattr(self.dynamics, '_crtbp_acceleration_nd'):

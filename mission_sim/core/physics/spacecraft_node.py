@@ -16,6 +16,7 @@ import numpy as np
 from typing import Optional
 from mission_sim.core.spacetime.ids import CoordinateFrame, Telecommand
 from mission_sim.core.physics.components.actuators.thruster import Thruster
+from mission_sim.core.physics.components.actuators.impulse_smoother import ImpulseSmoother
 from mission_sim.core.physics.components.sensors.isl_antenna import ISLAntenna
 from mission_sim.core.cyber.network.isl_router import ISLRouter
 from mission_sim.core.physics.ids import SpacecraftType, MicrowaveISLMeasurement
@@ -37,6 +38,7 @@ class SpacecraftNode:
         thruster: Optional[Thruster] = None,
         antenna: Optional[ISLAntenna] = None,
         router: Optional[ISLRouter] = None,
+        impulse_smoother: Optional[ImpulseSmoother] = None,
     ):
         """
         Initialize a spacecraft node.
@@ -50,6 +52,7 @@ class SpacecraftNode:
             thruster: Thruster hardware (creates default if None)
             antenna: ISL antenna hardware (creates default if None)
             router: Network router for transmitting measurements
+            impulse_smoother: Optional impulse smoother at actuator entry (L2 铁律 3)
         """
         self.id = sc_id
         self.state = np.array(initial_state, dtype=np.float64)
@@ -57,6 +60,7 @@ class SpacecraftNode:
         self.mass = float(initial_mass)
         self.sc_type = sc_type
         self.router = router
+        self.impulse_smoother = impulse_smoother
 
         # Hardware components (use defaults if not provided)
         self.thruster = thruster if thruster is not None else Thruster()
@@ -123,12 +127,16 @@ class SpacecraftNode:
     # -----------------------------------------------------------------
     # L2-specific hardware interaction
     # -----------------------------------------------------------------
-    def apply_control(self, commanded_force: np.ndarray) -> None:
+    def apply_control(self, commanded_force: np.ndarray, dt: float = None) -> None:
         """
         Apply a GNC command through the thruster hardware model.
         Updates external_accel and mass flow rate.
+
+        dt: 若提供且节点配置了冲量平滑器，指令先经 MIB 量化（等效平均推力，L2 铁律 3）。
         """
-        actual_force, mass_flow_rate = self.thruster.execute(commanded_force)
+        if self.impulse_smoother is not None and dt is not None and dt > 0.0:
+            commanded_force = self.impulse_smoother.smooth(commanded_force, dt)
+        actual_force, mass_flow_rate = self.thruster.execute(commanded_force, dt)
         self.last_control_force = actual_force.copy()
         self.external_accel += actual_force / self.mass
         self._current_mass_flow_rate = mass_flow_rate

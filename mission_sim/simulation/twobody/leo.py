@@ -11,7 +11,7 @@ from mission_sim.simulation.twobody.base import TwoBodyBaseSimulation
 from mission_sim.core.spacetime.ids import CoordinateFrame
 from mission_sim.core.spacetime.generators import KeplerianGenerator, J2KeplerianGenerator
 from mission_sim.core.physics.models.atmospheric_drag import AtmosphericDrag
-from mission_sim.utils.math_tools import elements_to_cartesian
+from mission_sim.utils.math_tools import elements_to_cartesian, absolute_to_lvlh, compute_lvlh_dcm
 
 
 class LEOL1Simulation(TwoBodyBaseSimulation):
@@ -125,34 +125,38 @@ class LEOL1Simulation(TwoBodyBaseSimulation):
         gain_scale = self.config.get("control_gain_scale", 1.0)
         self.k_matrix = gain_scale * K_base
 
+        # G-05 防调参（DD-001 D-03）：增益超出设计域 [0.1, 10] 必须显式告警（无条件）
+        self.gain_out_of_domain = not (0.1 <= gain_scale <= 10.0)
+        if self.gain_out_of_domain:
+            print(f"⚠️ [G-05] control_gain_scale={gain_scale:.3g} 超出设计域 [0.1, 10]；"
+                  f"结果仅供诊断，不得用于验收")
+
         if self.verbose:
             print(f"✅ LQR 控制律设计完成，增益缩放因子: {gain_scale:.2f}")
 
     def _compute_control(self, epoch: float, obs_state: Optional[np.ndarray], frame: CoordinateFrame):
-        """实现 LVLH 控制"""
+        """实现 LVLH 控制（误差与控制力统一经 GNCSubsystem 记录，DD-001 D-02）"""
         self.gnc_system.update_navigation(obs_state, frame, self.config["time_step"])
 
-        target_state = self.ephemeris.get_interpolated_state(epoch)
+        self.gnc_system.compute_tracking_error(epoch)
+        target_state = self.gnc_system.last_target_state
         nav_state = self.gnc_system.current_nav_state
-        error = nav_state - target_state
 
-        # 构建 LVLH 基向量
-        r_nom = target_state[0:3]
-        v_nom = target_state[3:6]
-        norm_r = np.linalg.norm(r_nom)
-        i_hat = r_nom / norm_r
-        h_vec = np.cross(r_nom, v_nom)
-        norm_h = np.linalg.norm(h_vec)
-        k_hat = h_vec / norm_h
-        j_hat = np.cross(k_hat, i_hat)
-        C_I2L = np.vstack([i_hat, j_hat, k_hat])
-
-        error_lvlh = np.zeros(6)
-        error_lvlh[0:3] = C_I2L @ error[0:3]
-        error_lvlh[3:6] = C_I2L @ error[3:6]
+        # LVLH 误差状态（旋转系相对量，含 ω×Δr 输运项；DD-001 G-03）
+        # 修复记录（WP-1.3）：原实现仅对惯性相对速度做旋转、缺失输运项，
+        # 导致闭环谱半径 1.0007/步（慢发散，e 折约 4 小时）。
+        error_lvlh_pos, error_lvlh_vel = absolute_to_lvlh(
+            target_state[0:3], target_state[3:6], nav_state[0:3], nav_state[3:6])
+        error_lvlh = np.concatenate([error_lvlh_pos, error_lvlh_vel])
 
         force_lvlh = -self.k_matrix @ error_lvlh
+
+        # LVLH 力 → 惯性系（与 absolute_to_lvlh 同一 DCM）
+        C_I2L = compute_lvlh_dcm(target_state[0:3], target_state[3:6])
         force_inertial = C_I2L.T @ force_lvlh
+
+        # 唯一通道：登记实际下发控制力（供显示/HDF5/报告）
+        self.gnc_system.record_control_force(force_inertial)
 
         return force_inertial, CoordinateFrame.J2000_ECI
 

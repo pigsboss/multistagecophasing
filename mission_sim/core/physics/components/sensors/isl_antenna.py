@@ -20,7 +20,8 @@ class ISLAntenna:
         range_noise_std: float = 0.05,       # 5 cm distance noise (1-sigma)
         angle_noise_std: float = 5e-5,       # ~10 arcseconds angle noise (1-sigma)
         max_range_m: float = 200000.0,       # 200 km maximum communication range
-        reference_range_m: float = 1000.0    # Range at which signal strength is 1.0 (normalized)
+        reference_range_m: float = 1000.0,   # Range at which signal strength is 1.0 (normalized)
+        random_seed: Optional[int] = None    # 固定种子（可复现性；None 使用全局随机源）
     ):
         """
         Initialize the physical parameters of the ISL Antenna.
@@ -30,11 +31,13 @@ class ISLAntenna:
             angle_noise_std: Standard deviation of angular measurement noise (radians).
             max_range_m: Maximum effective measurement distance. Beyond this, signal drops.
             reference_range_m: Distance used to normalize signal strength attenuation.
+            random_seed: Optional seed for reproducible noise (DD-003 §5).
         """
         self.range_noise_std = float(range_noise_std)
         self.angle_noise_std = float(angle_noise_std)
         self.max_range_m = float(max_range_m)
         self.reference_range_m = float(reference_range_m)
+        self._rng = np.random.default_rng(random_seed) if random_seed is not None else np.random
 
     def measure(self, true_rel_pos: np.ndarray, current_time: float) -> Optional[MicrowaveISLMeasurement]:
         """
@@ -62,9 +65,9 @@ class ISLAntenna:
         elevation_true = np.arcsin(true_rel_pos[2] / range_true)
 
         # 2. Inject Hardware Noise (Gaussian distribution)
-        range_meas = range_true + np.random.normal(0.0, self.range_noise_std)
-        azimuth_meas = azimuth_true + np.random.normal(0.0, self.angle_noise_std)
-        elevation_meas = elevation_true + np.random.normal(0.0, self.angle_noise_std)
+        range_meas = range_true + self._rng.normal(0.0, self.range_noise_std)
+        azimuth_meas = azimuth_true + self._rng.normal(0.0, self.angle_noise_std)
+        elevation_meas = elevation_true + self._rng.normal(0.0, self.angle_noise_std)
 
         # 3. Compute Signal Attenuation (Inverse-Square Law Approximation)
         # Normalized mapping: [0.0 to 1.0]

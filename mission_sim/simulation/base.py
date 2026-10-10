@@ -182,7 +182,7 @@ class BaseSimulation(ABC):
             force_cmd, force_frame = self._compute_control(epoch, obs_state, frame)
             self._propagate_state(force_cmd, force_frame, dt)
             self._post_step_processing(dt)
-            if step % 10 == 0: self._log_step(epoch)
+            if step % int(self.config.get("log_interval", 10)) == 0: self._log_step(epoch)
             if self.verbose and step % progress_steps == 0 and step > 0:
                 self._report_progress(step, epoch, force_cmd)
         if self.verbose: print("仿真主循环完成")
@@ -224,7 +224,7 @@ class BaseSimulation(ABC):
         self.environment.step_time(dt)
 
     def _log_step(self, epoch: float):
-        nom_state = self.ephemeris.get_interpolated_state(epoch)
+        nom_state = self.ephemeris.get_state(epoch)
         self.logger.log_step(epoch=epoch, nominal_state=nom_state, true_state=self.spacecraft.state,
                              nav_state=self.gnc_system.current_nav_state,
                              tracking_error=self.gnc_system.last_tracking_error,

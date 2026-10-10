@@ -85,12 +85,12 @@ class TestKeplerianGenerator:
         
         # Get interpolated state at exactly 1 period
         t_period = period
-        state_1period = ephemeris.get_interpolated_state(t_period)
+        state_1period = ephemeris.get_state(t_period)
         pos_1period = state_1period[0:3]
         
         # Get interpolated state at exactly 2 periods
         t_2period = period * 2
-        state_2period = ephemeris.get_interpolated_state(t_2period)
+        state_2period = ephemeris.get_state(t_2period)
         pos_2period = state_2period[0:3]
         
         # Circular orbit should close at exact period multiples
@@ -118,7 +118,7 @@ class TestKeplerianGenerator:
         # Also verify that velocity direction changes appropriately (should reverse after half period)
         # This is a sanity check for circular orbit dynamics
         t_half_period = period / 2
-        state_half = ephemeris.get_interpolated_state(t_half_period)
+        state_half = ephemeris.get_state(t_half_period)
         vel_half = state_half[3:6]
         vel_0 = state_0[3:6]
         
@@ -701,7 +701,7 @@ class TestEphemerisIntegration:
                 assert hasattr(ephemeris, 'times')
                 assert hasattr(ephemeris, 'states')
                 assert hasattr(ephemeris, 'frame')
-                assert hasattr(ephemeris, 'get_interpolated_state')
+                assert hasattr(ephemeris, 'get_state')
                 
                 # 验证数据一致性
                 assert len(ephemeris.times) == len(ephemeris.states)
@@ -709,7 +709,7 @@ class TestEphemerisIntegration:
                 # 测试插值功能（在时间范围内）
                 if len(ephemeris.times) > 1:
                     t_mid = (ephemeris.times[0] + ephemeris.times[-1]) / 2
-                    state = ephemeris.get_interpolated_state(t_mid)
+                    state = ephemeris.get_state(t_mid)
                     assert state.shape == (6,)
                     
             except Exception as e:

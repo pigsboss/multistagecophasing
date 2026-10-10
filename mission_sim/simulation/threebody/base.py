@@ -43,7 +43,7 @@ class ThreeBodyBaseSimulation(BaseSimulation):
         # 如果配置里没有（或为 None），使用默认值
         if injection is None:
             injection = np.array([2000, 2000, -1000, 0.01, -0.01, 0.005])
-        nom0_phys = self.ephemeris.get_interpolated_state(0.0)
+        nom0_phys = self.ephemeris.get_state(0.0)
         true0_phys = nom0_phys + injection
         # ... 后续初始化 ...
         

@@ -147,11 +147,42 @@ class GNCSubsystem:
             vel_norm = np.linalg.norm(obs_state[3:6])
             print(f"  [{self.sc_id} GNC] 导航更新: 位置={pos_norm:.1f}m, 速度={vel_norm:.4f}m/s")
 
+    def compute_tracking_error(self, epoch: float) -> np.ndarray:
+        """
+        【唯一通道】计算并记录当前时刻的跟踪误差 e = X_nav - X_nom(t)。
+
+        所有场景的显示/日志/报告必须使用本方法（或其登记值），
+        禁止在场景代码中自行计算误差（DD-001 G-02 / D-02）。
+        """
+        if self.ref_ephemeris is None:
+            raise RuntimeError(f"[{self.sc_id} GNC] 未加载标称星历，无法计算动态追踪偏差！")
+
+        # 动态获取当前时刻的绝对标称目标状态
+        try:
+            target_state = self.ref_ephemeris.get_state(epoch)
+            self.last_target_state = np.copy(target_state)
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ [{self.sc_id} GNC] 星历插值失败: {e}")
+            target_state = self.last_target_state
+
+        self.last_tracking_error = np.copy(self.current_nav_state - target_state)
+        return self.last_tracking_error
+
+    def record_control_force(self, control_force) -> np.ndarray:
+        """
+        【唯一通道】登记实际下发的控制力（供显示/HDF5/报告使用，DD-001 G-02）。
+        """
+        force = self._standardize_control_force(control_force)
+        self.last_control_force = np.copy(force)
+        self.total_control_calls += 1
+        return force
+
     def compute_control_force(self, epoch: float, k_matrix: np.ndarray) -> Tuple[np.ndarray, CoordinateFrame]:
         """
         计算站位维持的补偿推力。
 
-        核心逻辑: e(t) = X_nav(t) - X_nominal(t)
+        核心逻辑: e(t) = X_nav(t) - X_nominal(t)   （经 compute_tracking_error 唯一通道）
                   u(t) = -K * e(t)
 
         Args:
@@ -163,23 +194,7 @@ class GNCSubsystem:
                 - 推力向量 [Fx, Fy, Fz] (形状始终为 (3,))
                 - 推力所在的坐标系标签
         """
-        self.total_control_calls += 1
-
-        if self.ref_ephemeris is None:
-            raise RuntimeError(f"[{self.sc_id} GNC] 未加载标称星历，无法计算动态追踪偏差！")
-
-        # 动态获取当前时刻的绝对标称目标状态
-        try:
-            target_state = self.ref_ephemeris.get_interpolated_state(epoch)
-            self.last_target_state = np.copy(target_state)
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ [{self.sc_id} GNC] 星历插值失败: {e}")
-            target_state = self.last_target_state
-
-        # 计算追踪误差
-        error = self.current_nav_state - target_state
-        self.last_tracking_error = np.copy(error)
+        error = self.compute_tracking_error(epoch)
 
         # 验证K矩阵形状
         k_matrix = self._validate_and_fix_k_matrix(k_matrix)
@@ -278,7 +293,7 @@ class GNCSubsystem:
         if self.ref_ephemeris is None:
             return np.zeros(6, dtype=np.float64)
         try:
-            target_state = self.ref_ephemeris.get_interpolated_state(epoch)
+            target_state = self.ref_ephemeris.get_state(epoch)
             return self.current_nav_state - target_state
         except:
             return self.last_tracking_error

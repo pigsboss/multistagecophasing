@@ -250,6 +250,45 @@ class UniversalCRTBP(IForceModel):
         
         return np.array([ax, ay, az])
     
+    def variational_matrix_nd(self, state_nd: np.ndarray) -> np.ndarray:
+        """
+        无量纲 CRTBP 变分方程矩阵 A(t) = ∂f/∂x（供 STM/微分修正使用）。
+
+        标准形式（旋转系，ω=1）：A = [[0, I], [U_hess, Coriolis]]，其中
+        Coriolis 块 = [[0,2,0],[-2,0,0],[0,0,0]]，U_hess 为有效势 Hessian。
+        与 `_crtbp_acceleration_nd` 的解析导数一致（T-LS-001 以有限差分校验）。
+        """
+        x, y, z = float(state_nd[0]), float(state_nd[1]), float(state_nd[2])
+        mu = self._mu
+        dx1 = x + mu
+        dx2 = x + mu - 1.0
+        eps = 1e-15
+        r1_sq = dx1 * dx1 + y * y + z * z + eps
+        r2_sq = dx2 * dx2 + y * y + z * z + eps
+        r1_3 = r1_sq ** 1.5
+        r1_5 = r1_sq ** 2.5
+        r2_3 = r2_sq ** 1.5
+        r2_5 = r2_sq ** 2.5
+        m1, m2 = 1.0 - mu, mu
+        Uxx = (1.0 - m1 / r1_3 + 3.0 * m1 * dx1 * dx1 / r1_5
+               - m2 / r2_3 + 3.0 * m2 * dx2 * dx2 / r2_5)
+        Uyy = (1.0 - m1 / r1_3 + 3.0 * m1 * y * y / r1_5
+               - m2 / r2_3 + 3.0 * m2 * y * y / r2_5)
+        Uzz = (-m1 / r1_3 + 3.0 * m1 * z * z / r1_5
+               - m2 / r2_3 + 3.0 * m2 * z * z / r2_5)
+        Uxy = 3.0 * m1 * dx1 * y / r1_5 + 3.0 * m2 * dx2 * y / r2_5
+        Uxz = 3.0 * m1 * dx1 * z / r1_5 + 3.0 * m2 * dx2 * z / r2_5
+        Uyz = 3.0 * m1 * y * z / r1_5 + 3.0 * m2 * y * z / r2_5
+
+        A = np.zeros((6, 6), dtype=np.float64)
+        A[0:3, 3:6] = np.eye(3)
+        A[3, 0], A[3, 1], A[3, 2] = Uxx, Uxy, Uxz
+        A[4, 0], A[4, 1], A[4, 2] = Uxy, Uyy, Uyz
+        A[5, 0], A[5, 1], A[5, 2] = Uxz, Uyz, Uzz
+        A[3, 4] = 2.0
+        A[4, 3] = -2.0
+        return A
+
     def _crtbp_acceleration_physical(self, pos: np.ndarray, vel: np.ndarray) -> np.ndarray:
         """
         Direct computation of CRTBP acceleration in physical units.
