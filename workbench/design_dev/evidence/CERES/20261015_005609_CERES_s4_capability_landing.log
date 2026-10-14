@@ -1,0 +1,368 @@
+================================================================================
+MCPC 能力沉淀证据 —— Ceres S4：多目标行星际窗口扫描器 + 极区光照/PSR 几何核
+================================================================================
+生成时间（系统 date）：2026-10-15 00:56:09 CST
+主机：enceladus｜Python：Python 3.14.7
+仓库：/home/huo/Projects/multistagecophasing
+提交前 HEAD：3243e015ce1b5dc9ffa4d8b5b7dd19c961abe9c5（'feat(analysis): ...' 见岛内记录）
+来源（提出方＝谷神星探测专题岛 S4/CML5 长跑）已授权向本仓沉淀：
+  源件 1：专题工作区/谷神星探测/工具/s4_target_scan.py（+ 复用 工具/ceres_transfer.py）
+  源件 2：专题工作区/谷神星探测/工具/s4_polar_illum.py
+落位件（本仓新增；未改动、未删除任何既有文件）：
+  mission_sim/analysis/interplanetary/__init__.py
+  mission_sim/analysis/interplanetary/two_body.py        二体平根数星历 + Lambert 转移内核
+  mission_sim/analysis/interplanetary/target_scan.py     多目标（主带天体）窗口扫描器（含 CLI/--self-test）
+  mission_sim/analysis/polar_illumination.py             极区光照/PSR 几何核（含 CLI/--self-test）
+  tests/test_interplanetary_window_scan.py               新增 pytest（Lambert/星历/扫描器/CLI）
+  tests/test_polar_illumination.py                       新增 pytest（光照/PSR 判据与 CLI）
+与源件差异（仅宿主适配，算法与判据不变）：
+  ① 依赖内联：源件依赖专题岛文件系统（import ceres_transfer / PIL 画图），落位件把二体星历与
+     Lambert 内核内联为 two_body.py，落位件本身不依赖任何岛内路径；
+  ② 命名：私有 _solve_kepler/_cs/_tof_list/_iter_jds → 公开 solve_kepler/stumpff_cs/tof_grid/
+     iter_julian_days（可独立调用）；EARTH → EARTH_J2000；W65_* → DEM_*（去岛内标签）；
+     JSON 键 w65_anchor_sites/w65_band_note → dem_anchor_sites/dem_band_note；
+  ③ 类型标注 + black 格式化 + 中文 docstring 补齐（数值、公式、容差未改）；
+  ④ direce_leg/return_leg 的第二星历参数名 ceres → target（通用化）；
+  ⑤ PNG 画图由 Pillow（可选依赖）承担，缺 Pillow 时跳过并提示，不新增依赖声明。
+复算入口（本机）：
+  /tmp/mcpc_venv/bin/python -m mission_sim.analysis.interplanetary.target_scan --self-test
+  /tmp/mcpc_venv/bin/python -m mission_sim.analysis.polar_illumination --self-test
+  /tmp/mcpc_venv/bin/python -m pytest tests/test_interplanetary_window_scan.py tests/test_polar_illumination.py -q
+
+================================================================================
+【0】环境准备（本机系统 python3 缺 h5py/numba/spiceypy，既有测试无法导入 mission_sim —— 属既存环境缺口）
+================================================================================
+$ python3 -m pytest tests/test_polar_illumination.py -q      # 系统解释器（3.14.7，裸装）
+=========================== short test summary info ============================
+ERROR tests/test_polar_illumination.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 0.24s
+  ⇒ 结论：既有环境缺口（非本次改动引入）。以下全部验证在按仓库依赖声明的独立 venv 中进行：
+$ python3 -m venv /tmp/mcpc_venv
+$ /tmp/mcpc_venv/bin/pip install -q -r mission_sim/requirements.txt pytest black pytest-timeout pandas
+  已装：numpy 2.5.4 | scipy 1.18.1 | h5py 3.16.0 | numba 0.68.0 | spiceypy 8.3.0 | pytest 9.1.1 | black 26.10.1
+
+================================================================================
+【1】落位件自检（等价于源件 --self-test）
+================================================================================
+$ /tmp/mcpc_venv/bin/python -m mission_sim.analysis.interplanetary.target_scan --self-test
+============================================================================================
+target_scan · self-test（逐目标 Hohmann 解析对照 + Δν=180° 拱点分支复现）
+============================================================================================
+目标                        a(AU)      C3解析    v∞dep解析    v∞arr解析   TOF(d)      C3复现     误差%
+谷神星 (1) Ceres（基线）        2.7656     39.86      6.313      4.857    471.8    39.860 +0.0000
+灶神星 (4) Vesta            2.3614     30.47      5.520      4.432    397.9    30.470 -0.0000
+智神星 (2) Pallas           2.7696     39.95      6.320      4.861    472.6    39.947 -0.0000
+健神星 (10) Hygiea          3.1510     47.81      6.914      5.132    546.1    47.809 +0.0000
+灵神星 (16) Psyche          2.9257     43.28      6.579      4.984    502.2    43.280 +0.0000
+司琴星 (21) Lutetia         2.4344     32.25      5.679      4.522    411.0    32.247 -0.0000
+--------------------------------------------------------------------------------------------
+判据：复现 C3 与解析误差 <0.01% ⇒ 通过
+说明：Pallas i=34.9°、e=0.231 ⇒ 共面圆轨道 Hohmann 仅作**下界**参照；真实直飞 C3 必高于此。
+  ⇒ exit=0（判据：逐目标 Hohmann 解析 vs Δν=180° 拱点分支 Lambert 复现，误差 <0.01%）
+
+$ /tmp/mcpc_venv/bin/python -m mission_sim.analysis.polar_illumination --self-test
+==============================================================================
+polar_illumination · self-test
+==============================================================================
+  [PASS] 赤道 F(φ=0,θ=0)≈0.5 = 0.5
+  [PASS] 北极 F(φ=90,θ=0)≈0.5 = 0.5
+  [PASS] F(85N) 随 θ_h 单调不增 = (0.5, 0.411, 0.33, 0.297, 0.163, 0.037, 0.0, 0.0)
+  [PASS] 北极 elev_max=ε=4.028 = 4.028000000000006
+  [PASS] 北极 d/D 阈=tan(ε)=0.0704 = 0.0704179105423733
+  [PASS] 复现纯球体冬至日长[本件/文据]: M1:2.67/2.67h M2:2.27/2.27h M3:3.05/3.05h = 见左
+------------------------------------------------------------------------------
+自检 通过
+  ⇒ 判据：赤道/北极 F≈0.5（2%）、θ_h 单调不增、北极 elev_max=ε=4.028°、d/D 阈=tan(ε)、
+         复现「纯球体冬至日长」M1/M2/M3 = 2.67/2.27/3.05 h（容差 0.05 h）
+
+================================================================================
+【2】新增 pytest（正常路径 + 边界 + 对拍锚）
+================================================================================
+$ /tmp/mcpc_venv/bin/python -m pytest tests/test_interplanetary_window_scan.py tests/test_polar_illumination.py -q
+........................................................................ [ 50%]
+......................................................................   [100%]
+142 passed in 7.15s
+
+$ /tmp/mcpc_venv/bin/python -m pytest tests/test_interplanetary_window_scan.py -q
+.............................................                            [100%]
+45 passed in 1.16s
+$ /tmp/mcpc_venv/bin/python -m pytest tests/test_polar_illumination.py -q
+........................................................................ [ 74%]
+.........................                                                [100%]
+97 passed in 7.23s
+  覆盖：儒略日换算/星历活力公式/开普勒残差/Lambert 半长轴不变量/零 TOF 边界/空网格边界/
+        扫描器记账与逐年 top 截断/CLI（--self-test、未知目标、落盘、纯计算）/对拍锚（表驱动）：
+        窗口扫描 6 目标 global_best + Hohmann 下界锚、光照 F/I/峰值/dD 阈值/冬至日长锚。
+
+================================================================================
+【3】回归：既有相关测试（仅跑；不修任何既有件）
+================================================================================
+$ /tmp/mcpc_venv/bin/python -m pytest tests/test_math_tools.py tests/test_utils.py tests/test_spacetime_ids.py \
+      tests/test_thruster.py tests/atmospheric_swing -q -rf --tb=line
+.................................                                        [100%]
+33 passed in 14.52s
+
+$ /tmp/mcpc_venv/bin/python -m pytest tests/test_l3_payload_phasing.py tests/test_l4_engineering.py tests/test_gnc.py \
+      tests/test_isl_components.py tests/test_spacecraft_node.py tests/test_formation_controller.py \
+      tests/test_central_gravity.py -q -rf --tb=line --timeout=45
+...............................................................          [100%]
+63 passed in 36.61s
+  ⇒ 既有相关测试 96 项全绿（33 + 63），无回归。
+
+  【既有基线如实登记】（本次未改动这些件，仅记录现象）：
+  · 系统 python3 裸环境缺 h5py/numba/spiceypy/pandas ⇒ 既有测试 24+ 文件收集报错（环境缺口）；
+  · 全量 tests/（439 项）在本机不能按时跑完：既有重解算用例（lunar_swing 等）为 CPU 密集长算例，
+    观测到单用例 >12 min 持续 100% CPU 且不受 pytest-timeout 中断；与本沉淀件无关，未修。
+  · tests/test_l2_integration.py 依赖 pandas（未列入 mission_sim/requirements.txt）——既存依赖声明缺口，未修。
+
+================================================================================
+【4】对拍 A：全网格扫描 vs 岛内参考 JSON（容差 0，逐位相等）
+================================================================================
+脚本：/tmp/cmp_scan.py（内容见文末附录）
+$ /tmp/mcpc_venv/bin/python /tmp/cmp_scan.py
+[ceres] 网格 39390｜最优 2040-11-19 → 2042-07-22｜TOF 610 d｜C3 42.66｜v∞dep 6.531｜v∞arr 7.275
+[vesta] 网格 39390｜最优 2045-11-23 → 2047-08-05｜TOF 620 d｜C3 34.24｜v∞dep 5.852｜v∞arr 9.283
+[pallas] 网格 39390｜最优 2035-08-03 → 2037-05-24｜TOF 660 d｜C3 39.55｜v∞dep 6.289｜v∞arr 16.010
+[hygiea] 网格 39390｜最优 2037-12-05 → 2039-10-26｜TOF 690 d｜C3 45.63｜v∞dep 6.755｜v∞arr 8.074
+[psyche] 网格 39390｜最优 2033-01-30 → 2034-10-12｜TOF 620 d｜C3 40.12｜v∞dep 6.334｜v∞arr 6.129
+[lutetia] 网格 39390｜最优 2043-11-04 → 2045-06-26｜TOF 600 d｜C3 34.29｜v∞dep 5.856｜v∞arr 5.478
+TXT 已写入：/tmp/mcpc_s4_scan.txt
+JSON 已写入：/tmp/mcpc_s4_scan.json
+网格点：6 目标均 39390（与岛内一致）
+字段组：6 目标 × {global_best, hohmann_lower_bound, per_year_top(16 年×3 条)}
+对拍 1：vs 任务/S4_仿真线_目标扫描.json        MISMATCHES = 0
+对拍 2：vs 任务/ceres_transfer_direct_wide.json MISMATCHES = 0
+容差：0（逐位相等，== 比较浮点）
+RESULT: ALL BIT-IDENTICAL
+
+参考结果（岛内口径，C3 km²/s² / 抵达 v∞ km/s）：Vesta 34.24/9.28；Pallas 39.55/16.01；
+  Ceres 42.66/7.27；Hygiea 45.63/8.07；Psyche 40.12/6.13；Lutetia 34.29/5.48 —— 逐位复现。
+
+================================================================================
+【5】对拍 B：极区光照/PSR vs 岛内参考 JSON（容差 0，逐位相等）
+================================================================================
+脚本：/tmp/cmp_polar.py（内容见文末附录）
+$ /tmp/mcpc_venv/bin/python /tmp/cmp_polar.py
+已写入：/tmp/mcpc_polar.txt
+已写入：/tmp/mcpc_polar.json
+对拍字段： 10 组（光照分数/入射因子/峰值高度/dD 阈值/冬至日长/表头常量）
+MISMATCHES = 0 []
+容差：0（逐位相等；JSON 数值为源件 round(x,6|5|4|3|2) 后写入，双方同口径同写入位数）
+键名差异（已登记）：岛内 w65_anchor_sites/w65_band_note → 本件 dem_anchor_sites/dem_band_note
+RESULT: ALL BIT-IDENTICAL
+
+================================================================================
+【6】对拍 C：与源实现（岛内 工具/*.py）逐位直接对拍
+================================================================================
+脚本：/tmp/crosscheck_source.py（内容见文末附录；直接 import 岛内源件并与落位件同输入对比）
+$ /tmp/mcpc_venv/bin/python /tmp/crosscheck_source.py
+对比项总数：常数/状态/求解器/判据 逐位比对
+MISMATCHES = 0
+RESULT: ALL BIT-IDENTICAL
+
+================================================================================
+【7】格式与变更范围
+================================================================================
+$ /tmp/mcpc_venv/bin/python -m black --check mission_sim/analysis/interplanetary/ \
+      mission_sim/analysis/polar_illumination.py tests/test_interplanetary_window_scan.py tests/test_polar_illumination.py
+All done! ✨ 🍰 ✨
+6 files would be left unchanged.
+
+$ git status --short            # 仅新增，无既有件改动
+?? mission_sim/analysis/interplanetary/
+?? mission_sim/analysis/polar_illumination.py
+?? tests/test_interplanetary_window_scan.py
+?? tests/test_polar_illumination.py
+$ git diff --stat HEAD         # 既有文件改动行数（应为空）
+
+================================================================================
+【8】附录：对拍脚本原文（可原样复算）
+================================================================================
+---------------------------------------- /tmp/cmp_scan.py
+"""对拍：MCPC target_scan 全网格结果 vs 岛内参考 JSON（逐位比对）。"""
+import json
+import subprocess
+import sys
+
+ISLAND = "/mnt/data/huo/Documents/Kimi/Workspaces/行星探测工程/专题工作区/谷神星探测"
+MINE = "/tmp/mcpc_s4_scan.json"
+
+subprocess.run(
+    [
+        sys.executable, "-m", "mission_sim.analysis.interplanetary.target_scan",
+        "--t0", "2030-01-01", "--t1", "2045-12-31", "--step", "15",
+        "--tof-min", "600", "--tof-max", "1600", "--tof-step", "10",
+        "--top-per-year", "3", "--txt", "/tmp/mcpc_s4_scan.txt", "--json", MINE,
+    ],
+    check=True,
+)
+
+ref = json.load(open(f"{ISLAND}/任务/S4_仿真线_目标扫描.json"))
+ref_baseline = json.load(open(f"{ISLAND}/任务/ceres_transfer_direct_wide.json"))
+mine = json.load(open(MINE))
+
+
+def walk(a, b, path, out):
+    if isinstance(a, dict):
+        assert set(a) == set(b), (path, set(a) ^ set(b))
+        for k in a:
+            walk(a[k], b[k], f"{path}.{k}", out)
+    elif isinstance(a, list):
+        assert len(a) == len(b), (path, len(a), len(b))
+        for i, (x, y) in enumerate(zip(a, b)):
+            walk(x, y, f"{path}[{i}]", out)
+    elif isinstance(a, float) or isinstance(b, float):
+        if not a == b:
+            out.append((path, a, b, a - b))
+    else:
+        if a != b:
+            out.append((path, a, b, None))
+
+
+mismatch = []
+n_fields = 0
+for key in ref["targets"]:
+    r, m = ref["targets"][key], mine["targets"][key]
+    for sub in ("global_best", "hohmann_lower_bound", "per_year_top"):
+        walk(r[sub], m[sub], f"{key}.{sub}", mismatch)
+    assert r["grid_points"] == m["grid_points"] == 39390, key
+    n_fields += 1
+
+mismatch_baseline = []
+walk(
+    ref_baseline["global_best"],
+    mine["targets"]["ceres"]["global_best"],
+    "ceres_baseline.global_best",
+    mismatch_baseline,
+)
+
+print("网格点：6 目标均 39390（与岛内一致）")
+print("字段组：6 目标 × {global_best, hohmann_lower_bound, per_year_top(16 年×3 条)}")
+print("对拍 1：vs 任务/S4_仿真线_目标扫描.json        MISMATCHES =", len(mismatch))
+print("对拍 2：vs 任务/ceres_transfer_direct_wide.json MISMATCHES =", len(mismatch_baseline))
+print("容差：0（逐位相等，== 比较浮点）")
+print("RESULT:", "ALL BIT-IDENTICAL" if not mismatch and not mismatch_baseline else "DIFF FOUND")
+for row in (mismatch + mismatch_baseline)[:10]:
+    print("  ", row)
+
+---------------------------------------- /tmp/cmp_polar.py
+"""对拍：MCPC polar_illumination 结果 vs 岛内参考 JSON（逐位比对）。"""
+import json
+import subprocess
+import sys
+
+ISLAND = "/mnt/data/huo/Documents/Kimi/Workspaces/行星探测工程/专题工作区/谷神星探测"
+MINE = "/tmp/mcpc_polar.json"
+
+subprocess.run(
+    [sys.executable, "-m", "mission_sim.analysis.polar_illumination",
+     "--txt", "/tmp/mcpc_polar.txt", "--json", MINE, "--no-png"],
+    check=True,
+)
+
+ref = json.load(open(f"{ISLAND}/任务/S4_仿真线_极区光照_近似.json"))
+mine = json.load(open(MINE))
+NUM = ["epsilon_deg", "lats", "theta_h_deg", "annual_illumination_fraction",
+       "annual_insolation_factor", "peak_elevation_deg", "psr_d_over_D_threshold",
+       "winter_day_length_h", "c1b_lat_limit_deg", "solar_constant_wm2"]
+bad = [k for k in NUM if ref[k] != mine[k]]
+print("对拍字段：", len(NUM), "组（光照分数/入射因子/峰值高度/dD 阈值/冬至日长/表头常量）")
+print("MISMATCHES =", len(bad), bad)
+print("容差：0（逐位相等；JSON 数值为源件 round(x,6|5|4|3|2) 后写入，双方同口径同写入位数）")
+print("键名差异（已登记）：岛内 w65_anchor_sites/w65_band_note → 本件 dem_anchor_sites/dem_band_note")
+print("RESULT:", "ALL BIT-IDENTICAL" if not bad else "DIFF FOUND")
+
+---------------------------------------- /tmp/crosscheck_source.py
+"""与源实现直接对拍：岛内 工具/ceres_transfer.py、s4_target_scan.py、s4_polar_illum.py vs MCPC 落位件。"""
+import sys, importlib
+ISLAND = "/mnt/data/huo/Documents/Kimi/Workspaces/行星探测工程/专题工作区/谷神星探测"
+sys.path.insert(0, ISLAND + "/工具")
+src_ct = importlib.import_module("ceres_transfer")
+src_ts = importlib.import_module("s4_target_scan")
+src_pi = importlib.import_module("s4_polar_illum")
+
+from mission_sim.analysis.interplanetary import two_body as tb
+from mission_sim.analysis.interplanetary import target_scan as ts
+from mission_sim.analysis import polar_illumination as pi
+
+fail = []
+def eq(name, a, b):
+    if isinstance(a, float) or isinstance(b, float):
+        ok = (a == b)
+    else:
+        ok = (a == b)
+    if not ok: fail.append((name, a, b))
+
+# 1) 常数
+for n in ["AU_KM", "MU_SUN", "JD_J2000", "SEC_PER_DAY", "DEG", "LAMBERT_TOL",
+          "SIN_DEGEN", "Z_MAX_FRAC", "KEPLER_TOL"]:
+    eq("const." + n, getattr(tb, n), getattr(src_ct, n))
+eq("EARTH specs", tb.EARTH_J2000, src_ct.EARTH)
+eq("TARGETS", ts.TARGETS, src_ts.TARGETS)
+eq("DEFAULT_ORDER", ts.DEFAULT_ORDER, src_ts.DEFAULT_ORDER)
+eq("SBDB_SNAPSHOT_EPOCH", ts.SBDB_SNAPSHOT_EPOCH, src_ts.SBDB_SNAPSHOT_EPOCH)
+
+# 2) 星历状态（逐位）
+e_src, c_src = src_ct.Ephemeris(src_ct.EARTH), src_ct.Ephemeris(src_ct.CERES_SNAPSHOT)
+e_my, c_my = tb.Ephemeris(tb.EARTH_J2000), tb.Ephemeris(ts.spec_of("ceres"))
+for jd in [2451545.0, 2461200.5, 2462502.5, 2466477.5, 2468307.5]:
+    eq(f"earth.state({jd})", e_my.state(jd), e_src.state(jd))
+    eq(f"ceres.state({jd})", c_my.state(jd), c_src.state(jd))
+
+# 3) Lambert / 腿 / Hohmann（逐位）
+for (r1, r2, tof) in [((1.0*1.495978707e8, 0.0, 0.0), (3.0*1.495978707e8, 4.0*1.495978707e8, 0.0), 3.0e7),
+                      ((1.495978707e8, 0.0, 0.0), (-4.1e8, 1e5, 3e7), 5.0e7)]:
+    eq("lambert", tb.lambert(r1, r2, tof), src_ct.lambert(r1, r2, tof))
+    eq("lambert_retro", tb.lambert(r1, r2, tof, prograde=False),
+       src_ct.lambert(r1, r2, tof, prograde=False))
+for key in ts.DEFAULT_ORDER:
+    spec = ts.spec_of(key)
+    a = spec["a_au"]
+    eq(f"hohmann({key})", tb.hohmann_transfer(1.0, a), src_ct._hohmann_analytic(1.0, a))
+    eq(f"lambert_on_180({key})", tb.lambert_on_180(1.0, a, 4.0e7, 0.0),
+       src_ct._lambert_on_180(1.0, a, 4.0e7, 0.0))
+for key in ts.DEFAULT_ORDER:
+    lj, tof = 2464000.5, 700.0
+    eq(f"direct_leg({key})", tb.direct_leg(lj, tof, e_my, tb.Ephemeris(ts.spec_of(key))),
+       src_ct.direct_leg(lj, tof, e_src, src_ct.Ephemeris(src_ts.spec_of(key))))
+eq("tof_grid", tb.tof_grid(600, 1600, 10), src_ct._tof_list(600, 1600, 10))
+
+# 4) 极区光照核（逐位）
+eq("EPS/ROT_H/S0", (pi.EPS, pi.ROT_H, pi.SOL_CONST_WM2),
+   (src_pi.EPS, src_pi.ROT_H, src_pi.SOL_CONST_WM2))
+for phi in [0.0, 60.0, 84.0, 85.0, 89.0, 90.0]:
+    for th in src_pi.THS:
+        eq(f"annual_frac({phi},{th})", pi.annual_frac(phi, th), src_pi.annual_frac(phi, th))
+        eq(f"annual_insol({phi},{th})", pi.annual_insolation(phi, th), src_pi.annual_insolation(phi, th))
+    eq(f"peak_elev({phi})", pi.peak_elev(phi), src_pi.peak_elev(phi))
+    eq(f"psr({phi})", pi.psr_dD_threshold(phi), src_pi.psr_dD_threshold(phi))
+for phi, dl in [(83.3247, 2.67), (84.31, 2.27), (81.856, 3.05)]:
+    eq(f"winter_day({phi})", pi.winter_day_length_h(phi), src_pi.winter_day_length_h(phi))
+for d in [-4.028, -2.0, 0.0, 3.0]:
+    eq(f"diurnal(85,{d},0)", pi.diurnal_frac(85.0, d, 0.0), src_pi._diurnal_frac(85.0, d, 0.0))
+eq("delta_pdf_quad", pi.delta_pdf_quad(), src_pi._delta_pdf_quad())
+eq("c1b_lat_limit", pi.c1b_lat_limit(2.0), src_pi._c1b_lat_limit(2.0))
+
+print("对比项总数：常数/状态/求解器/判据 逐位比对")
+print("MISMATCHES =", len(fail))
+for f in fail[:10]:
+    print("  ", f)
+print("RESULT:", "ALL BIT-IDENTICAL" if not fail else "DIFF FOUND")
+
+================================================================================
+【9】旧记录差异（待核，勿追究旧状态）
+================================================================================
+岛内旧记录称本仓曾沉淀 5 件（提交 14408db／289176d／…；含 solvers/lambert.py、
+algorithms/gravity_assist.py）。本机核查（2026-10-15 00:58:04 CST）：
+$ git rev-parse HEAD            → 3243e015ce1b5dc9ffa4d8b5b7dd19c961abe9c5
+$ git rev-list --all --count    → 686（含远端跟踪引用）
+$ git cat-file -t 14408db       → fatal: Not a valid object name 14408db
+$ git cat-file -t 289176d       → fatal: Not a valid object name 289176d
+$ git log --all --pretty=format: --name-only | sort -u | grep -iE 'lambert|gravity_assist'
+   → 0 条路径记录（NONE）
+$ git branch -a / git tag / git stash list → 仅 main（=origin/main）；无 tag；无 stash
+结论：本机全历史（686 提交、全部已抓取引用）中不存在所述提交对象与文件路径；
+      本次按本机现状落位，未执行任何 fetch/push 以改动仓库引用。差异登记为【待核】。
+
+（本证据文件由 2026-10-15 会话生成；命令均为原样粘贴可复算。）
