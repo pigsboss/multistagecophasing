@@ -1,0 +1,195 @@
+================================================================================
+MCPC 能力沉淀证据 —— Ceres E1：SEP 低推力设计器（Sims-Flanagan）＋顺访链
+（自由探索 R1-B：能力沉淀 · 判据 R1-3）
+================================================================================
+生成时间（系统 date）：2026-10-15 08:35:33 CST
+主机：enceladus｜Python：3.14.7｜numpy：2.5.4｜scipy：1.18.1
+仓库：/home/huo/Projects/multistagecophasing（分支 main）
+提交前 HEAD：93b68ea（'feat(analysis): interplanetary multi-target window scanner +
+  polar illumination geometry core (Ceres S4)'）
+来源（提出方＝谷神星探测专题岛，自由探索 R1-B 已授权向本仓沉淀；同批先例＝93b68ea）：
+  源件 1：专题工作区/谷神星探测/工具/s4_lt_common.py
+  源件 2：专题工作区/谷神星探测/工具/s4_lt_design.py
+  源件 3：专题工作区/谷神星探测/工具/s4_lt_variants.py
+  对拍锚：专题工作区/谷神星探测/任务/拓展_SF_基线.json、
+          任务/拓展_SF_顺访_V1_out_lutetia.json、任务/拓展_SF_顺访_V2_out_vesta.json、
+          任务/拓展_SF_顺访_汇总.json
+落位件（本仓**新增**；未改动、未删除任何既有文件）：
+  mission_sim/analysis/interplanetary/low_thrust.py     低推力原语（Kepler/Lambert/多圈/SEP 模型/质量链）
+  mission_sim/analysis/interplanetary/sf_design.py      Sims-Flanagan 设计器（Prob/初值/多起点 SLSQP）
+  mission_sim/analysis/interplanetary/flyby_chain.py    顺访链（飞越日预扫描＋SF 精算＋窗口敏感）
+  tests/test_interplanetary_low_thrust.py               新增 pytest（59 项：单元/边界/对拍/CLI）
+  tests/fixtures/interplanetary_low_thrust_anchors.json 对拍锚（岛内机读结果的**逐字子集**）
+与源件差异（仅宿主适配；算法、离散口径与数值**未改**）：
+  ① 依赖内联：源件依赖岛内文件系统（``import ceres_transfer`` / ``s4_target_scan`` /
+     ``任务/常量.yaml`` / PIL）。落位件改复用本仓 ``two_body``（星历/Lambert/时间换算）与
+     ``target_scan``（目标快照表）；常量对拍由"vs 常量.yaml"改为"vs 源件登记值的可复算断言"
+     （``low_thrust.constants_audit``：AU/μ☉/J2000 地球根数/SBDB 快照，19 项逐位）。
+  ② 命名/切分：``s4_lt_common`` → ``low_thrust``；``s4_lt_design`` → ``sf_design``；
+     ``s4_lt_variants`` → ``flyby_chain``。私有 ``_energy`` → 公开 ``specific_energy``。
+  ③ 类型标注 + 中文 docstring 补齐 + black 格式化（数值、公式、容差、随机种子未改）。
+  ④ ``C.dump_json``（岛内相对根写盘）→ ``low_thrust.dump_json``（原样路径写盘，自动建父目录）；
+     变体输出的 ``--json-prefix`` → ``--out-prefix``，默认前缀去岛内路径（``拓展_SF_顺访``）。
+  ⑤ ``sf_design --variants`` 由"import s4_lt_variants"改为"惰性 import flyby_chain"（同委托语义）。
+  ⑥ 自检入口可判门：``sf_design.run_self_test`` 返回 res 并置 ``res['ok']``，``main`` 以
+     0/1 反映关系判据（源件 ``main`` 恒返回 0）；判据内容与源件一致（两跑一致、SF≥脉冲、质量链）。
+  ⑦ ``Prob`` 等类未改；``pulse_bound_freetime`` / ``scan_flyby`` / ``VARIANTS`` / ``POOL_TARGETS``
+     原样搬运（POOL_TARGETS 随 low_thrust 登记，因 ``Prob`` 的星历查表在 low_thrust）。
+与源件**口径备忘**（不是差异，是原样继承的报数约定，避免误读）：
+  · ``Prob.obj`` = 节点冲量**分量绝对值之和**（L1）；``counters['total']`` = 冲量**模长之和**。
+    源件 JSON 的 ``total``＝``obj``；物理 Σ|Δv| 用 ``counters['total']``。两者一般不相等
+    （SR-1 去程：17.075 L1 vs 15.407 模长）。
+
+【本次未改动/未提交的既有件】
+  · ``mission_sim/analysis/interplanetary/__init__.py`` 的模块清单**未更新**（为守"只新增"：
+    该件已在 93b68ea 纳入版本管理，改它即属"改既有件"）——列为【待裁定】。
+  · 仓库无 pyproject/setup.cfg，black 走默认参数（与 93b68ea 同）。
+
+================================================================================
+【0】环境（复用 93b68ea 批次已建的 venv；系统 python3 缺 h5py，既有测试无法导入 mission_sim）
+================================================================================
+$ /tmp/mcpc_venv/bin/python -c "import numpy,scipy,h5py,black,pytest; ..."
+numpy 2.5.4 | scipy 1.18.1 | h5py 3.16.0 | pytest 9.1.1 | black 26.10.1
+  ⇒ 系统解释器裸环境仍缺 h5py/numba/spiceypy（**既存环境缺口**，非本次引入）；全部验证在
+    /tmp/mcpc_venv 中进行（沿用既有 requirements.txt，未新增依赖：仅 numpy/scipy）。
+
+================================================================================
+【1】落位件自检（等价于源件 --self-test）
+================================================================================
+$ python3 -m mission_sim.analysis.interplanetary.low_thrust --self-test
+----------------------------------------------------------------------------------------
+low_thrust · self-test（常量 / 传播器 / Lambert 双路 / 星历一致性）
+① 内联常量 vs 源件登记值对拍（19 项，最大相对差 0.00e+00）
+② 传播器 vs RK4（独立数值积分）：最大 |Δr| = 5.898e-05 km｜能量相对漂移 ≤ 1.8e-15｜
+   角动量相对漂移 ≤ 1.1e-15
+③ Lambert：自实现 vs two_body.lambert（双路）＋端点闭合
+   TOF=  300 d : |Δr|=1.974e-06 km｜双路 |Δv1|=2.1e-08 km/s
+   TOF=  800 d : |Δr|=4.970e-05 km｜双路 |Δv1|=6.6e-09 km/s
+   TOF= 1500 d : |Δr|=1.562e-04 km｜双路 |Δv1|=7.1e-09 km/s
+   TOF= 2376 d : |Δr|=1.989e-04 km｜双路 |Δv1|=3.4e-08 km/s
+④ 星历内部一致性（kep 用 μ☉ vs 平根数自身 n）
+   谷神星 400/1200 d：漂移 5.08e-02 / 1.72e-01 km；地球 400/1200 d：2.66e+03 / 8.09e+03 km
+   （地球端 n≠√(µ/a³) 导致的累积，与源件一致，属**源件声明口径限**，不影响谷神星端）
+判据：常量逐位一致 & |Δr|(RK4)<1e-3 km & Lambert 端点闭合 ⇒ 通过   [exit=0]
+  ⇒ 与源件自检数一致（源件：5.90e-05 km / 1.8e-15 / 1.1e-15 / 2.0e-4 km）。
+
+$ python3 -m mission_sim.analysis.interplanetary.sf_design --self-test      [exit=0，≈82 s]
+① 解析螺旋标尺：v_c1=29.785、v_c2=17.910 ⇒ 单程 11.874；往返 23.749；扣 √C3=3.661 ⇒
+   纯 SEP 螺旋上标尺 20.09；Hohmann 型脉冲下标尺 18.68 km/s
+   同日期脉冲参照：去程 12.657 ＋ 返程 14.646 = 27.303 km/s（与源件**逐位**一致）
+③ 两跑一致性：跑1＝跑2＝17.9721774579 km/s（残差 3.562e+02 km），**逐位相等（==）**
+② 低推力 vs 脉冲下界：SF(N=14) 17.9722 ｜ 下界 12.6570 ｜ 乘子 ×1.420 ⇒ 通过（SF ≥ 下界）
+④ 质量链：SF 17.9722 km/s ⇒ m_终 2952.9 kg；Xe 1320 kg ⇔ Δv=13.0343 km/s（"实达 13.03"）
+⇒ res['ok']=True
+  【绝对值差异声明】源件（scipy 1.17.1）同档自检为 16.7050 km/s / 残差 3.467e+04 km；本机
+  scipy 1.18.1 得 17.9722 / 3.562e+02 ⇒ **优化器路径随 scipy 版本变动**，故本件**不锚定 SF
+  绝对值**，判据只取关系（两跑一致、SF ≥ 脉冲下界、质量链闭合）与解析/脉冲标尺锚（逐位）。
+
+$ python3 -m mission_sim.analysis.interplanetary.target_scan --self-test      [exit=0]
+  ⇒ 既有件回归正常（逐目标 Hohmann 解析 vs Δν=180° 拱门分支 Lambert 复现，误差 <0.01%）。
+
+$ python3 -m mission_sim.analysis.interplanetary.flyby_chain --keys __none__ --out-prefix /tmp/lt_smoke
+合计 0 s；写出 /tmp/lt_smoke_汇总.json（variants=[]，退出码 0）—— CLI 与 dump_json 通路正常。
+
+================================================================================
+【2】新增 pytest（单元 + 边界 + 对拍；含 --deselect 单跑与全量两档）
+================================================================================
+$ python3 -m pytest tests/test_interplanetary_low_thrust.py -q
+...........................................................            [100%]
+59 passed in 87.85s (0:01:27)
+  （其中 58 项为快项、合计 2.36 s；1 项＝ ``TestSelfTestAndCLI::test_sf_design_self_test_relations``
+    跑源件四项自检 ≈ 82 s；时间盒 15 min 内有充裕余量。）
+
+$ python3 -m pytest tests/test_interplanetary_low_thrust.py tests/test_interplanetary_window_scan.py -q
+104 passed in 90.20s (0:01:30)      # 59 新增 + 45 既有（窗口扫描件，无回归）
+
+覆盖：
+  · 单元：儒略日/偏日数换算；星历 vs two_body 逐位；Kepler（零 dt 恒等 / 活力公式＋比能守恒 /
+    vs RK4 / 节点冲量语义 / 双曲溢出返回入参）；Lambert 双路＋端点闭合、多圈 rev≥1、
+    零/负 TOF→None；SEP 功率-推力关系（a@1AU=2.1021e-07）、1/r²、k_deg 线性与极值、
+    ConstAModel 对照、质量链正反解闭合（1320 kg ⇔ 13.0343 km/s）
+  · 对拍（逐位 == ）：SR-1 去/返程解向量重放（obj/残差/counters）；V1/V2 顺访链解向量重放；
+    脉冲参照（含分项 dep/arr/rev）；解析螺旋标尺；飞越日预扫描 top（日期与 dv）
+  · 边界：零 TOF 传播（ΣΔv=0、cap=0、残差有限、_bounds 守卫）；空窗口（脉冲自由到达参照→None、
+    空变体过滤→零产出＋空汇总）；非正 TOF；长度不一致 → AssertionError；k_deg∈{0,1e-6,0.9262,1,5}
+  · CLI：两个 --self-test 门、``--variants`` 委托链、``--keys`` 空过滤落盘、dump_json 往返
+
+================================================================================
+【3】回归：既有相关测试（仅跑；不修任何既有件）
+================================================================================
+$ python3 -m pytest tests/test_interplanetary_window_scan.py -q
+45 passed（含在 §2 的 104 项内；既有窗口扫描件在本批落位后无回归）。
+  【既有基线如实登记】系统 python3 裸环境缺 h5py/numba/spiceypy ⇒ 既有测试大批文件收集报错
+  （环境缺口，非本次引入）；全量 tests/（400+ 项）含 CPU 密集长算例，未在本次跑（与本批无关）。
+
+================================================================================
+【4】对拍 A：与源实现（岛内 工具/s4_lt_*.py）逐位直接对拍（容差 0）
+================================================================================
+脚本：/tmp/crosscheck_lt.py（同一解释器内同 import 岛内源件与落位件；原文见 §7 附录）
+$ python3 /tmp/crosscheck_lt.py
+比对项：星历/传播/Lambert/多圈/SEP 模型/质量链/脉冲参照/螺旋标尺/解重放/顺访链
+MISMATCHES = 0
+RESULT: ALL BIT-IDENTICAL
+  逐位覆盖：
+   · 常数 AU/μ☉/J2000 与 6 天体 × 5 时刻状态（含巡访池件 venetia487）
+   · Kepler 5 个 dt（0/100/400/1200/2376 d）位置与速度
+   · 自实现 Lambert 4 个 TOF（v1/v2）＋ 多圈 lambert_multi 全部解的 v1/rev
+   · SEP 模型 a（k_deg∈{0,0.9262,1,5}）、T@1AU、质量链正反解
+   · 脉冲参照（去/返程 total 与逐腿 dep/arr/rev）、解析螺旋标尺全字段
+   · 解向量重放：SR-1 去/返程、V1、V2 的 obj 与残差
+   · 顺访链：定点脉冲参照、飞越日预扫描逐行（日期与参考 Δv）
+
+================================================================================
+【5】对拍 B：与岛内机读结果（任务/拓展_SF_*.json）逐位对拍（容差 0）
+================================================================================
+锚：tests/fixtures/interplanetary_low_thrust_anchors.json（岛内 JSON 的逐字子集，含**解向量 x**）
+$ python3 -m pytest tests/test_interplanetary_low_thrust.py -q -k "Replay or PulseBound or FlybyChain"
+16 passed, 43 deselected in 1.37s
+  ⇒ 全绿；关键读数（落位件重放 == 岛内 JSON，逐位）：
+   SR-1 去程（N=16）：obj 17.07508409245527｜残差 0.5904919698392889 km｜模长和 15.406534201441323｜
+       util 0.7641596969057819｜m_终 3152.47417910257 kg｜触界 11/16
+   SR-1 返程（N=14）：obj 13.19172880497237｜残差 7086394.932920374 km（**源件判"未收敛"**）｜
+       模长和 8.690469000287766｜触界 13
+   SR-1 脉冲参照：去程 12.656978244104268（dep 5.675247850362586 ＋ arr 6.981730393741682，rev=2）
+                返程 14.64591320482635；合计比 k_vs_pulse=1.1085570535282303
+   V1 去程顺访 Lutetia（16+16）：飞越 2034-05-05｜obj 14.984368952297306｜残差 370.68528835127927 km｜
+       模长和 12.349709430211984｜util 0.9783370869342374｜触界 26/32｜
+       v∞(Lutetia)=4.385780387853778、v∞(Ceres)≈1.80e-05 km/s｜两腿 7.895041585721964／4.45466784449002
+       定点脉冲参照 12.105600836645385；飞越日预扫描 top1 dv 12.105600836645559（同一解、nscan 差异）
+   V2 去程顺访 Vesta：飞越 2033-02-14｜obj 293.01137792798824｜残差 352413317.2643675 km
+       （**源件判"未收敛、不作数"**，如实登记）｜定点脉冲参照 13.161625338699116
+  ⇒ 结论：**解向量重放逐位一致**，即"落位件的动力学/质量/记账链"与岛内机读结果等价。
+
+================================================================================
+【6】格式与变更范围
+================================================================================
+$ python3 -m black --check mission_sim/analysis/interplanetary/low_thrust.py \
+      mission_sim/analysis/interplanetary/sf_design.py \
+      mission_sim/analysis/interplanetary/flyby_chain.py tests/test_interplanetary_low_thrust.py
+All done! ✨ 🍰 ✨
+4 files would be left unchanged.
+
+$ git status --short              # 仅新增，无既有件改动
+?? mission_sim/analysis/interplanetary/flyby_chain.py
+?? mission_sim/analysis/interplanetary/low_thrust.py
+?? mission_sim/analysis/interplanetary/sf_design.py
+?? tests/fixtures/interplanetary_low_thrust_anchors.json
+?? tests/test_interplanetary_low_thrust.py
+（log 落位后同样只列新增；``git diff --stat HEAD`` 对既有件应为空。）
+线程口径：全部命令前置 OMP/OPENBLAS/MKL/NUMEXPR/VECLIB_NUM_THREADS=1（低推力对小数组多线程
+  只增同步开销，沿用 E1 线程教训）；落位件亦在 import numpy 前 os.environ.setdefault(...,'1')。
+
+================================================================================
+【7】附录：对拍脚本原文（/tmp/crosscheck_lt.py，可原样复算）
+================================================================================
+（本附录为脚本职责说明；脚本已随 /tmp 交付，如需长期留存可另立 tests 工具件——列为【待裁定】。）
+比对项与判据见 §4；脚本行为＝同输入调用岛内 ``IC/ID/IV`` 与落位件 ``LT/D/FC``，浮点用 ``==`` 比较。
+
+================================================================================
+【8】未闭合 / 待裁定（交提出方）
+================================================================================
+1. 【待裁定】包 ``__init__.py`` 的模块清单未更新（守"只新增"）；是否允许一次"版本化小改＋留痕"。
+2. 【未闭合】本批只沉淀 E1 的 **1 条完整收敛顺访解（V1）** 的口径；源件 V2/V3/V4/V5 的"未收敛/
+   未跑完"如实继承，落位件**不掩盖**（V2 锚即为未收敛解，测试同样锚定其逐位值）。
+3. 【待核】η=0.70、C3 赤纬包络 β≤20°、k_deg 真值等源件【假设/待核】项原样继承，未在本批取件。
+4. 【环境】SF 绝对值随 scipy 版本漂移（§1 已声明）⇒ 跨机复算只应对齐关系判据与解析锚。
