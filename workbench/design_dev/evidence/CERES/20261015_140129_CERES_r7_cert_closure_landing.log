@@ -69,7 +69,7 @@ $ python3 -m mission_sim.analysis.interplanetary.thrust_certificate --self-test 
   ① 最短时螺旋两跑逐位一致：是
   ② a_sep vs SEPModel.a_km_s2 最大相对差：0.00e+00
   ③ 弹道几何界：a∈[1.4895, 1.9977] AU ⇒ v∞∈[4.612, 6.777] km/s（到达半径 1.0165 AU）
-  ④ Edelbaum 单程螺旋标尺 |v_c2−v_c1| = 11.874 km/s
+  ④ Edelbaum 单程螺旋标尺 |v_c2−v_c1| = 12.285 km/s
   ⇒ 与岛内源件 s4_lt2_r1.selftest 判据一致（该项即源件自检入口）。
 
 $ python3 -m mission_sim.analysis.interplanetary.closure_options --opt2    [exit=0，≈0.4 s]
@@ -178,7 +178,8 @@ $ python3 -m pytest tests/test_interplanetary_certificate_closure.py -q        �
 ================================================================================
 【6】格式与变更范围
 ================================================================================
-$ python3 -m black --check <4 个新增模块 + 新增测试>      → All done!（5 files reformatted，复跑 unchanged）
+$ python3 -m black --check <4 个新增模块 + 新增测试>      → All done! 5 files would be left unchanged
+  （本批落位时 5 件首次 reformat；上述 evidence 修正后复跑仍 unchanged。）
 $ git status --short              # 仅新增，无既有件改动
 ?? mission_sim/analysis/interplanetary/chain_accounting.py
 ?? mission_sim/analysis/interplanetary/closure_options.py
