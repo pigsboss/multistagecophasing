@@ -22,8 +22,18 @@
   L-BFGS-B 罚函数版作热启动。结果带收敛历史摘要与随机种子。
 
 **目标函数口径（源件原样）**：``Prob.obj`` = 节点冲量**分量绝对值之和**（L1），而
-``counters["total"]`` = 节点冲量**模长之和**（物理 Σ|Δv|）；两者在一般解下不相等，
-报数须注明用的是哪一个（源件 JSON 的 ``total`` ＝ ``obj`` 值）。
+``counters["total"]`` = 节点冲量**模长之和**（物理 Σ|Δv|）；两者在一般解下不相等。
+``sf_solve`` 返回 dict **同时命名**两者（``obj_L1``／``dv_L2``，``total`` 键保留向后兼容）。
+
+**内向转移（水星/金星）补丁**（源件面向谷神星外向转移，内向长弧上需下列开关）：
+* 出发方向界可注入：``Prob(dep_alpha_half=…)``／``_bounds(..., dep_alpha_half=…)``
+  （默认 0.8 rad＝外向口径；内向转移可取 π ⇒ 出发方向自由，运载 √C3 得沿近逆行抵扣）；
+* 可行性前级默认开：``sf_solve(feas_stage=True)`` 先 ``least_squares`` 压端点约束残差
+  （只在改善时采用），再进罚函数＋SLSQP 流水线；``feas_metric`` 可选残差口径
+  （``"eq"``＝源件口径；``"resid"``＝按 ``resid_km`` 统一量纲并含 cap/v∞ 违约量——
+  位置与速度混合约束（交会）的必备口径）；
+* **非等分分段**：``segs`` 元素可为段数（``int``，旧口径）或时长/分数权重序列；
+  ``Prob(end_dense=k)`` 把末腿末段再均分为 k 段（长弧末端加密）。
 
 用法::
 
@@ -73,14 +83,63 @@ SR1_DATES = {
 }
 SEED_DEFAULT = 20261015
 
+# 出发方向角半界 [rad]（默认＝谷神星线**外向转移**口径）：α∈α_E±DEP_ALPHA_HALF。
+# **内向转移**（水星/金星）的最优出发渐近线近似逆行，调用方需注入更大半界
+# （可取 π ⇒ 出发方向自由），否则运载 √C3 的抵扣方向被封在 0.8 rad 内。
+DEP_ALPHA_HALF = 0.8
+DEP_BETA_HALF = 0.35  # β 的 ±20° 为**工程界**【假设】（未登记实际 C3 赤纬包络）
+FEAS_MAX_NFEV = 2000  # 可行性前级（least_squares）默认 nfev 上限
+
 
 # ================================================================ 问题描述
+def _split_legs(
+    nodes: Sequence[float], segs: Sequence[Any], end_dense: int = 1
+) -> Tuple[List[int], List[List[float]], List[bool]]:
+    """把每腿的 ``segs`` 规格解算为（段数、段时长分数、是否等分）。
+
+    ``segs[j]`` 两种写法（**旧写法行为逐位保留**）：
+      * ``int n``：该腿**等分**为 n 段（源件口径）；
+      * ``[1/3, 1/3, 1/3]`` 形（长度＝段数）：按**分数/时长权重**分段（权重和不必为 1，
+        内部按和归一）⇒ 支持非等分分段。
+    ``end_dense=k``（k≥2）把**末腿的末段**再均分为 k 段（端点加密：长弧末端打靶对小 Δt
+    敏感），总时长不变、末腿段数由 n 变 n−1+k。
+    """
+    assert len(segs) == len(nodes) - 1, "segs 长度须等于腿数（len(nodes)−1）"
+    counts: List[int] = []
+    fracs: List[List[float]] = []
+    equal: List[bool] = []
+    for spec in segs:
+        if isinstance(spec, (int, np.integer)):
+            n = int(spec)
+            if n < 1:
+                raise ValueError("每腿段数须 ≥1，得到 %r" % (spec,))
+            counts.append(n)
+            fracs.append([1.0 / n] * n)
+            equal.append(True)
+        else:
+            w = [float(q) for q in spec]
+            if not w or any(q <= 0.0 for q in w):
+                raise ValueError("分段权重须为非空正数序列，得到 %r" % (spec,))
+            s = math.fsum(w)
+            counts.append(len(w))
+            fracs.append([q / s for q in w])
+            equal.append(False)
+    k = int(end_dense)
+    if k > 1:
+        last = fracs[-1]
+        counts[-1] = counts[-1] - 1 + k
+        fracs[-1] = last[:-1] + [last[-1] / k] * k
+        equal[-1] = False
+    return counts, fracs, equal
+
+
 class Prob:
     """一条（或一条链的）小推力转移问题。
 
     Args:
         nodes: 节点偏日数（离 J2000），长度 M+1（M＝腿数）。
-        segs: 每腿段数，长度 M。
+        segs: 每腿段数，长度 M。元素为 ``int n``（该腿等分 n 段，旧口径）或
+            **非等分**权重序列（如 ``[1.0, 2.0, 4.0]``：3 段，时长比 1:2:4；和不必为 1）。
         bodies: 天体键，长度 M+1。
         kinds: 长度 M+1；元素 0 为 ``depart_earth`` / ``start_body``，中间为
             ``flyby`` / ``rendezvous``，末元素为终点类型。
@@ -88,12 +147,17 @@ class Prob:
         m0: 起始质量 [kg]。
         c3: 运载注入 C3 [km²/s²]（``depart_earth`` 时必需）。
         vinf_max: ``arrive_earth`` 的地球再入 v∞ 上限 [km/s]。
+        name: 问题名（进结果与 ``fmt()``）。
+        meta: 附加元数据。
+        dep_alpha_half / dep_beta_half: 出发方向角半界 [rad]（见 :func:`_bounds`；
+            默认 0.8/0.35 为**外向转移**口径；内向转移可注入 ``math.pi``）。
+        end_dense: ``k≥2`` 时把**末腿的末段**再均分为 k 段（端点加密）。
     """
 
     def __init__(
         self,
         nodes: Sequence[float],
-        segs: Sequence[int],
+        segs: Sequence[Any],
         bodies: Sequence[str],
         kinds: Sequence[str],
         model: Any,
@@ -102,9 +166,11 @@ class Prob:
         vinf_max: Optional[float] = None,
         name: str = "",
         meta: Optional[Mapping[str, Any]] = None,
+        dep_alpha_half: float = DEP_ALPHA_HALF,
+        dep_beta_half: float = DEP_BETA_HALF,
+        end_dense: int = 1,
     ) -> None:
         self.nodes = list(map(float, nodes))
-        self.segs = list(map(int, segs))
         self.bodies = list(bodies)
         self.kinds = list(kinds)
         self.model = model
@@ -113,11 +179,21 @@ class Prob:
         self.vinf_max = vinf_max
         self.name = name
         self.meta = dict(meta or {})
-        assert len(self.segs) == len(self.nodes) - 1 == len(self.bodies) - 1
+        self.dep_alpha_half = float(dep_alpha_half)
+        self.dep_beta_half = float(dep_beta_half)
+        self.end_dense = int(end_dense)
+        assert len(segs) == len(self.nodes) - 1 == len(self.bodies) - 1
+        self.leg_segs, self.leg_fracs, self.leg_equal = _split_legs(
+            self.nodes, segs, end_dense=self.end_dense
+        )
+        self.segs = list(self.leg_segs)  # 每腿**段数**（int，旧语义不变）
         dtl: List[float] = []
-        for j, n in enumerate(self.segs):
-            for _ in range(n):
-                dtl.append((self.nodes[j + 1] - self.nodes[j]) / n)
+        for j in range(len(self.nodes) - 1):
+            dur = self.nodes[j + 1] - self.nodes[j]
+            if self.leg_equal[j]:  # 等分：保持源件逐位口径
+                dtl += [dur / self.segs[j]] * self.segs[j]
+            else:
+                dtl += [dur * f for f in self.leg_fracs[j]]
         self.dt = dtl
         self.N = sum(self.segs)
         self.nimp = self.N - 1
@@ -474,10 +550,18 @@ def _tangential_trj(
     r, v = prob.ic(alpha, beta)
     leg_of: List[int] = []
     frac_of: List[float] = []
-    for j, nseg in enumerate(prob.segs):
-        for i in range(nseg):
-            leg_of.append(j)
-            frac_of.append((i + 0.5) / nseg)
+    for j in range(len(prob.segs)):
+        if prob.leg_equal[j]:  # 等分：保持源件逐位口径
+            nseg = prob.segs[j]
+            for i in range(nseg):
+                leg_of.append(j)
+                frac_of.append((i + 0.5) / nseg)
+        else:  # 非等分：段中点的累计归一化时间
+            cum = 0.0
+            for f in prob.leg_fracs[j]:
+                leg_of.append(j)
+                frac_of.append(cum + 0.5 * f)
+                cum += f
     dv = np.zeros((prob.nimp, 3))
     ve = prob.model.ve
     dvacc = 0.0
@@ -659,19 +743,130 @@ def _clip_caps(prob: Prob, x: Sequence[float]) -> np.ndarray:
     return dv.reshape(-1)
 
 
-def _bounds(prob: Prob, x0: Sequence[float]) -> List[Tuple[float, float]]:
-    """设计变量边界。冲量分量 ∈ ±2·max(cap)；出发方向 α∈α_E±0.8 rad、β∈±0.35 rad。
+def _bounds(
+    prob: Prob,
+    x0: Sequence[float],
+    dep_alpha_half: Optional[float] = None,
+    dep_beta_half: Optional[float] = None,
+) -> List[Tuple[float, float]]:
+    """设计变量边界。冲量分量 ∈ ±2·max(cap)；出发方向 α∈α_E±half、β∈±half。
 
-    β 的 ±20° 为**工程界**【假设】（专题岛未登记实际 C3 赤纬包络，见待裁定）。
+    ``half`` 取 ``Prob.dep_alpha_half``／``Prob.dep_beta_half``（构造默认 0.8／0.35 rad
+    ＝**外向转移**口径，谷神星线）；显式传入的同名参数优先。**内向转移**（水星/金星）的
+    出发渐近线近似逆行、需 α 半界可取到 π（出发方向自由），否则运载 √C3 的抵扣方向被封死。
+    β 的 ±0.35 rad（±20°）为**工程界**【假设】（专题岛未登记实际 C3 赤纬包络，见待裁定）。
     """
     tr = prob.propagate(_clip_caps(prob, x0))
     b = max(2.0 * float(np.max(tr["caps"])), 0.05)
     a0 = prob.alpha0()
-    lo: List[float] = [a0 - 0.8, -0.35] if prob.bstart else []
-    hi: List[float] = [a0 + 0.8, 0.35] if prob.bstart else []
+    ah = float(getattr(prob, "dep_alpha_half", DEP_ALPHA_HALF))
+    bh = float(getattr(prob, "dep_beta_half", DEP_BETA_HALF))
+    if dep_alpha_half is not None:
+        ah = float(dep_alpha_half)
+    if dep_beta_half is not None:
+        bh = float(dep_beta_half)
+    lo: List[float] = [a0 - ah, -bh] if prob.bstart else []
+    hi: List[float] = [a0 + ah, bh] if prob.bstart else []
     lo += [-b] * (3 * prob.nimp)
     hi += [b] * (3 * prob.nimp)
     return list(zip(lo, hi))
+
+
+def feas_resid_fn(prob: Prob, metric: str = "eq") -> Any:
+    """构造可行性前级的残差函数（``metric`` 决定量纲口径）。
+
+    * ``"eq"``（默认，源件/D1 口径）：直接用 :meth:`Prob.eq_cons`
+      （位置以 AU、速度以 km/s 计）。**位置项被 AU 归一化后远小于速度项**，
+      故该口径在"位置＋速度"混合约束下会优先闭合速度、放弃位置。
+    * ``"resid"``：按 :meth:`Prob.resid_km` 的同一口径统一量纲
+      （位置 /1e3 km、速度 /1 km·s⁻¹，两者可直接比较），并**把违约的等式-伴随不等式
+      一并最小化**：节点冲量超 cap 的正残差与 ``arrive_earth`` 的 v∞ 超越量（km/s）。
+      ⇒ 前级目标＝"把 x 推到**可行集**"（等式闭合＋冲量受限＋v∞ 受限），而非只压位置。
+      长弧＋混合约束问题（水星内向转移）上，该口径是收敛与否的分水岭。
+    """
+    if metric == "eq":
+        return prob.eq_cons
+    if metric != "resid":
+        raise ValueError("feas metric 须为 'eq' 或 'resid'，得到 %r" % (metric,))
+
+    def _fn(z: Sequence[float]) -> np.ndarray:
+        tr = prob.propagate(z)
+        out: List[float] = []
+        for i, (_k, kind, _body) in enumerate(prob.enc):
+            rb, vb = prob.body_state[i + 1]
+            dr = LT.vsub(tr["r"][i], rb)
+            out += [dr[0] / 1e3, dr[1] / 1e3, dr[2] / 1e3]
+            if kind == "rendezvous":
+                out += list(LT.vsub(tr["v"][i], vb))
+            elif kind == "arrive_earth" and prob.vinf_max:
+                dv = LT.vsub(tr["v"][i], vb)
+                out.append(max(0.0, LT.vnorm(dv) - prob.vinf_max))
+        ov = tr["mags"] - tr["caps"]
+        out += [max(0.0, float(q)) for q in ov]
+        return np.array(out)
+
+    return _fn
+
+
+def feas_prestage(
+    prob: Prob,
+    x0: Sequence[float],
+    bnds: Optional[Sequence[Tuple[float, float]]] = None,
+    max_nfev: int = FEAS_MAX_NFEV,
+    keep_best: bool = True,
+    metric: str = "eq",
+) -> Tuple[np.ndarray, float, Dict[str, Any]]:
+    """**可行性前级**：在界内用 ``least_squares`` 最小化端点约束残差。
+
+    长弧（7–10 年）问题上，SLSQP 直接从切向初值出发常停在残差 1e6–1e7 km；
+    先做本前级把 x 推到约束流形附近，再交给 ``sf_solve`` 的精修段收口。
+    ``keep_best=True``（默认）时，若前级未改善残差则**原样返回 x0**（不会变差）。
+    ``metric`` 见 :func:`feas_resid_fn`（默认 ``"eq"``＝源件/D1 口径；
+    ``"resid"``＝按 ``resid_km`` 统一量纲并含不等式违约量）。
+    **注**：``bnds`` 缺省时由传入点的 cap 现算（与 ``sf_solve`` 同口径），故界会随传入点变化；
+    需要"界不变"的对照请显式传 ``bnds``。
+    返回 ``(x, resid_km, info)``。
+    """
+    from scipy.optimize import least_squares
+
+    bnds = list(_bounds(prob, x0) if bnds is None else bnds)
+    lo = np.array([q[0] for q in bnds], float)
+    hi = np.array([q[1] for q in bnds], float)
+    x_in = np.clip(np.asarray(x0, float), lo, hi)
+    r_in = prob.resid_km(x_in)
+    try:
+        ls = least_squares(
+            feas_resid_fn(prob, metric),
+            x_in,
+            bounds=(lo, hi),
+            method="trf",
+            xtol=1e-13,
+            ftol=1e-13,
+            gtol=1e-13,
+            max_nfev=int(max_nfev),
+            x_scale="jac",
+        )
+    except Exception as exc:  # noqa: BLE001
+        return x_in, r_in, dict(
+            ok=False,
+            resid_in_km=r_in,
+            resid_km=r_in,
+            nfev=0,
+            msg="%s: %s" % (exc.__class__.__name__, exc),
+        )
+    x_f = np.asarray(ls.x, float)
+    r_f = prob.resid_km(x_f)
+    info = dict(
+        ok=True,
+        resid_in_km=r_in,
+        resid_km=r_f,
+        nfev=int(ls.nfev),
+        msg=str(ls.message)[:60],
+        kept=r_f >= r_in if keep_best else False,
+    )
+    if keep_best and not (r_f < r_in):
+        return x_in, r_in, info
+    return x_f, r_f, info
 
 
 def sf_solve(
@@ -682,8 +877,24 @@ def sf_solve(
     seed: int = SEED_DEFAULT,
     verbose: bool = False,
     multistart: int = 3,
+    feas_stage: bool = True,
+    feas_max_nfev: int = FEAS_MAX_NFEV,
+    feas_metric: str = "eq",
 ) -> Dict[str, Any]:
-    """SLSQP 直接法＋罚函数热启动。返回结果 dict（含收敛历史摘要、随机种子）。"""
+    """SLSQP 直接法＋罚函数热启动。返回结果 dict（含收敛历史摘要、随机种子）。
+
+    ``feas_stage=True``（默认）时，先对本问题首起点做一次**可行性前级**
+    （:func:`feas_prestage`：``least_squares`` 压端点约束残差，**只在改善时采用**），
+    再进 L-BFGS 罚函数＋SLSQP 流水线。长弧问题上该前级对收敛与否起决定作用；
+    关掉即退回源件流水线（供对拍与回归用）。
+
+    ``feas_max_nfev``：前级的 ``least_squares`` nfev 上限。
+    ``feas_metric``：前级残差口径（``"eq"`` 默认＝源件/D1 口径；``"resid"``＝按
+    ``resid_km`` 统一量纲并含冲量/cap 与 v∞ 违约量，见 :func:`feas_resid_fn`）。
+
+    返回 dict 的 Δv 口径**双命名**：``obj_L1``（＝``total``，节点冲量分量绝对值之和，
+    优化目标）与 ``dv_L2``（物理 Σ|Δv|，节点冲量模长之和）；``total`` 键保留向后兼容。
+    """
     hist: List[Dict[str, Any]] = []
     cons = [dict(type="eq", fun=prob.eq_cons), dict(type="ineq", fun=prob.ineq_cons)]
     starts: List[Tuple[str, np.ndarray]] = []
@@ -701,9 +912,28 @@ def sf_solve(
         base = base + rng.normal(0, 0.02 * max(1.0, np.abs(base).max()), base.shape)
         starts.append(("rand%d" % (q + 1), base))
     bnds = _bounds(prob, starts[0][1])
+    feas_info: Optional[Dict[str, Any]] = None
+    if feas_stage:
+        x_f, r_f, feas_info = feas_prestage(
+            prob,
+            _clip_caps(prob, starts[0][1]),
+            bnds=bnds,
+            max_nfev=feas_max_nfev,
+            metric=feas_metric,
+        )
+        if prob.resid_km(x_f) < prob.resid_km(_clip_caps(prob, starts[0][1])):
+            starts[0] = ("tangential+feas", np.asarray(x_f, float))
     print(
-        "    设计变量 %d（含初值 %d 个起点）｜冲量分量界 ±%.3f km/s"
-        % (prob.nv, len(starts), bnds[-1][1])
+        "    设计变量 %d（含初值 %d 个起点）｜冲量分量界 ±%.3f km/s%s"
+        % (
+            prob.nv,
+            len(starts),
+            bnds[-1][1],
+            "" if not feas_stage else "｜前级 %.3e→%.3e km" % (
+                feas_info["resid_in_km"],
+                feas_info["resid_km"],
+            ),
+        )
     )
 
     results = []
@@ -828,12 +1058,23 @@ def sf_solve(
         nv=prob.nv,
         seed=seed,
         total=best["total"],
+        obj_L1=best["total"],
+        dv_L2=best["counters"]["total"],
         resid_km=best["resid_km"],
         best_tag=best["tag"],
         x=best["x"],
         counters=best["counters"],
+        feas_stage=bool(feas_stage),
+        feas_metric=feas_metric,
+        feas=feas_info,
         all_starts=[
-            dict(tag=r["tag"], total=r["total"], resid_km=r["resid_km"])
+            dict(
+                tag=r["tag"],
+                total=r["total"],
+                obj_L1=r["total"],
+                dv_L2=r["counters"]["total"],
+                resid_km=r["resid_km"],
+            )
             for r in results
         ],
         history=hist,

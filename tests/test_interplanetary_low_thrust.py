@@ -521,3 +521,209 @@ class TestSelfTestAndCLI:
     def test_dump_json_round_trip(self, tmp_path):
         path = LT.dump_json(str(tmp_path / "a" / "b.json"), {"x": 1.5})
         assert json.loads(Path(path).read_text(encoding="utf-8")) == {"x": 1.5}
+
+
+class TestInwardTransferPatch:
+    """内向转移补丁（水星/金星线）：出发角界注入／可行性前级／非等分分段／L1-L2 命名。
+
+    源件面向**外向**转移（谷神星线）：出发角 α∈α_E±0.8 rad、``segs`` 每腿等分、
+    ``sf_solve`` 无可行性前级、Δv 只有单一口径 ``total``。本类锚定补丁后的**新契约**，
+    并守住**旧口径逐位不变**（等分 dt、默认角界、``total`` 键）。
+    """
+
+    WIN = (11305.5, 11905.5)
+
+    def _prob(self, segs, bodies=None, kinds=None, **kw):
+        return D.Prob(
+            list(self.WIN),
+            segs,
+            bodies or ["earth", "ceres"],
+            kinds or ["depart_earth", "rendezvous"],
+            D.sep_model(),
+            c3=13.4,
+            **kw,
+        )
+
+    # ---------------------------------------------------------- P-3 非等分分段
+    def test_equal_int_segs_dt_bitwise_unchanged(self):
+        """旧写法（int 等分）：dt 与源件口径 ``dur/n`` 逐位一致。"""
+        span = self.WIN[1] - self.WIN[0]
+        p = self._prob([4])
+        assert p.segs == [4] and p.N == 4 and p.nimp == 3
+        assert p.leg_equal == [True]
+        assert p.dt == [span / 4.0] * 4  # 逐位，非 allclose
+
+    def test_nonuniform_segs_keep_total_span(self):
+        """非等分权重列表：段数正确、段时长成比、**总时长与等分相同**。"""
+        span = self.WIN[1] - self.WIN[0]
+        p = self._prob([[1.0, 2.0, 1.0]])
+        assert p.segs == [3] and p.leg_equal == [False]
+        assert p.dt[1] == pytest.approx(2.0 * p.dt[0], rel=1e-15)
+        assert math.fsum(p.dt) == pytest.approx(span, rel=1e-15)
+        assert p.N == 3 and p.nv == 2 + 3 * 2
+
+    def test_nonuniform_weights_scale_invariant(self):
+        """权重和不必为 1：``[2,6,2]`` 与 ``[1,3,1]`` 同解；``end_dense=1`` 不改动。"""
+        assert self._prob([[2.0, 6.0, 2.0]]).dt == self._prob([[1.0, 3.0, 1.0]]).dt
+        assert self._prob([4]).dt == self._prob([4], end_dense=1).dt
+
+    def test_nonuniform_multi_leg_span(self):
+        """多腿：逐腿总时长各自守恒，遭遇节点索引仍按段数累计。"""
+        t0, tm, t1 = 11305.5, 11605.5, 11905.5
+        p = D.Prob(
+            [t0, tm, t1],
+            [[1.0, 3.0], [1.0, 1.0]],
+            ["earth", "ceres", "ceres"],
+            ["depart_earth", "flyby", "rendezvous"],
+            D.sep_model(),
+            c3=13.4,
+        )
+        assert p.segs == [2, 2]
+        assert math.fsum(p.dt[:2]) == pytest.approx(tm - t0, rel=1e-15)
+        assert math.fsum(p.dt[2:]) == pytest.approx(t1 - tm, rel=1e-15)
+        assert [e[0] for e in p.enc] == [2, 4]  # 遭遇节点段索引＝前序段数累计
+        assert [e[1] for e in p.enc] == ["flyby", "rendezvous"]
+
+    def test_end_dense_refines_last_segment(self):
+        """端点加密：末腿段数 n→n−1+k，总时长不变，末端 k 段等长。"""
+        span = self.WIN[1] - self.WIN[0]
+        p = self._prob([4], end_dense=3)
+        assert p.segs == [6] and p.N == 6
+        assert math.fsum(p.dt) == pytest.approx(span, rel=1e-15)
+        assert p.dt[:3] == [span / 4.0] * 3  # 前 3 段仍为原等分
+        assert p.dt[3:] == [span / 4.0 / 3.0] * 3
+        assert p.end_dense == 3
+
+    def test_segs_spec_errors_raise(self):
+        with pytest.raises(ValueError):
+            self._prob([0])
+        with pytest.raises(ValueError):
+            self._prob([[1.0, -1.0]])
+        with pytest.raises(AssertionError):
+            self._prob([3, 3])
+
+    # ---------------------------------------------------------- P-1 出发角界注入
+    def test_departure_bounds_default_is_outward(self):
+        """默认（外向转移口径）：α∈α_E±0.8 rad、β∈±0.35 rad。"""
+        p = self._prob([4])
+        b = D._bounds(p, np.zeros(p.nv))
+        a0 = p.alpha0()
+        assert p.dep_alpha_half == D.DEP_ALPHA_HALF == 0.8
+        assert b[0] == (a0 - 0.8, a0 + 0.8)
+        assert b[1] == (-0.35, 0.35)
+
+    def test_departure_bounds_injectable_on_prob(self):
+        """内向转移：``Prob(dep_alpha_half=π)`` ⇒ 出发方向自由（±π）。"""
+        p = self._prob([4], dep_alpha_half=math.pi)
+        b = D._bounds(p, np.zeros(p.nv))
+        a0 = p.alpha0()
+        assert b[0] == pytest.approx((a0 - math.pi, a0 + math.pi), rel=0, abs=0)
+        assert b[0][1] - b[0][0] == pytest.approx(2.0 * math.pi, rel=1e-15)
+
+    def test_departure_bounds_explicit_arg_wins(self):
+        p = self._prob([4])
+        b = D._bounds(p, np.zeros(p.nv), dep_alpha_half=1.2, dep_beta_half=0.1)
+        a0 = p.alpha0()
+        assert b[0] == (a0 - 1.2, a0 + 1.2)
+        assert b[1] == (-0.1, 0.1)
+
+    def test_bounds_without_departure_have_no_angle_vars(self):
+        """``start_body`` 起点无 α/β 变量：界长度＝3·nimp。"""
+        p = self._prob([3], ["ceres", "earth"], ["start_body", "arrive_earth"])
+        b = D._bounds(p, np.zeros(p.nv))
+        assert len(b) == 3 * p.nimp and p.nv == 3 * p.nimp
+
+    # ---------------------------------------------------------- P-2 可行性前级
+    def test_feas_prestage_improves_then_keeps(self):
+        """前级：低质量初值上压残差；已收敛点上**不变差**（keep_best）。
+
+        界由传入点处的 cap 决定（与 ``sf_solve`` 同口径），故两次调用显式传同一 ``bnds``，
+        以隔离"界随点变"的影响。
+        """
+        p = self._prob([4])
+        x_bad = np.zeros(p.nv)
+        bnds = D._bounds(p, x_bad)
+        x1, r1, info1 = D.feas_prestage(p, x_bad, bnds=bnds, max_nfev=400)
+        assert info1["ok"] is True and r1 <= p.resid_km(x_bad)
+        assert r1 < p.resid_km(x_bad)  # 本问题上确有改善
+        x2, r2, info2 = D.feas_prestage(p, x1, bnds=bnds, max_nfev=400)
+        assert r2 <= r1 and info2["kept"] is True and np.array_equal(x2, x1)
+
+    def test_feas_resid_metric_scales_consistently(self):
+        """``metric="resid"``：位置/1e3 km 与速度 km/s 同量纲（前级不再牺牲位置）。"""
+        p = self._prob([4])
+        x = np.zeros(p.nv)
+        tr = p.propagate(x)
+        rb, vb = p.body_state[1]
+        dr = LT.vsub(tr["r"][0], rb)
+        dv = LT.vsub(tr["v"][0], vb)
+        f_eq = D.feas_resid_fn(p, "eq")(x)
+        f_rs = D.feas_resid_fn(p, "resid")(x)
+        assert f_eq[:3] == pytest.approx([q / LT.AU_KM for q in dr], rel=1e-15)
+        assert f_rs[:3] == pytest.approx([q / 1e3 for q in dr], rel=1e-15)
+        assert f_rs[3:6] == pytest.approx(list(dv), rel=1e-15)
+        # 冲量超 cap 的正残差（zeros 起点无冲量 ⇒ 0）
+        assert list(f_rs[6:]) == [0.0] * p.nimp
+        with pytest.raises(ValueError):
+            D.feas_resid_fn(p, "__nope__")
+
+    def test_feas_resid_metric_penalizes_vinf_overshoot(self):
+        """``arrive_earth``：v∞ 超越量进残差（可行集口径，含不等式违约）。"""
+        p = D.Prob(
+            list(self.WIN),
+            [4],
+            ["earth", "ceres"],
+            ["depart_earth", "arrive_earth"],
+            D.sep_model(),
+            c3=13.4,
+            vinf_max=6.0,
+        )
+        x0 = np.zeros(p.nv)
+        f = D.feas_resid_fn(p, "resid")(x0)
+        assert f.shape == (3 + 1 + p.nimp,)  # 位置 3 ＋ v∞ 1 ＋ cap 3
+        assert list(f[4:]) == [0.0] * p.nimp  # zeros 起点无冲量 ⇒ 不违约 cap
+        x1 = np.full(p.nv, 1.0)
+        v_rel = LT.vnorm(LT.vsub(p.propagate(x1)["v"][0], p.body_state[1][1]))
+        assert v_rel > 6.0  # 该点上确违约
+        assert D.feas_resid_fn(p, "resid")(x1)[3] == pytest.approx(v_rel - 6.0, rel=1e-12)
+        assert D.feas_resid_fn(p, "eq")(x1).shape == (3,)
+
+    def test_sf_solve_feas_stage_switch(self):
+        """``feas_stage`` 默认开、可关；两档都返回命名键与有限残差。"""
+        p = self._prob([4])
+        r_on = D.sf_solve(p, seed=1, maxiter=3, multistart=1)
+        assert r_on["feas_stage"] is True
+        assert r_on["feas"]["ok"] is True
+        assert r_on["feas"]["resid_km"] <= r_on["feas"]["resid_in_km"]
+        r_off = D.sf_solve(p, seed=1, maxiter=3, multistart=1, feas_stage=False)
+        assert r_off["feas_stage"] is False and r_off["feas"] is None
+        assert math.isfinite(r_off["resid_km"]) and r_off["resid_km"] > 0.0
+
+    def test_sf_solve_two_runs_identical_with_feas_stage(self):
+        """对拍口径（源件自检③）：同初值同种子两跑**逐位一致**（含前级）。"""
+        p = self._prob([4])
+        x0 = np.zeros(p.nv)
+        ra = D.sf_solve(p, x0=x0, seed=1, maxiter=3, multistart=1)
+        rb = D.sf_solve(p, x0=x0, seed=1, maxiter=3, multistart=1)
+        assert ra["x"] == rb["x"]
+        assert ra["obj_L1"] == rb["obj_L1"] and ra["dv_L2"] == rb["dv_L2"]
+        assert ra["feas"] == rb["feas"]
+
+    def test_sf_solve_nonuniform_segs_smoke(self):
+        """非等分分段进完整流水线（切向/脉冲初值＋前级）不崩且键齐。"""
+        p = self._prob([[1.0, 2.0, 1.0]], end_dense=2)
+        r = D.sf_solve(p, seed=1, maxiter=3, multistart=1, verbose=False)
+        assert r["segs"] == [4] and r["N"] == 4
+        assert math.isfinite(r["resid_km"]) and math.isfinite(r["dv_L2"])
+
+    # ---------------------------------------------------------- P-4 Δv 双口径命名
+    def test_l1_l2_naming_keys(self):
+        """``total``＝``obj_L1``（优化目标 L1）；``dv_L2``＝counters.total（物理模长和）。"""
+        p = self._prob([4])
+        r = D.sf_solve(p, seed=1, maxiter=3, multistart=1)
+        assert r["obj_L1"] == r["total"]
+        assert r["dv_L2"] == r["counters"]["total"]
+        assert r["dv_L2"] <= r["obj_L1"] * (1.0 + 1e-12)  # L2 ≤ L1（分量和的三角不等式）
+        assert all(
+            q["obj_L1"] == q["total"] and "dv_L2" in q for q in r["all_starts"]
+        )
