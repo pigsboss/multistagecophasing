@@ -1,0 +1,220 @@
+================================================================================
+MCPC 能力沉淀证据 —— Ceres R5/R6：小推力不可行证书 ＋ 返程闭合矩阵 ＋ 火星借力链 ＋ 全链对账
+（自由探索 R7：mcpc 二次沉淀 · 素材级）
+================================================================================
+生成时间（系统 date）：2026-10-15 14:01 CST
+主机：enceladus｜Python：3.14.7｜numpy：2.5.4｜scipy：1.18.1
+仓库：/home/huo/Projects/multistagecophasing（分支 main）
+提交前 HEAD：d56418b（'feat(analysis): SEP low-thrust Sims-Flanagan designer + flyby chain
+  (Ceres E1)'）
+来源（提出方＝谷神星探测专题岛，2026-10-15 拓展轮 R7；同批先例＝93b68ea、d56418b）：
+  源件 1：专题工作区/谷神星探测/工具/s4_lt2_r1.py     （v0.2：min_radius_at_T 不可行证书／
+            init_spiral／sf_solve2；3D RK4 螺旋、弹道界、脉冲 v∞ 前沿）
+  源件 2：专题工作区/谷神星探测/工具/s4_lt3_r5.py     （v0.1：闭合矩阵四案；含
+            init_spiral_local／sf_solve2_local——修正 R1 单腿索引缺陷）
+  源件 3：专题工作区/谷神星探测/工具/s4_lt4_r6.py     （v0.1：去程火星借力链＋全链对账＋
+            返程 2099.4 d 复核；含火星星历近似表）
+  对拍锚：任务/拓展_R1_返程能力.json、任务/拓展_R5_{时间延后,kdeg提升,地球借力EFB,
+            化学离场脉冲,vinf前沿}.json、任务/拓展_R6_{去程火星借力,返程2099复核,全链对账}.json
+落位件（本仓**新增**；未改动、未删除任何既有文件）：
+  mission_sim/analysis/interplanetary/thrust_certificate.py   半径-时间不可行证书＋螺旋能力
+          （a_sep/_deriv3/spiral_run/min_time_spiral/min_radius_at_T/thrust_mult_for_tof/
+           spiral_nodes/init_spiral/sf_solve2/ballistic_bounds/vinf_scan/frontier/
+           threshold_table/prob_ret/_thrust_dir/selftest）
+  mission_sim/analysis/interplanetary/closure_options.py      闭合矩阵四案＋R5-2 v∞ 前沿
+          （tangential_tmin/init_spiral_local/sf_solve2_local/opt1/opt2/opt3_efb/opt4_chem/
+           run_vinf/flyby_dvmax/sf_checks）
+  mission_sim/analysis/interplanetary/flyby_mars.py           去程火星借力链（R6-1／R6-2）
+          （MARS_JPL_T1/mars_spec/register_mars/dmax_deg/ga_scan/init_chain/chain_sf/
+           direct_sf/opt1/opt2/run_scan/F003）
+  mission_sim/analysis/interplanetary/chain_accounting.py     全链对账（R6-3）
+          （prop_kg/chain_reconcile）
+  tests/test_interplanetary_certificate_closure.py           新增 pytest（53 项：单元/边界/对拍/CLI）
+  tests/fixtures/interplanetary_r5r6_anchors.json            对拍锚（岛内机读结果的**逐字子集**）
+
+与源件差异（仅宿主适配；算法、常数、容差与随机种子**未改**）
+  ① 依赖内联：岛内 ``s4_lt_common``／``s4_lt_design``／``s4_lt2_r1``／``s4_lt3_r5``／
+     ``ceres_transfer`` → 本仓 ``low_thrust``／``sf_design``／（新件内互相）／``two_body``。
+     前者数值口径已在前批 93b68ea／d56418b 对拍为逐位一致；本批 §4 再直接对拍（0 错）。
+  ② **不再落盘**：源件 run_capability/run_vinf/opt1/opt2/opt3/opt4/opt2(R6)/chain 会把结果写
+     岛内 ``任务/*.json``（``sf_checks(merge=True)`` 更是 **改写既有** ``拓展_R5_时间延后.json``）。
+     落位件只**返回 dict**；CLI 增 ``--out-dir`` / ``--out-json``（默认不写）。需要落盘由调用方
+     ``low_thrust.dump_json`` 处理。
+  ③ 测试友好的可选旋钮：``min_time_spiral``／``min_radius_at_T`` 把源件内联的迭代上限提为
+     可选参数（``maxiter`` 等；**默认值与源件一致**，默认路径逐位不变）。
+  ④ 未搬运：``figs``（matplotlib 出图，写岛内 ``图/拓展``）；``s4_lt2_r1 --sens/--extra/--ret``
+     （依赖 ``s4_lt_variants``，已独立沉淀为 ``flyby_chain``）；``s4_lt4_r6 --figs``；
+     R5 ``--sfonly`` 的"并入既有 JSON"写盘分支。均列为【待裁定】。
+  ⑤ **源件缺陷原样继承**：``thrust_certificate.init_spiral`` 用 ``prob.nodes`` 逐点取时间，对
+     **单腿**问题（nodes 仅 2 项）会 IndexError（源件 R5 已就其写出 ``init_spiral_local``）；
+     本批两版并存并有专项边界测试（见 §2 覆盖）。
+  ⑥ 源件两处 δ_max 助手**口径不一**，本批**各自原样继承**（未统一，以免改变报数）：
+     ``flyby_mars.dmax_deg`` 返回**度**且无 e≤1 守卫（v∞→0 ⇒ 180°）；
+     ``closure_options.flyby_dvmax`` 返回**弧度**且 e≤1 ⇒ π。
+
+================================================================================
+【0】环境（沿用 93b68ea／d56418b 批次已建的 venv）
+================================================================================
+$ /tmp/mcpc_venv/bin/python -c "import numpy,scipy,h5py,pytest,black; ..."
+numpy 2.5.4 | scipy 1.18.1 | pytest 9.1.1 | black 26.10.1
+  系统 python3 裸环境仍缺 h5py/numba/spiceypy（**既存环境缺口**，非本次引入）；全部验证在
+  /tmp/mcpc_venv 中进行（沿用既有 mission_sim/requirements.txt，**未新增依赖**：仅 numpy/scipy）。
+  【本机注意】**/tmp 为 2 GB tmpfs 且已用满**（`df -h /tmp` = 100%）⇒ 本批所有临时脚本与
+  pytest basetemp 改置 ``TMPDIR=/home/huo/.cache/mcpc_r7_tmp``（未删除他人工件）。
+
+================================================================================
+【1】落位件自检（等价于源件 --self-test）
+================================================================================
+$ python3 -m mission_sim.analysis.interplanetary.thrust_certificate --self-test     [exit=0]
+  ① 最短时螺旋两跑逐位一致：是
+  ② a_sep vs SEPModel.a_km_s2 最大相对差：0.00e+00
+  ③ 弹道几何界：a∈[1.4895, 1.9977] AU ⇒ v∞∈[4.612, 6.777] km/s（到达半径 1.0165 AU）
+  ④ Edelbaum 单程螺旋标尺 |v_c2−v_c1| = 11.874 km/s
+  ⇒ 与岛内源件 s4_lt2_r1.selftest 判据一致（该项即源件自检入口）。
+
+$ python3 -m mission_sim.analysis.interplanetary.closure_options --opt2    [exit=0，≈0.4 s]
+  ② k_deg 对返程 t_min：1.000⇒1866.7 d／1.035⇒1720.6 d／1.040⇒1703.8 d …（8 档）
+  ★ 闭合 1719 d 需 k_deg ≥ 1.0355；∂t_min/∂k_deg=−2627 d（拟合 RMS 24.0 d ⇒ 近线性）
+
+$ python3 -m mission_sim.analysis.interplanetary.flyby_mars --scan        （便宜档，未在本次复跑全量）
+$ python3 -m mission_sim.analysis.interplanetary.chain_accounting（无参）  [exit=0，打印用法]
+
+================================================================================
+【2】新增 pytest（单元 + 边界 + 对拍 + CLI）
+================================================================================
+$ python3 -m pytest tests/test_interplanetary_certificate_closure.py -q
+53 passed in 363.42s (0:06:03)        [exit=0]      # 时间盒 15 min 内（占 40%）
+覆盖（7 组）：
+  · 螺旋核与弹道界（8）：星历逐位锚（depart r/v、earth arrival v、target 半径）；ballistic_bounds
+    逐位锚＋解析关系；a_sep≡SEPModel（含质量下限守卫）；固定律螺旋 t_min/r_curve **逐位锚**；
+    k_deg 单调（1.0/0.9262 档均不足 1719 d）；thrust_mult_for_tof 与行表插值 k* 交叉校核；
+    跑满 tmax／目标首穿；self-test 关系。
+  · 证书（6）：r_min(1719 d)、r_min(1800 d)、r_min(2099.4 d) **逐位锚**＋闭合/不可行判定；
+    r_min(T) 单调不增（缩减档）；r_min 载荷形状；min_time_spiral ≤ 固定律解（交叉校核）。
+  · 脉冲 v∞ 前沿（4）：R6-2 网格 vinf_scan／frontier／threshold_table **逐位锚**；R5-2 窗口
+    run_vinf **逐位锚**（34242 行）＋"≤6.0/6.3 无解、≥6.6 有解"可达性；Pareto 判据；空网格/全门限无解。
+  · 闭合矩阵四案（9）：k_deg 行表逐位＋k*/梯度/局部梯度；化学离场整表逐位＋**分岔**（0.30 不足／
+    0.37 闭合）＋推进剂账；EFB 逐位＋**自由飞掠不可行证书**（区间无交集）＋powered 变体；无弧2 边界；
+    δ_max 公式；三种脉冲方向；sf_solve2_local 单腿冒烟；**init_spiral 单腿缺陷 vs init_spiral_local 修正**；
+    CLI --opt2 落盘。
+  · 火星借力链（11）：mars_spec 逐位；register_mars／状态；dmax_deg 锚＋单调＋v∞→0 边界；
+    angle_deg/helio_arc；ga_scan 全网格 **逐位锚**（9712 Lambert／702 匹配／0 可行／min_turn）＋
+    宽窗逐位锚＋缩减网格自洽；chain_sf 几何判定关系＋同链松带；direct_sf；R6-2 opt2 结构（含
+    vinf_scan 逐位）；链路表常量；CLI。
+  · 全链对账（5）：chain_reconcile **逐位锚**（reconcile/rings/timeline_options）；取最优链；
+    过滤未收敛链；空输入边界；prop_kg≡火箭方程；CLI 往返（含缺输入）。
+  · 问题工厂与边界（6）：prob_ret 记账；自定义 vinf/t0；小 T 证书有限；a_sep 1/r²＋k_deg 线性；
+    _thrust_dir 正交/径向；spiral_nodes 计数＋质量单调下降。
+
+================================================================================
+【3】回归（只跑；不修任何既有件）
+================================================================================
+$ python3 -m pytest tests/test_interplanetary_low_thrust.py \
+      tests/test_interplanetary_window_scan.py \
+      tests/test_interplanetary_certificate_closure.py -q
+157 passed in 551.26s (0:09:11)        [exit=0]     # 既有 104 ＋ 新增 53，无回归
+  ⇒ 相关件合跑 157 项全绿；本批新增件未扰动既有 low_thrust／window_scan 口径。
+  【既有基线如实登记】系统 python3 裸环境缺 h5py/numba/spiceypy ⇒ 既有测试大批文件收集报错
+  （环境缺口，非本次引入）；全量 tests/（400+ 项）含 CPU 密集长算例，本次未跑（与本批无关）。
+
+================================================================================
+【4】对拍 A：与岛内源件（工具/s4_lt2_r1.py v0.2／s4_lt3_r5.py v0.1／s4_lt4_r6.py v0.1）
+         同级同输入逐位对拍（容差 0）
+================================================================================
+脚本：/home/huo/.cache/mcpc_r7_tmp/crosscheck_r5r6.py（同一解释器内 sys.path 加岛内 工具/ 后
+      import 岛内源件＋落位件；浮点用 `==` 比较；**PYTHONDONTWRITEBYTECODE=1** 以免写岛内 pyc）
+$ PYTHONDONTWRITEBYTECODE=1 python3 crosscheck_r5r6.py
+比对项 46（全部 ok）：
+  · 谷神星/地球星历状态、ballistic_bounds 六字段
+  · 固定律 3D 螺旋（t_d/dv/speed/m_f/hist 长度与末点 r）
+  · R5 ① 切向 t_min（t/dv/speed/vinf_lower/arrival）
+  · R5 ④ 化学离场整表（8 行 t_min／prop_mono）＋ dv_chem_for_1719d
+  · R5 ③ EFB（arc2_count/n_t1/mneed_max/arc1_min/n_match_free/status/powered_best）
+  · init_spiral_local（单腿）设计向量逐元素
+  · R6 mars_spec、dmax_deg、ga_scan（n_lambert/匹配/可行/min_turn/vout_min_by_rev/t1_range）、
+    ga_scan_wide（匹配数/min_turn）
+  · 脉冲 vinf_scan（284 行，首/中点行）＋ frontier＋ threshold_table
+MISMATCHES = 0
+RESULT: ALL BIT-IDENTICAL
+
+================================================================================
+【5】对拍 B：与岛内机读结果（任务/拓展_R{1,5,6}_*.json）逐位/声明容差对拍
+================================================================================
+锚：tests/fixtures/interplanetary_r5r6_anchors.json（岛内 JSON 的**逐字子集**，含容差策略字段）
+$ python3 -m pytest tests/test_interplanetary_certificate_closure.py -q        ⇒ 全绿（53 项）
+关键读数（落位件复算 == 岛内机读，**逐位**；仅两处按 rtol 声明）：
+  【R1 证书口径】目标半径 1.0165018695408143 AU（地球再入点）；离场 r=2.9789298367794417 AU、
+      v=16.577814200609986 km/s；再入点地球 |v|=29.297179651939718 km/s；
+      弹道几何界 a∈[1.4894649183897208, 1.997715853160128] AU ⇒ v∞∈[4.612270141949512,
+      6.7774847253453565] km/s。
+  【R5 ① 时间延后 / 不可行证书】切向反推螺旋 t_min=**1866.7199799241464 d**（到达 2043-12-09，
+      Δv=12.88231311888391 km/s）⇒ 对可用 1719 d **缺口 147.72 d**；
+      r_min(1719 d)=**1.0458782682042718 AU** > 1.0165 ⇒ **不可行证书**；r_min(1800 d)=
+      1.0091594151636039 AU ⇒ 闭合；半径必要条件闭合阈值 T*=**1783.8029035412585 d**（再入 2043-09-17）。
+  【R5 ② k_deg】k*（闭合 1719 d）=**1.035467426936959**；∂t_min/∂k_deg=−2626.645773857584 d
+      （**rtol 1e-9**：本机 BLAS 求和次序使尾数差 ~1.5e-15）；拟合 RMS=24.00003511706512 d。
+  【R5 ③ EFB（自由飞掠不可行证书）】弧2 解 **6686** 个（v∞≤6.0），其所需离场 v∞ 最大
+      **6.006116100053514 km/s <** 弧1 到达 v∞ 最小 **6.31599795467113 km/s** ⇒ **两区间无交集，
+      自由飞掠不可行**（n_match_free=0）；动力飞掠变体最小 ΣΔv=11.77539307906371 km/s。
+  【R5 ④ 化学离场】Δv_c=0.30 km/s 不足、**0.37 km/s 闭合**（若单靠脉冲：需 0.3207194267476689
+      km/s，肼 ≈619 kg）；∂t_min/∂Δv_c 序列 341…197 d/(km/s)。
+  【R5-2 v∞ 前沿】34242 行（88 离场日 × 81 TOF × ≤3 圈）；最低 v∞=**6.379016274188303 km/s**；
+      v∞≤6.0／6.3 **无解**、≤6.6 有解（Δv₁=5.797671527987436）⇒ "003 的 v∞=6.00 不可达"。
+  【R6-1 火星借力链】火星近似根数 a=1.5237166198 AU、e=0.0934208988、epoch JD 2463963.5；
+      GA 扫描 Lambert **9712** 次、模长匹配 **702** 对、**自由飞掠可行 0** 对（最小转角
+      73.4005124224766° > δ_max 37.013933676217306°）；候选B 链 **自由飞掠可行**
+      （v∞ 4.881466608257389→5.158826848194771，转角 5.333906544831808° ≤ δ_max_alt300
+      38.19441022175578°），ΣΔv 22.234458913510178（推进 21.691303880271683＋飞掠 0.5431550332384951）。
+  【R6-2 返程 2099.4 d 复核】证书 r_min(2099.4 d)=**0.3669636163529584 AU**（余量 0.649538253187856，
+      闭合）；脉冲扫描 284 行，最低 v∞=10.281116670222188；TOF=2099.4 d 上最低 v∞=23.21215078335956
+      ⇒ v∞≤6.0/6.3/6.6/7.0 **全无解**。
+  【R6-3 全链对账】去程(借力) 21.691303880271683 ＋ 返程(2099.4 d) 39.59645277120203 =
+      **61.287756651473714 km/s**（003 参考 14.0 ⇒ **4.3777×**）；Xe 1320 kg ⇔ Δv=13.034337120377815 km/s。
+  **不锚项（声明）**：SF（least_squares/SLSQP）与 min_time_spiral（Nelder-Mead）的绝对读数随
+      scipy 版本漂移 ⇒ 测试只锚**关系**（残差、Δv>0、几何判定、以及 chain_reconcile 的
+      **算术**在同一输入下的恒等）；``min_radius_at_T`` 在本机 scipy 1.18.1 下与源件**逐位一致**，
+      故仍按 `==` 锚（r_min/dv/speed/vinf_lower/law 全字段）。
+
+================================================================================
+【6】格式与变更范围
+================================================================================
+$ python3 -m black --check <4 个新增模块 + 新增测试>      → All done!（5 files reformatted，复跑 unchanged）
+$ git status --short              # 仅新增，无既有件改动
+?? mission_sim/analysis/interplanetary/chain_accounting.py
+?? mission_sim/analysis/interplanetary/closure_options.py
+?? mission_sim/analysis/interplanetary/flyby_mars.py
+?? mission_sim/analysis/interplanetary/thrust_certificate.py
+?? tests/fixtures/interplanetary_r5r6_anchors.json
+?? tests/test_interplanetary_certificate_closure.py
+$ git diff --stat HEAD            # 对既有件为空
+线程口径：全部命令前置 OMP/OPENBLAS/MKL/NUMEXPR/VECLIB_NUM_THREADS=1；落位件亦在 import
+  numpy 前 os.environ.setdefault(...,'1')（沿源件与 E1 线程教训）。
+写入边界：仅上表 6 个 mcpc 新增件 ＋ 本 evidence ＋ 岛内 1 个登记件；**未改岛内其他件**
+  （岛内 `工具/__pycache__` 亦未新增：对拍脚本置 PYTHONDONTWRITEBYTECODE=1）。
+
+================================================================================
+【7】附录：对拍脚本职责（/home/huo/.cache/mcpc_r7_tmp/crosscheck_r5r6.py）
+================================================================================
+行为＝在 sys.path 前置岛内 ``工具/`` 后同进程 import 岛内 ``s4_lt2_r1``／``s4_lt3_r5``／
+``s4_lt4_r6`` 与落位件 ``thrust_certificate``／``closure_options``／``flyby_mars``，对同一输入
+调用两者并以 ``==`` 比较 46 组标量/结构（§4 列项）。脚本在会话临时目录（非两仓）；
+**是否另立 tests/ 工具件长期留存**列为【待裁定】。
+
+================================================================================
+【8】未闭合 / 待裁定（交提出方）
+================================================================================
+1. 【待裁定】本批**未搬运** ``figs``（出图，写岛内 图/拓展）与 ``--sfonly`` 的"并入既有 JSON"
+   写盘分支；是否需在 mcpc 侧补"只读复用图版/只回写调用方指定路径"的等效入口。
+2. 【待裁定】mcpc 包 ``__init__.py`` 的模块清单**未更新**（守"只新增"，沿 d56418b 先例）；
+   是否允许一次"版本化小改＋留痕"。
+3. 【待裁定】SF 优化器的绝对值随 scipy 漂移（§5 声明）⇒ 本批对 SF 只锚关系；
+   是否需要"锁定 scipy 版本 + 锚绝对值"的复算基线。
+4. 【待核】**火星星历**＝JPL《Approximate Positions of the Planets》线性根数（外部近似表，
+   **非岛内登记值**，未含摄动，固有误差 O(1e-3–1e-2 AU）⇒ 飞掠几何判读量级可接受，**不得
+   当精密星历引用**；是否改用 SPICE 星历另立【待裁定】。
+5. 【未闭合】源件两处 δ_max 助手（度/弧度、有/无 e≤1 守卫）口径不一，本批**原样继承未统一**；
+   若后续要统一须同步改源件与锚（本批不动）。
+6. 【环境】/tmp tmpfs 已满（既存环境缺口，非本批引入）；本批临时件改置 /home 缓存目录。
+7. 【留痕提醒】岛内并行轮次（R10 等）同期在写 ``工具/s4_lt5_r10.py`` 等；本批**未读、未改**
+   该件。若后续源件 ``s4_lt2_r1/s4_lt3_r5/s4_lt4_r6`` 再改，落位件需**重跑 §4 对拍**方可主张等价。
+================================================================================
